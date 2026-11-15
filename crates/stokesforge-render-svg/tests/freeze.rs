@@ -67,11 +67,11 @@ const TOP_10: AutoMargins = AutoMargins {
     top: 10.0,
 };
 
-/// A layer with its own top X is aligned on the covered layer's ticks (#174):
-/// the frozen bounds are the drawn ones, which only a draw can give. Redrawn
-/// from the written ranges, the figure is the same.
+/// A layer with its own top X freezes its own tight range (#529, form 529-5:
+/// no alignment on the covered layer's ticks). The frozen bounds are the
+/// drawn ones. Redrawn from the written ranges, the figure is the same.
 #[test]
-fn an_overlay_with_its_own_top_x_freezes_the_drawn_aligned_ranges() {
+fn an_overlay_with_its_own_top_x_freezes_its_own_tight_range() {
     let (project, ids) = project_with(&[
         ("X", vec![0.0, 1.0, 2.0]),
         ("Y", vec![10.0, 20.0, 30.0]),
@@ -93,9 +93,9 @@ fn an_overlay_with_its_own_top_x_freezes_the_drawn_aligned_ranges() {
     assert_eq!(bounds(&spec.panels[0].bottom), before[0].0);
     // The written spec draws the same figure.
     assert_eq!(drawn(project.tree(), &spec, TOP_10), before);
-    // The aligned range is not the plain padded extent (witness that a draw
-    // was needed): 401..803 would not be extended to the tick grid.
-    assert_ne!(bounds(&layer.bottom), (401.0, 803.0));
+    // The range is the layer's own extent (no horizontal margin here), not
+    // widened to the covered layer's tick grid (0..2).
+    assert_eq!(bounds(&layer.bottom), (401.0, 803.0));
 }
 
 /// A layer without data keeps Auto (no `0..1` written), and the axes of the

@@ -61,9 +61,6 @@ pub struct Widened {
 struct Target {
     at: (usize, Side),
     dest: (usize, Side),
-    /// The covered layer's matching axis moved: this one is aligned with it
-    /// again (#174), whether it was exceeded or not.
-    realign: bool,
 }
 
 fn axis(spec: &PlotSpec, (panel, side): (usize, Side)) -> Option<&AxisSpec> {
@@ -171,15 +168,11 @@ fn widen_round(
         let grew_high = old.is_none_or(|o| extent.1 > o.1 + 1e-9 * (o.1 - o.0).abs());
         let grew_low = old.is_none_or(|o| extent.0 < o.0 - 1e-9 * (o.1 - o.0).abs());
         let (mut low, mut high) = current;
-        if target.realign {
-            (low, high) = bound;
-        } else {
-            if grew_high && extent.1 > current.1 + tolerance {
-                high = bound.1.max(current.1);
-            }
-            if grew_low && extent.0 < current.0 - tolerance {
-                low = bound.0.min(current.0);
-            }
+        if grew_high && extent.1 > current.1 + tolerance {
+            high = bound.1.max(current.1);
+        }
+        if grew_low && extent.0 < current.0 - tolerance {
+            low = bound.0.min(current.0);
         }
         if (low, high) == current {
             continue;
@@ -207,28 +200,26 @@ pub fn widen_to_data(
     margins: AutoMargins,
 ) -> Option<Widened> {
     let mut base_targets = Vec::new();
-    let mut overlay_axes = Vec::new();
+    let mut own_targets = Vec::new();
     for (index, panel) in spec.panels.iter().enumerate() {
         let base = overlay_base(spec, index);
         match panel.overlay {
             Some(overlay) if base != index => {
                 let (x, y) = ((index, Side::Bottom), (index, Side::Left));
                 if overlay.x_top {
-                    overlay_axes.push((x, (base, Side::Bottom)));
+                    own_targets.push(Target { at: x, dest: x });
                 } else {
                     base_targets.push(Target {
                         at: x,
                         dest: (base, Side::Bottom),
-                        realign: false,
                     });
                 }
                 if overlay.y_right {
-                    overlay_axes.push((y, (base, Side::Left)));
+                    own_targets.push(Target { at: y, dest: y });
                 } else {
                     base_targets.push(Target {
                         at: y,
                         dest: (base, Side::Left),
-                        realign: false,
                     });
                 }
             }
@@ -237,7 +228,6 @@ pub fn widen_to_data(
                     base_targets.push(Target {
                         at: (index, side),
                         dest: (index, side),
-                        realign: false,
                     });
                 }
             }
@@ -254,18 +244,17 @@ pub fn widen_to_data(
         before,
         &mut base_moved,
     );
-    // The overlaid layers' own axes read the covered layer's, so they are
-    // measured once it is settled; one whose covered axis moved is aligned again.
-    let own: Vec<Target> = overlay_axes
-        .into_iter()
-        .map(|(at, covered)| Target {
-            at,
-            dest: at,
-            realign: base_moved.contains(&covered),
-        })
-        .collect();
+    // An overlaid layer's own axis (its top X, its right Y) widens on its own
+    // data only (#529, form 529-5: it is never aligned on the covered layer).
     let mut own_moved = Vec::new();
-    widen_round(tree, &mut out, &own, margins, before, &mut own_moved);
+    widen_round(
+        tree,
+        &mut out,
+        &own_targets,
+        margins,
+        before,
+        &mut own_moved,
+    );
     moved.extend(base_moved);
     moved.extend(own_moved);
     if moved.is_empty() {

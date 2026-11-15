@@ -508,7 +508,7 @@ Additions go to the **active layer**. A small numbered badge for each layer sits
 
 These actions use the active layer: dropping columns, **Send to**, **Add Text** and **New Layer**.
 
-Zoom and pan act on all the layers that share a plot area, so the ticks stay aligned.
+Zoom and pan act on all the layers that share a plot area.
 
 ## Several layers side by side
 

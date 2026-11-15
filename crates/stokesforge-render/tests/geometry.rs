@@ -809,13 +809,36 @@ fn an_overlaid_layer_shares_the_plot_area_and_keeps_its_scale() {
     );
 }
 
-/// #174: the scales of an overlaid layer are joined to those of the covered
-/// layer — same axis fractions for the ticks, hence the top 0 facing the
-/// bottom 0 — while enclosing its own data.
+/// #529 (form 529-5, which replaced the #174 alignment): an overlaid layer's
+/// own axis takes its own tight automatic range, never the covered layer's
+/// ticks. Data 0..1 over a base 4..6 with the default margins (1 % below,
+/// 5 % above) frames -0.01..1.05.
 #[test]
-fn the_scales_of_an_overlaid_layer_are_joined_to_those_of_the_covered_layer() {
+fn an_overlaid_layers_own_axis_takes_its_own_tight_range() {
     use stokesforge_plot::{OverlaySpec, Panels};
-    use stokesforge_render::scale::{linear_key_points, DEFAULT_LABELS};
+    let columns = [
+        ("X", vec![0.0, 1.0, 2.0]),
+        ("Y", vec![4.0, 5.0, 6.0]),
+        ("Y2", vec![0.0, 0.5, 1.0]),
+    ];
+    let drawn = geometry(&columns, |ids: &[NodeId]| {
+        let mut base = PanelSpec::at(0, 0);
+        base.series.push(SeriesSpec::new_xy(ids[0], ids[1]));
+        let mut top = PanelSpec::overlay_on(&base, OverlaySpec::new(false, true));
+        top.series.push(SeriesSpec::new_xy(ids[0], ids[2]));
+        PlotSpec::empty("Test").with_panels(Panels::new(vec![base, top]))
+    });
+    let own = drawn.panels[1].y_range;
+    assert!((own.0 + 0.01).abs() < 1e-9, "{own:?}");
+    assert!((own.1 - 1.05).abs() < 1e-9, "{own:?}");
+}
+
+/// The ticks of an overlaid layer's own axis are the ones of its own range,
+/// not those of the covered layer's: bases 0..800 and 0..120 do not share
+/// their tick fractions.
+#[test]
+fn the_ticks_of_an_overlaid_layers_own_axes_are_its_own() {
+    use stokesforge_plot::{OverlaySpec, Panels};
     let columns = [
         ("X", vec![0.0, 400.0, 800.0]),
         ("Y", vec![0.0, 5.0, 10.0]),
@@ -830,87 +853,19 @@ fn the_scales_of_an_overlaid_layer_are_joined_to_those_of_the_covered_layer() {
         PlotSpec::empty("Test").with_panels(Panels::new(vec![base, top]))
     });
     let (base, top) = (&drawn.panels[0], &drawn.panels[1]);
-    let fractions = |range: (f64, f64)| -> Vec<f64> {
-        linear_key_points(range, DEFAULT_LABELS)
-            .iter()
-            .map(|t| (t - range.0) / (range.1 - range.0))
-            .collect()
-    };
-    for (own, other, data) in [
-        (base.x_range, top.x_range, (0.0, 120.0)),
-        (base.y_range, top.y_range, (0.0, 0.9)),
-    ] {
-        let (a, b) = (fractions(own), fractions(other));
-        assert_eq!(a.len(), b.len(), "{own:?} / {other:?}");
-        for (x, y) in a.iter().zip(&b) {
-            assert!((x - y).abs() < 1e-6, "{own:?} / {other:?}");
-        }
-        assert!(other.0 <= data.0 && other.1 >= data.1, "{other:?}");
-    }
-}
-
-/// #174 with the asymmetric margins of #529: the layer overlaid on a base
-/// framed 1 % below and 10 % above stays tight (a few times its data, never
-/// the huge step a naive search settles for), and when its ticks cannot be
-/// opposite within that bound it keeps its own framing.
-#[test]
-fn an_overlaid_layer_stays_tight_on_a_base_with_asymmetric_margins() {
-    use stokesforge_plot::{OverlaySpec, Panels};
-    use stokesforge_render::{AutoMargins, FigureTexts};
-    let mut project = Project::new("Geometry").expect("project");
-    let root = project.root();
-    let book = project.add_empty_workbook(root, None).expect("workbook");
-    let sheet = project.add_worksheet(book, None).expect("worksheet");
-    let mut add = |name: &str, values: &[f64]| {
-        project
-            .add_column(sheet, None, Some(name), Column::from_f64(values))
-            .expect("column")
-    };
-    let (x, y, y2) = (
-        add("X", &[0.0, 1.0, 2.0]),
-        add("Y", &[4.0, 5.0, 6.0]),
-        add("Y2", &[0.0, 0.5, 1.0]),
+    // Own extent plus the default margins only.
+    assert!(
+        top.x_range.0 >= -1.3 && top.x_range.1 <= 126.1,
+        "{:?}",
+        top.x_range
     );
-    let mut base = PanelSpec::at(0, 0);
-    base.series.push(SeriesSpec::new_xy(x, y));
-    let mut top = PanelSpec::overlay_on(&base, OverlaySpec::new(false, true));
-    top.series.push(SeriesSpec::new_xy(x, y2));
-    let spec = PlotSpec::empty("Test").with_panels(Panels::new(vec![base, top]));
-    let plot = resolve_spec(project.tree(), &spec);
-    // The tick count of the base follows the plot height and the margins
-    // move its first tick: sweep both, one of them hits a refused middle.
-    for height in [300, 450, 600, 800, 1100, 1400, 2000] {
-        for bottom in [1.0, 2.5, 4.0, 7.0] {
-            let texts = FigureTexts::new(
-                "en",
-                "(broken)",
-                |name| name.to_owned(),
-                |count| count.to_string(),
-                |number| number.to_string(),
-            )
-            .with_margins(AutoMargins {
-                bottom,
-                top: 10.0,
-                ..AutoMargins::default()
-            });
-            let backend = Mute {
-                size: (900, height),
-                measurer: TextMeasurer::default(),
-            };
-            let drawn = pipeline::draw_with_texts(backend, &plot, &texts).expect("drawing");
-            let (base, top) = (&drawn.panels[0], &drawn.panels[1]);
-            let case = format!("height {height}, bottom {bottom}: base {:?}", base.y_range);
-            let own = top.y_range;
-            assert!(own.0 <= 0.0 && own.1 >= 1.0, "{case}: encloses {own:?}");
-            // The wanted framing is 2 % + 10 % wider than the data, then up
-            // to 2.5 times that: never the huge step of a naive search.
-            let wanted = 1.0 + (bottom + 10.0) / 100.0;
-            assert!(
-                own.1 - own.0 <= 2.5 * wanted + 1e-9,
-                "{case}: tight, got {own:?}"
-            );
-        }
-    }
+    assert!(
+        top.y_range.0 >= -0.02 && top.y_range.1 <= 0.96,
+        "{:?}",
+        top.y_range
+    );
+    assert_ne!(top.x_range, base.x_range);
+    assert_ne!(top.y_range, base.y_range);
 }
 
 /// #172: the legend of the ordinary layer also lists the curves of the

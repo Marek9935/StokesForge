@@ -2940,41 +2940,25 @@ fn draw_panel<DB: DrawingBackend>(
     let y2_data = extent_of(&prepared, series::y_extent, Some(SeriesAxis::Right));
     let x_range = match base {
         Some(base) if !x_own => base.x_range,
-        _ => {
-            let own = axis_range(
-                &spec.bottom,
-                x_scale,
-                x_data,
-                false,
-                AxisRole::Horizontal,
-                margins,
-            );
-            join_to_base(
-                &spec.bottom,
-                x_scale,
-                own,
-                base.map(|b| (b.x_scale, b.x_range, b.x_count)),
-            )
-        }
+        _ => axis_range(
+            &spec.bottom,
+            x_scale,
+            x_data,
+            false,
+            AxisRole::Horizontal,
+            margins,
+        ),
     };
     let y_range = match base {
         Some(base) if !y_own => base.y_range,
-        _ => {
-            let own = axis_range(
-                &spec.left,
-                y_scale,
-                y_data,
-                needs_baseline(&prepared, SeriesAxis::Left),
-                AxisRole::Vertical,
-                margins,
-            );
-            join_to_base(
-                &spec.left,
-                y_scale,
-                own,
-                base.map(|b| (b.y_scale, b.y_range, b.y_count)),
-            )
-        }
+        _ => axis_range(
+            &spec.left,
+            y_scale,
+            y_data,
+            needs_baseline(&prepared, SeriesAxis::Left),
+            AxisRole::Vertical,
+            margins,
+        ),
     };
     let y2_range = right_active.then(|| {
         axis_range(
@@ -4540,28 +4524,6 @@ fn axis_range(
         (max, min)
     } else {
         (min, max)
-    }
-}
-
-/// Joins the axis of a superimposed layer to that of the covered layer (#174):
-/// same bounds at the corners, ticks opposite. No effect outside a
-/// superimposed layer, on a logarithmic scale (decades already align) or with
-/// an extent set by hand.
-fn join_to_base(
-    spec: &AxisSpec,
-    scale: AxisScale,
-    own: (f64, f64),
-    base: Option<(AxisScale, (f64, f64), usize)>,
-) -> (f64, f64) {
-    match base {
-        Some((base_scale, base_range, base_count))
-            if scale == AxisScale::Linear
-                && base_scale == AxisScale::Linear
-                && !spec.has_explicit_range() =>
-        {
-            scale::aligned_range(base_range, own, base_count).unwrap_or(own)
-        }
-        _ => own,
     }
 }
 

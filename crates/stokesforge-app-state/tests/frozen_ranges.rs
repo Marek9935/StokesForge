@@ -141,8 +141,8 @@ fn an_empty_layer_stays_auto_and_freezes_when_data_arrive() {
     // The first layer is still the one that was written.
     close(bounds(&spec.panels[0].left), (3.98, 6.2));
 
-    // Data arrive in the layer: the next write freezes it, aligned on the
-    // covered layer (#174) like the drawing.
+    // Data arrive in the layer: the next write freezes its own tight range
+    // like the drawing (#529, form 529-5: no alignment on the covered layer).
     let mut edited = spec.clone();
     edited
         .panels
@@ -176,9 +176,11 @@ fn a_y2_layer_created_by_the_gesture_is_frozen_too() {
             "{panel:?}"
         );
     }
-    // The Y2 data (0..1) fit in the frozen range, aligned on the first layer.
+    // The Y2 data (0..1) get their own tight range, never the covered layer's
+    // ticks (#529, form 529-5): the default margins give about -0.01..1.05.
     let (low, high) = bounds(&spec.panels[1].left);
-    assert!(low <= -0.01 && high >= 1.1, "{low} {high}");
+    assert!((-0.05..=0.0).contains(&low), "{low}");
+    assert!((1.0..=1.2).contains(&high), "{high}");
 }
 
 /// A file opened at startup gets the same note as `File > Open`: the project

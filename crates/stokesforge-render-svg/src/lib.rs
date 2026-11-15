@@ -180,8 +180,8 @@ pub fn fix_legacy_frames(
 /// drawn into every axis still on Auto (From/To in data space, in the order of the
 /// axis direction, and `auto_range = false`). The graph then no longer moves, neither with the
 /// preferences nor with a new version. It draws (it does not call the framing
-/// alone) because an overlay with its own top X lines its ticks up on the
-/// covered layer (#174), which takes the drawn tick count.
+/// alone) so that the range written is the single one the drawing used, on
+/// the export's own measurement.
 ///
 /// Written: `bottom` and `left` of a layer that owns that axis, `right` only
 /// when drawn. An axis with no data to frame stays on Auto: it freezes at the
