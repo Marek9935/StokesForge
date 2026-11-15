@@ -357,79 +357,6 @@ pub fn axis_ticks(
         .collect()
 }
 
-/// Frames a linear axis of an overlaid layer (#174) so that its ticks fall
-/// **opposite** those of the covered layer's axis.
-///
-/// `base` is the interval of the covered axis, `wanted` the one that would
-/// only wrap the layer's data; both in the same direction. We look for a
-/// "round" step and a position of the first tick such that the resulting
-/// interval contains `wanted`, has as many ticks as `base` and places them
-/// at the same fractions of the axis. Each candidate is checked against the
-/// ticks Plotters will actually place: we do not guess its algorithm. `labels`
-/// is the tick count of the covered axis ([`tick_count`]). `None`
-/// if nothing fits (the caller then keeps `wanted`).
-pub fn aligned_range(base: (f64, f64), wanted: (f64, f64), labels: usize) -> Option<(f64, f64)> {
-    let inverted = base.0 > base.1;
-    if (wanted.0 > wanted.1) != inverted {
-        return None;
-    }
-    let (b0, b1) = if inverted { (base.1, base.0) } else { base };
-    let (d0, d1) = if inverted {
-        (wanted.1, wanted.0)
-    } else {
-        wanted
-    };
-    if ![b0, b1, d0, d1].iter().all(|v| v.is_finite()) || b1 <= b0 || d1 <= d0 {
-        return None;
-    }
-    let base_points = linear_key_points((b0, b1), labels);
-    if base_points.len() < 2 {
-        return None;
-    }
-    let base_step = base_points[1] - base_points[0];
-    if base_step <= 0.0 {
-        return None;
-    }
-    // The base ticks, as a fraction of the axis.
-    let fractions: Vec<f64> = base_points.iter().map(|t| (t - b0) / (b1 - b0)).collect();
-    let steps_in_axis = (b1 - b0) / base_step;
-    let first_offset = (base_points[0] - b0) / base_step;
-
-    let smallest = (d1 - d0) / steps_in_axis;
-    let decade = 10f64.powf(smallest.log10().floor());
-    const MANTISSAS: [f64; 11] = [1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 7.5, 8.0];
-    for exponent in [1.0, 10.0, 100.0] {
-        for mantissa in MANTISSAS {
-            let step = decade * exponent * mantissa;
-            let span = steps_in_axis * step;
-            if span < d1 - d0 {
-                continue;
-            }
-            // First tick `j · step`, placed `first_offset` steps from the low
-            // edge: the low edge is `(j − first_offset) · step`.
-            let lowest = (d1 - span) / step + first_offset;
-            let highest = d0 / step + first_offset;
-            let (lo_j, hi_j) = ((lowest - 1e-9).ceil(), (highest + 1e-9).floor());
-            if lo_j > hi_j {
-                continue;
-            }
-            let j = ((lowest + highest) / 2.0).round().clamp(lo_j, hi_j);
-            let low = (j - first_offset) * step;
-            let high = low + span;
-            let points = linear_key_points((low, high), labels);
-            let aligned = points.len() == fractions.len()
-                && points
-                    .iter()
-                    .zip(&fractions)
-                    .all(|(t, f)| ((t - low) / (high - low) - f).abs() < 1e-6);
-            if aligned {
-                return Some(if inverted { (high, low) } else { (low, high) });
-            }
-        }
-    }
-    None
-}
-
 /// Widens a logarithmic interval to the whole decades that enclose it.
 ///
 /// This is what makes the ticks fall on 1, 10, 100 rather than on 3.16 and
@@ -706,36 +633,6 @@ mod tests {
         assert_eq!(format_linear_tick(-0.0, 0), "0");
         assert_eq!(format_linear_tick(-1e-12, 1), "0.0");
         assert_eq!(format_linear_tick(-2.0, 0), "-2");
-    }
-
-    #[test]
-    fn an_aligned_axis_places_its_ticks_opposite() {
-        let base = (-40.0, 840.0);
-        let wanted = (-6.0, 126.0);
-        let range = aligned_range(base, wanted, DEFAULT_LABELS).expect("an aligned framing");
-        assert!(range.0 <= wanted.0 && range.1 >= wanted.1, "{range:?}");
-        let fractions = |r: (f64, f64)| -> Vec<f64> {
-            linear_key_points(r, DEFAULT_LABELS)
-                .iter()
-                .map(|t| (t - r.0) / (r.1 - r.0))
-                .collect()
-        };
-        let (a, b) = (fractions(base), fractions(range));
-        assert_eq!(a.len(), b.len());
-        for (x, y) in a.iter().zip(&b) {
-            assert!((x - y).abs() < 1e-6, "{a:?} / {b:?}");
-        }
-    }
-
-    #[test]
-    fn alignment_respects_the_axis_direction() {
-        let inverted =
-            aligned_range((840.0, -40.0), (126.0, -6.0), DEFAULT_LABELS).expect("aligned");
-        assert!(inverted.0 > inverted.1);
-        assert_eq!(
-            aligned_range((-40.0, 840.0), (126.0, -6.0), DEFAULT_LABELS),
-            None
-        );
     }
 
     #[test]

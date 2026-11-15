@@ -425,12 +425,23 @@ fn histogram_geometry(
     }
 }
 
-/// Extent of a geometry on the abscissa axis.
+/// Extent of a geometry on the abscissa axis, whiskers included (#529): with
+/// the data running edge to edge, an X error bar beyond the last point would
+/// otherwise be cut by the frame.
 pub fn x_extent(geometry: &Geometry) -> Option<(f64, f64)> {
     match geometry {
         Geometry::Nothing => None,
-        Geometry::Curve { points, .. } => extent(points.iter().map(|(x, _)| *x)),
-        Geometry::Bars { bars, .. } => extent(bars.iter().flat_map(|(l, r, _)| [*l, *r])),
+        Geometry::Curve { points, whiskers } => extent(
+            points
+                .iter()
+                .map(|(x, _)| *x)
+                .chain(whiskers.iter().flat_map(|(a, b)| [a.0, b.0])),
+        ),
+        Geometry::Bars { bars, whiskers } => extent(
+            bars.iter()
+                .flat_map(|(l, r, _)| [*l, *r])
+                .chain(whiskers.iter().flat_map(|(a, b)| [a.0, b.0])),
+        ),
     }
 }
 

@@ -26,6 +26,13 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- A series added to a graph (dragging columns onto it, Add rows, an analysis
+  result plotted on it) that goes beyond the written axis range widens only the
+  exceeded side, at once, with the margins of Preferences > Display > Graphs
+  (#529). It is a history step of its own: the first Ctrl+Z gives the old range
+  back and keeps the series, the second removes the series. An orange message
+  says which axis widened. A script that adds a curve (`pyst`) never widens.
+
 - Origin detection by content (#509): the application recognises an Origin
   project by its extension or by its first bytes (`CPYA`/`CPYUA`), like the
   CLI and `pyst`, so a renamed Origin file opens the Import from Origin
@@ -91,6 +98,12 @@ without a message, see `docs/persistence.md`).
 
 ### Changed
 
+- Opening a project made with an earlier version writes its automatic axis
+  ranges once (#529): every axis left on Auto, in every graph that has data,
+  gets its From and To computed with the new framing rule and the margins of
+  Preferences > Display > Graphs, so the figures may be reframed slightly. The
+  project then counts as modified and an orange message says how many graphs
+  were written; save to keep them. The `.stf` format does not change.
 - Axis title (#506): Graph Properties > Axes has one free field, **Axis title**;
   the Units field is gone. A new graph fills its axis titles with a formula that
   reads the column (long name, else short name, then ` / units` only when there

@@ -247,6 +247,10 @@ pub const OPACITY_PERCENT: Quantity = Quantity::whole(10.0).between(0.0, 100.0);
 /// Hue, in degrees.
 pub const HUE_DEGREES: Quantity = Quantity::whole(15.0).between(0.0, 360.0);
 
+/// A margin of the automatic axis framing, in percent of the data extent
+/// (#529): a real from 0 to 100.
+pub const AUTO_MARGIN_PERCENT: Quantity = Quantity::real(0.5, 5.0, 2).between(0.0, 100.0);
+
 /// Saturation or lightness, in percent.
 pub const PERCENT: Quantity = Quantity::whole(10.0).between(0.0, 100.0);
 

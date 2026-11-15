@@ -165,9 +165,18 @@ fn a_bare_stroke_keeps_the_line_without_tick_marks_or_numbers() {
     assert_eq!(occurrences(&bare, "30"), occurrences(&without, "30"));
 }
 
+/// The data run edge to edge by default (#529): a tick mark on the left edge
+/// is hidden by the left axis in this test's filter, so the range is set by
+/// hand, with room on both sides.
+fn off_the_edge(p: &mut PanelSpec) {
+    p.bottom.auto_range = false;
+    p.bottom.range_min = Some(-30.0);
+    p.bottom.range_max = Some(830.0);
+}
+
 #[test]
 fn inward_and_both_sided_tick_marks_follow_the_plot_area() {
-    let default = closed_frame("tick-marks-default", |_| {});
+    let default = closed_frame("tick-marks-default", off_the_edge);
     let outward = top_tick_marks(&default);
     let top = top_line(&default);
     assert!(!outward.is_empty());
@@ -177,6 +186,7 @@ fn inward_and_both_sided_tick_marks_follow_the_plot_area() {
     );
 
     let inward = closed_frame("tick-marks-inward", |p| {
+        off_the_edge(p);
         p.top.tick_direction = TickDirection::In
     });
     let tick_marks = top_tick_marks(&inward);
@@ -189,6 +199,7 @@ fn inward_and_both_sided_tick_marks_follow_the_plot_area() {
     );
 
     let both = closed_frame("tick-marks-both", |p| {
+        off_the_edge(p);
         p.top.tick_direction = TickDirection::Both
     });
     let tick_marks = top_tick_marks(&both);

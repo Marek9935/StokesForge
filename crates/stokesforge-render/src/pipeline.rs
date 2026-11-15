@@ -76,6 +76,7 @@ use crate::clip::{self, PixelBounds};
 use crate::color::{auto_ink, composite, over_white, parse_hex, rgba_or};
 use crate::decimate;
 use crate::formula::literal_style_font;
+use crate::framing::{self, AutoMargins, AxisRole};
 use crate::legend;
 use crate::paint::{self, opaque, rgba, PAPER};
 use crate::scale;
@@ -126,10 +127,25 @@ pub const MAX_CELLS: usize = 256;
 pub use stokesforge_plot::{DEFAULT_FIGURE_SIZE, FALLBACK_FRAME, MIN_CELL};
 use stokesforge_plot::{MAX_FRAME_SIZE, MIN_FRAME_SIZE};
 
+/// Which axes of a drawn layer had data to frame, see [`DrawnPanel::has_data`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AxesWithData {
+    /// Bottom axis.
+    pub x: bool,
+    /// Left axis.
+    pub y: bool,
+    /// Right axis.
+    pub y2: bool,
+}
+
 /// What a panel ended up drawing — enough to write a test without rereading
 /// pixels.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DrawnPanel {
+    /// Which axes had data to frame (#529): an axis without any is framed on
+    /// `0..1`, a placeholder that a caller freezing the automatic ranges must
+    /// not write.
+    pub has_data: AxesWithData,
     /// Index of the layer in [`PlotSpec::panels`]: the identity of a layer
     /// (several layers can be superimposed in the same cell).
     pub index: usize,
@@ -526,15 +542,19 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
         // bands of their axes; a legacy graph (nothing stored) shares the area
         // equally, bands inside.
         let explicit = match explicit_frames(spec) {
-            Some(frames) => Some(ExplicitGrid::build(
-                spec,
-                &layout,
-                &plans,
-                frames,
-                Some(root_width),
-                &mut |text, font, size, width| text_band(root, text, font, size, width),
-                &mut |_| Ok(title_height),
-            )?),
+            Some(frames) => {
+                let edges = edge_reserves(spec, &layout, &frames.0, &area);
+                Some(ExplicitGrid::build(
+                    spec,
+                    &layout,
+                    &plans,
+                    frames,
+                    &edges,
+                    Some(root_width),
+                    &mut |text, font, size, width| text_band(root, text, font, size, width),
+                    &mut |_| Ok(title_height),
+                )?)
+            }
             None => None,
         };
         let (column_breaks, row_breaks) = match &explicit {
@@ -847,6 +867,91 @@ type CellPlans = (
     Vec<(u32, u32)>,
 );
 
+/// The room a column needs beside its frame so that the first and the last
+/// number of its horizontal axes are never cut by the figure edge (#529, A5):
+/// `(left, right)` in pixels from the frame edge, 0 where nothing overhangs.
+///
+/// Only an axis whose range is **written** (`has_explicit_range`) can be read
+/// without the data, and every graph writes its ranges now (#529, frozen
+/// ranges); an axis still on Auto (no data yet, a file not opened by the
+/// application, the CLI) asks for nothing and keeps the old margin. The ticks
+/// are the ones the draw places: same tick count (the plot width is the
+/// stored frame width, so there is no circularity), same format, same
+/// "label every", measured like the draw measures them. The reserve is the
+/// overhang beyond the frame edge, so a column whose edge labels fit inside
+/// [`MARGIN`] (or whose last tick is not at the edge) is not widened: the
+/// grid takes the larger of the two.
+fn edge_reserves<DB: DrawingBackend>(
+    spec: &PlotSpec,
+    layout: &Layout,
+    frame_widths: &[f64],
+    probe: &DrawingArea<DB, Shift>,
+) -> Vec<(u32, u32)> {
+    let mut reserves = vec![(0_u32, 0_u32); layout.columns];
+    let style = text_style(LABEL_SIZE, (0, 0, 0, 255));
+    let width_of = |text: &str| -> f64 {
+        probe
+            .estimate_text_size(text, &style)
+            .map_or(0.0, |size| f64::from(size.0))
+    };
+    for (index, panel) in spec.panels.iter().enumerate() {
+        let Some(cell) = layout.cells.get(index).copied() else {
+            continue;
+        };
+        // A layer that follows the X axis of the one it covers adds none.
+        if panel.overlay.is_some_and(|overlay| !overlay.x_top) {
+            continue;
+        }
+        let axis = &panel.bottom;
+        if !axis.visible || !axis.tick_labels {
+            continue;
+        }
+        let Some(((low, high), reversed)) = explicit_range(axis, axis.scale) else {
+            continue;
+        };
+        let column = cell % layout.columns;
+        let Some(length) = frame_widths.get(column).copied().filter(|l| *l > 0.0) else {
+            continue;
+        };
+        let range = if axis.inverted || reversed {
+            (high, low)
+        } else {
+            (low, high)
+        };
+        let comma = spec.decimal_comma;
+        let count = scale::tick_count(
+            axis.scale,
+            range,
+            length,
+            scale::AxisDirection::Horizontal,
+            comma,
+            &width_of,
+        );
+        let format = scale::TickFormat::new(axis.scale, range, count)
+            .with_decimal_comma(comma)
+            .with_label_every(axis.label_every, range, count);
+        for tick in scale::linear_key_points(range, count) {
+            let text = format.format(tick);
+            if text.is_empty() {
+                continue;
+            }
+            let half = width_of(&text) / 2.0;
+            let position = (tick - range.0) / (range.1 - range.0) * length;
+            // One pixel more than the text: the measure is an estimate.
+            let left = (half - position).ceil() + 1.0;
+            let right = (position + half - length).ceil() + 1.0;
+            let slot = &mut reserves[column];
+            if left > 1.0 {
+                slot.0 = slot.0.max(left as u32);
+            }
+            if right > 1.0 {
+                slot.1 = slot.1.max(right as u32);
+            }
+        }
+    }
+    reserves
+}
+
 /// The plans of the cells (union of what their layers ask for) and the rank of
 /// each layer among the superimposed ones of its cell, from the spec alone.
 fn cell_plans<DB: DrawingBackend>(
@@ -991,6 +1096,7 @@ impl ExplicitGrid {
         layout: &Layout,
         plans: &std::collections::HashMap<usize, CellPlan>,
         frames: (Vec<f64>, Vec<f64>),
+        edges: &[(u32, u32)],
         width: Option<u32>,
         measure: &mut MeasureBand<'_, E>,
         measure_title: &mut MeasureTitle<'_, E>,
@@ -1013,6 +1119,10 @@ impl ExplicitGrid {
             } else {
                 (gutters.left, gutters.right)
             };
+        }
+        // The edge numbers of the horizontal axes must fit (#529, A5).
+        for (slot, edge) in column_gutters.iter_mut().zip(edges) {
+            *slot = (slot.0.max(edge.0), slot.1.max(edge.1));
         }
         let min_left = column_gutters.first().map_or(MARGIN, |g| g.0);
         for (column, slot) in column_gutters.iter_mut().enumerate() {
@@ -1653,11 +1763,13 @@ pub fn figure_layout<DB: DrawingBackend>(
         });
     };
     let (plans, _, _) = cell_plans(spec, &layout, probe)?;
+    let edges = edge_reserves(spec, &layout, &frames.0, probe);
     let grid = ExplicitGrid::build(
         spec,
         &layout,
         &plans,
         frames,
+        &edges,
         None,
         &mut |text, font, size, width| text_band(probe, text, font, size, width),
         &mut |width| graph_title_band(spec, probe, width),
@@ -2822,46 +2934,40 @@ fn draw_panel<DB: DrawingBackend>(
             .any(|series| series.axis == SeriesAxis::Right);
 
     // 2 — framing, in the transformed space.
+    let margins = figure_texts.margins;
+    let x_data = extent_of(&prepared, series::x_extent, None);
+    let y_data = extent_of(&prepared, series::y_extent, Some(SeriesAxis::Left));
+    let y2_data = extent_of(&prepared, series::y_extent, Some(SeriesAxis::Right));
     let x_range = match base {
         Some(base) if !x_own => base.x_range,
-        _ => {
-            let own = axis_range(
-                &spec.bottom,
-                x_scale,
-                extent_of(&prepared, series::x_extent, None),
-                false,
-            );
-            join_to_base(
-                &spec.bottom,
-                x_scale,
-                own,
-                base.map(|b| (b.x_scale, b.x_range, b.x_count)),
-            )
-        }
+        _ => axis_range(
+            &spec.bottom,
+            x_scale,
+            x_data,
+            false,
+            AxisRole::Horizontal,
+            margins,
+        ),
     };
     let y_range = match base {
         Some(base) if !y_own => base.y_range,
-        _ => {
-            let own = axis_range(
-                &spec.left,
-                y_scale,
-                extent_of(&prepared, series::y_extent, Some(SeriesAxis::Left)),
-                needs_baseline(&prepared, SeriesAxis::Left),
-            );
-            join_to_base(
-                &spec.left,
-                y_scale,
-                own,
-                base.map(|b| (b.y_scale, b.y_range, b.y_count)),
-            )
-        }
+        _ => axis_range(
+            &spec.left,
+            y_scale,
+            y_data,
+            needs_baseline(&prepared, SeriesAxis::Left),
+            AxisRole::Vertical,
+            margins,
+        ),
     };
     let y2_range = right_active.then(|| {
         axis_range(
             &spec.right,
             y2_scale,
-            extent_of(&prepared, series::y_extent, Some(SeriesAxis::Right)),
+            y2_data,
             needs_baseline(&prepared, SeriesAxis::Right),
+            AxisRole::Vertical,
+            margins,
         )
     });
 
@@ -3555,6 +3661,11 @@ fn draw_panel<DB: DrawingBackend>(
         overlay,
         row: spec.row,
         column: spec.column,
+        has_data: AxesWithData {
+            x: x_data.is_some(),
+            y: y_data.is_some(),
+            y2: y2_data.is_some(),
+        },
         x_range: data_range(x_scale, x_range),
         y_range: data_range(y_scale, y_range),
         y2_range: y2_range.map(|range| data_range(y2_scale, range)),
@@ -4360,6 +4471,26 @@ fn extent_of(
     seen.then_some((min, max))
 }
 
+/// The written framing of an axis, if complete and representable on `scale`:
+/// its bounds in the transformed space, low first, and whether it was written
+/// from high to low (the axis is then drawn reversed). The one reading of
+/// `range_min` / `range_max`, shared by [`axis_range`] and [`edge_reserves`].
+fn explicit_range(spec: &AxisSpec, scale: AxisScale) -> Option<((f64, f64), bool)> {
+    if !spec.has_explicit_range() {
+        return None;
+    }
+    match (spec.range_min, spec.range_max) {
+        (Some(min), Some(max)) if min.is_finite() && max.is_finite() && min != max => {
+            let (low, high) = (min.min(max), min.max(max));
+            match (scale::forward(scale, low), scale::forward(scale, high)) {
+                (Some(low), Some(high)) if low != high => Some(((low, high), min > max)),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Bounds of an axis, in the transformed space.
 ///
 /// The explicit framing of the spec takes precedence if it is complete **and**
@@ -4371,26 +4502,23 @@ fn axis_range(
     scale: AxisScale,
     data: Option<(f64, f64)>,
     with_baseline: bool,
+    role: AxisRole,
+    margins: AutoMargins,
 ) -> (f64, f64) {
-    let mut reversed = false;
-    let explicit = spec
-        .has_explicit_range()
-        .then(|| match (spec.range_min, spec.range_max) {
-            (Some(min), Some(max)) if min.is_finite() && max.is_finite() && min != max => {
-                reversed = min > max;
-                let (low, high) = (min.min(max), min.max(max));
-                match (scale::forward(scale, low), scale::forward(scale, high)) {
-                    (Some(low), Some(high)) if low != high => Some((low, high)),
-                    _ => None,
-                }
-            }
-            _ => None,
-        })
-        .flatten();
+    let explicit = explicit_range(spec, scale);
+    let reversed = explicit.is_some_and(|(_, reversed)| reversed);
+    let explicit = explicit.map(|(range, _)| range);
 
     let (min, max) = match explicit {
         Some(range) => range,
-        None => padded(scale, data, with_baseline),
+        None => padded(
+            scale,
+            data,
+            with_baseline,
+            role,
+            margins,
+            spec.inverted || reversed,
+        ),
     };
     if spec.inverted || reversed {
         (max, min)
@@ -4399,57 +4527,25 @@ fn axis_range(
     }
 }
 
-/// Joins the axis of a superimposed layer to that of the covered layer (#174):
-/// same bounds at the corners, ticks opposite. No effect outside a
-/// superimposed layer, on a logarithmic scale (decades already align) or with
-/// an extent set by hand.
-fn join_to_base(
-    spec: &AxisSpec,
+/// The extent of the data, widened by what it takes to be a framing: the
+/// one rule of [`framing::auto_frame`] (#529), shared with the analysis
+/// preview. `inverted` says the axis is drawn reversed, so that `Bottom` and
+/// `Top` stay the edges of the frame.
+fn padded(
     scale: AxisScale,
-    own: (f64, f64),
-    base: Option<(AxisScale, (f64, f64), usize)>,
+    data: Option<(f64, f64)>,
+    with_baseline: bool,
+    role: AxisRole,
+    margins: AutoMargins,
+    inverted: bool,
 ) -> (f64, f64) {
-    match base {
-        Some((base_scale, base_range, base_count))
-            if scale == AxisScale::Linear
-                && base_scale == AxisScale::Linear
-                && !spec.has_explicit_range() =>
-        {
-            scale::aligned_range(base_range, own, base_count).unwrap_or(own)
-        }
-        _ => own,
-    }
-}
-
-/// The extent of the data, widened by what it takes to be a framing.
-fn padded(scale: AxisScale, data: Option<(f64, f64)>, with_baseline: bool) -> (f64, f64) {
-    // No data: `0..1`, which is worth "one decade" on a logarithmic scale
-    // since the interval there is already that of the exponents.
-    let Some((mut min, mut max)) = data else {
-        return (0.0, 1.0);
+    // A bar that does not show where it starts lies about its height.
+    let baseline = if with_baseline {
+        scale::forward(scale, 0.0)
+    } else {
+        None
     };
-    if with_baseline {
-        // A bar that does not show where it starts lies about its height.
-        if let Some(baseline) = scale::forward(scale, 0.0) {
-            min = min.min(baseline);
-            max = max.max(baseline);
-        }
-    }
-    if matches!(scale, AxisScale::Log) {
-        // The decades stand in for a margin: widening before snapping to them
-        // would change nothing most of the time, and would add an empty
-        // decade the rest of the time.
-        return scale::snap_to_decades((min, max));
-    }
-    if min == max {
-        // A constant series, or a single point: without this spreading,
-        // `build_cartesian_2d` would receive an empty interval and Plotters
-        // would divide by zero when projecting.
-        let pad = if min == 0.0 { 1.0 } else { min.abs() * 0.05 };
-        return (min - pad, max + pad);
-    }
-    let pad = (max - min) * 0.05;
-    (min - pad, max + pad)
+    framing::auto_frame(scale, role, margins, inverted, data, baseline)
 }
 
 /// Puts a transformed interval back into the data space, to be reported to
@@ -4793,25 +4889,141 @@ mod tests {
             ..AxisSpec::default()
         };
         assert_eq!(
-            axis_range(&axis, AxisScale::Linear, None, false),
+            axis_range(
+                &axis,
+                AxisScale::Linear,
+                None,
+                false,
+                AxisRole::Vertical,
+                AutoMargins::default()
+            ),
             (800.0, 400.0)
         );
         axis.range_min = Some(400.0);
         axis.range_max = Some(800.0);
         assert_eq!(
-            axis_range(&axis, AxisScale::Linear, None, false),
+            axis_range(
+                &axis,
+                AxisScale::Linear,
+                None,
+                false,
+                AxisRole::Vertical,
+                AutoMargins::default()
+            ),
             (400.0, 800.0)
         );
         axis.inverted = true;
         assert_eq!(
-            axis_range(&axis, AxisScale::Linear, None, false),
+            axis_range(
+                &axis,
+                AxisScale::Linear,
+                None,
+                false,
+                AxisRole::Vertical,
+                AutoMargins::default()
+            ),
             (800.0, 400.0)
         );
         axis.range_min = Some(800.0);
         axis.range_max = Some(400.0);
         assert_eq!(
-            axis_range(&axis, AxisScale::Linear, None, false),
+            axis_range(
+                &axis,
+                AxisScale::Linear,
+                None,
+                false,
+                AxisRole::Vertical,
+                AutoMargins::default()
+            ),
             (800.0, 400.0)
+        );
+    }
+
+    fn auto(
+        scale: AxisScale,
+        data: Option<(f64, f64)>,
+        baseline: bool,
+        role: AxisRole,
+        inverted: bool,
+    ) -> (f64, f64) {
+        let axis = AxisSpec {
+            inverted,
+            ..AxisSpec::default()
+        };
+        axis_range(&axis, scale, data, baseline, role, AutoMargins::default())
+    }
+
+    fn near(actual: (f64, f64), expected: (f64, f64)) {
+        assert!(
+            (actual.0 - expected.0).abs() < 1e-9 && (actual.1 - expected.1).abs() < 1e-9,
+            "{actual:?} != {expected:?}"
+        );
+    }
+
+    /// #529: the horizontal axis runs edge to edge, the vertical ones leave
+    /// 1 % below and 5 % above; `Bottom` is the bottom of the frame.
+    #[test]
+    fn the_automatic_framing_follows_the_axis_role() {
+        use AxisScale::Linear;
+        near(
+            auto(Linear, Some((0.0, 2.0)), false, AxisRole::Horizontal, false),
+            (0.0, 2.0),
+        );
+        near(
+            auto(Linear, Some((10.0, 30.0)), false, AxisRole::Vertical, false),
+            (9.8, 31.0),
+        );
+        // Inverted: the axis is returned high bound first, with the bottom
+        // margin (1 %) on the high bound.
+        near(
+            auto(Linear, Some((10.0, 30.0)), false, AxisRole::Vertical, true),
+            (30.2, 9.0),
+        );
+        // Constant series: still a non-empty spread.
+        let (low, high) = auto(Linear, Some((4.0, 4.0)), false, AxisRole::Horizontal, false);
+        assert!(low < high);
+        // Positive bars sit on the frame whatever the bottom margin is.
+        let bars = auto(Linear, Some((3.0, 7.0)), true, AxisRole::Vertical, false);
+        assert_eq!(bars.0, 0.0);
+        // Log: decades, margins ignored.
+        assert_eq!(
+            auto(
+                AxisScale::Log,
+                Some((0.0, 3.0)),
+                false,
+                AxisRole::Vertical,
+                false
+            ),
+            scale::snap_to_decades((0.0, 3.0))
+        );
+        assert_eq!(
+            auto(Linear, None, false, AxisRole::Vertical, false),
+            (0.0, 1.0)
+        );
+    }
+
+    #[test]
+    fn x_error_bars_and_bar_edges_enter_the_horizontal_extent() {
+        let curve = Geometry::Curve {
+            points: vec![(0.0, 1.0), (2.0, 1.0)],
+            whiskers: vec![((1.0, 1.0), (3.0, 1.0))],
+        };
+        assert_eq!(series::x_extent(&curve), Some((0.0, 3.0)));
+        let bars = Geometry::Bars {
+            bars: vec![(-0.5, 0.5, 1.0), (1.5, 2.5, 1.0)],
+            whiskers: Vec::new(),
+        };
+        let x = series::x_extent(&bars).expect("extent");
+        near(
+            framing::auto_frame(
+                AxisScale::Linear,
+                AxisRole::Horizontal,
+                AutoMargins::default(),
+                false,
+                Some(x),
+                None,
+            ),
+            (-0.5, 2.5),
         );
     }
 

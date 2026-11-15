@@ -49,7 +49,7 @@ Source: `render-egui/lib.rs` (navigation, objects), `render-egui/shape_tools.rs`
 | Drag | plot area, Zoom tool | zoom rectangle (beyond 4 px) |
 | Drag | plot area, shape tool | draws the shape; a click without movement places the default size |
 | Double-click | free text, title, legend entry (one series name) | in-place editing; the legend frame between entries does nothing |
-| Double-click | curve, shape, axis (its numbers or its line, #385) | opens its settings; on the axis line the axis beats a curve lying against the edge |
+| Double-click | curve, shape, axis (its numbers or its line, #385) | opens its settings; on the axis line a curve under the pointer (its line or a marker, even half outside the frame) beats the axis, the axis wins elsewhere on the line (#529) |
 | Double-click | empty area (away from an axis line), margins | reframes (resets the zoom) |
 | Wheel | — | — (the wheel alone does not zoom, #62) |
 | Ctrl + wheel (or pinch) | plot area | zoom anchored under the pointer |

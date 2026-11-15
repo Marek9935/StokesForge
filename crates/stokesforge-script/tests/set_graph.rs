@@ -27,6 +27,15 @@ fn bench() -> Bench {
     project
         .add_column(sheet, None, Some("B"), Column::from_f64(&[4.0, 5.0, 6.0]))
         .unwrap();
+    // Far above B: a curve that goes beyond the ranges written for it (#529).
+    project
+        .add_column(
+            sheet,
+            None,
+            Some("T"),
+            Column::from_f64(&[40.0, 50.0, 60.0]),
+        )
+        .unwrap();
     let actor = Session::spawn(project, None).unwrap();
     let session = actor.handle();
     let prefix = std::env::var_os(interpreter::HOME_ENV)
@@ -257,14 +266,36 @@ fn set_graph_refuses_without_writing_anything() {
     assert_eq!(b.session.snapshot().unwrap().history, history);
 }
 
+/// #529: a graph made by `pyst.plot` has its automatic ranges written once
+/// (default margins: 0 / 0 / 1 / 5 %), and `x_auto_range=True` computes the
+/// range again once and writes it; the axis does not track the data after it.
 #[test]
-fn set_graph_restores_automatic_framing() {
+fn plot_and_x_auto_range_write_the_computed_range_once() {
     let b = bench();
     run(&b, GRAPH);
+    let panel = graph_spec(&b).panels[0].clone();
+    assert!(
+        !panel.bottom.auto_range && !panel.left.auto_range,
+        "frozen at creation"
+    );
+    assert_eq!(
+        (panel.bottom.range_min, panel.bottom.range_max),
+        (Some(1.0), Some(3.0))
+    );
+    let (low, high) = (panel.left.range_min.unwrap(), panel.left.range_max.unwrap());
+    // 4..6 with 1 % below and 5 % above.
+    assert!(
+        (low - 3.98).abs() < 1e-9 && (high - 6.1).abs() < 1e-9,
+        "{low} {high}"
+    );
+    assert!(panel.right.auto_range, "no data on the right axis");
+
     run(&b, "pyst.set_graph(pyst.resolve('[G]'), x_from=1, x_to=2)");
-    assert!(!graph_spec(&b).panels[0].bottom.auto_range);
+    assert_eq!(graph_spec(&b).panels[0].bottom.range_max, Some(2.0));
     run(&b, "pyst.set_graph(pyst.resolve('[G]'), x_auto_range=True)");
-    assert!(graph_spec(&b).panels[0].bottom.auto_range);
+    let bottom = graph_spec(&b).panels[0].bottom.clone();
+    assert!(!bottom.auto_range, "computed once, not tracking");
+    assert_eq!((bottom.range_min, bottom.range_max), (Some(1.0), Some(3.0)));
 }
 
 #[test]
@@ -1004,4 +1035,29 @@ fn the_total_size_cannot_be_combined_with_a_plot_area_size() {
         );
     }
     assert_eq!(graph_spec(&b), spec);
+}
+
+/// #529: a script that adds a curve to an existing graph never widens its
+/// written ranges (only the application's gestures do), and adds no step of
+/// its own.
+#[test]
+fn pyst_adding_a_curve_beyond_the_ranges_leaves_them_alone() {
+    let b = bench();
+    run(&b, GRAPH);
+    let before = graph_spec(&b).panels[0].clone();
+    run(
+        &b,
+        "t = pyst.resolve('[Book1]Sheet1!T')\na = pyst.resolve('[Book1]Sheet1!A')\ng = pyst.resolve('[G]')\npyst.plot(t, a, graph=g)",
+    );
+    let after = graph_spec(&b).panels[0].clone();
+    assert_eq!(after.series.len(), 2, "the curve is added");
+    assert_eq!(after.left, before.left, "the ranges did not move");
+    assert_eq!(after.bottom, before.bottom);
+    assert_ne!(
+        b.session.snapshot().unwrap().history.undo_label,
+        Some(stokesforge_commands::HistoryLabel::EditPlotSpec(
+            stokesforge_commands::PlotEditKind::WidenRanges
+        )),
+        "no widening step"
+    );
 }
