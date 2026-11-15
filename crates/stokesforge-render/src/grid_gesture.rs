@@ -692,6 +692,46 @@ pub fn page_corner_slack_keeping_ratio(
     at(scale)
 }
 
+/// The pull of a page corner kept on the page's ratio, with the snap on the
+/// leading side (Ctrl + drag, #512). The leading side is the one that asks for
+/// the larger relative change (the same choice as
+/// [`page_corner_slack_keeping_ratio`]); with a snap `step` its pulled edge
+/// lands on a grid line counted from the top-left corner of the page, and the
+/// other side follows the exact ratio, off the grid. Without a step (Shift) the
+/// ratio is kept with no snap. Both returned pulls are for one common scale, so
+/// feeding them to [`page_corner_slack_keeping_ratio`] gives that scale.
+/// A non-finite `delta` or an empty page is returned unchanged.
+pub fn page_corner_ratio_delta(
+    corner: (bool, bool),
+    image: (f64, f64),
+    delta: (f64, f64),
+    step: Option<f64>,
+) -> (f64, f64) {
+    let (w, h) = image;
+    if !(w > 0.0 && h > 0.0 && delta.0.is_finite() && delta.1.is_finite()) {
+        return delta;
+    }
+    let sign = |outward: bool| if outward { 1.0 } else { -1.0 };
+    let rw = (w + sign(corner.0) * delta.0) / w;
+    let rh = (h + sign(corner.1) * delta.1) / h;
+    let scale = match step.filter(|step| step.is_finite() && *step > 0.0) {
+        Some(step) => {
+            let (outward, start, moved, len) = if rw >= rh {
+                (corner.0, if corner.0 { w } else { 0.0 }, delta.0, w)
+            } else {
+                (corner.1, if corner.1 { h } else { 0.0 }, delta.1, h)
+            };
+            let snapped = ((start + moved) / step).round() * step - start;
+            (len + sign(outward) * snapped) / len
+        }
+        None => rw.max(rh),
+    };
+    (
+        sign(corner.0) * (scale - 1.0) * w,
+        sign(corner.1) * (scale - 1.0) * h,
+    )
+}
+
 /// The frames and the slack after **Fit Layout to Page** (#505, K1), the
 /// inverse of fitting the page to the layout: the empty space around the grid
 /// goes to zero and the graphs grow to fill it, the page keeping its size.
@@ -1322,6 +1362,36 @@ mod tests {
                 (-40.0, -40.0)
             ),
             slack(0.0, 0.0, 36.0, 0.0)
+        );
+    }
+
+    /// Ctrl + drag keeps the snap (#512): the leading side (the larger relative
+    /// change) lands on the step, the other follows the exact ratio; Shift +
+    /// Ctrl keeps the ratio with no snap. On 400 x 300 with a step of 50,
+    /// `(+60, +10)` leads on the width: 450 wide, 337.5 high. Witness: the
+    /// snap dropped when the ratio is kept (the width stays 460), or applied to
+    /// both sides (the height lands on 350).
+    #[test]
+    fn a_page_corner_with_ctrl_snaps_the_leading_side_only() {
+        let image = (400.0, 300.0);
+        let none = slack(0.0, 0.0, 0.0, 0.0);
+        let pull = page_corner_ratio_delta((true, true), image, (60.0, 10.0), Some(50.0));
+        assert!((pull.0 - 50.0).abs() < 1e-9 && (pull.1 - 37.5).abs() < 1e-9);
+        assert_eq!(
+            page_corner_slack_keeping_ratio((true, true), image, none, pull),
+            slack(0.0, 0.0, 50.0, 38.0)
+        );
+        // No snap: the ratio only, as the plain keeping function.
+        let free = page_corner_ratio_delta((true, true), image, (60.0, 10.0), None);
+        assert!((free.0 - 60.0).abs() < 1e-9 && (free.1 - 45.0).abs() < 1e-9);
+        // The top-left corner leads on the height; the line counts from the top.
+        let pull = page_corner_ratio_delta((false, false), image, (-4.0, -60.0), Some(50.0));
+        assert!((pull.0 + 200.0 / 3.0).abs() < 1e-9 && (pull.1 + 50.0).abs() < 1e-9);
+        // Not finite: unchanged.
+        let nan = (f64::NAN, 1.0);
+        assert_eq!(
+            page_corner_ratio_delta((true, true), image, nan, Some(50.0)).1,
+            1.0
         );
     }
 

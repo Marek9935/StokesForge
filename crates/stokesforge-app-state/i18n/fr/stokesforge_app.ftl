@@ -889,8 +889,7 @@ plot-axes-log-scale =
     .hint = Logarithme en base 10
 plot-axes-from = De
 plot-axes-from-auto = Auto
-    .hint = Les bornes suivent de nouveau les données. L'axe garde son sens
-    .disabled = Les bornes suivent déjà les données
+    .hint = Calcule maintenant la plage à partir des données, avec les marges de Préférences > Affichage > Graphiques, et l'écrit dans De et à. Elle ne suit plus les données. L'axe garde son sens
 plot-axes-display-section = Affichage
 plot-axes-decimal-comma = Virgule décimale sur les graduations
     .hint = Écrit 1,5 au lieu de 1.5 sur tous les axes de ce graphe, à l'écran et dans les exports
@@ -1504,6 +1503,7 @@ history-plot-legend-text = Changer le texte de la légende
 history-plot-color-bar = Changer la barre de couleurs
 history-plot-fit-page = Ajuster la page à la disposition
 history-plot-fit-layout = Ajuster la disposition à la page
+history-plot-widen-ranges = Élargir les plages des axes
 
 # Panneaux fixes et fenêtres détachées (#100)
 panel-expand = Déployer le panneau
@@ -2153,6 +2153,17 @@ preferences-display = Affichage
 preferences-display-interface = Interface
 preferences-display-object-manager = Gestionnaire d'objets
 preferences-display-new = Nouveaux
+preferences-display-graphs = Graphiques
+preferences-graphs-auto-range = Plage automatique des axes
+preferences-graphs-auto-range-note = Espace laissé autour des données quand un axe est automatique, en % de l'étendue des données. Un nouveau graphique écrit ses plages une fois avec ces valeurs ; les graphiques existants gardent les leurs. Les axes logarithmiques ne sont pas concernés.
+preferences-graphs-margin-left = Gauche (%)
+    .hint = Espace au bord gauche de la zone de tracé, en % de l'étendue des données. Un nouveau graphique écrit ses plages une fois. Par défaut 0.
+preferences-graphs-margin-right = Droite (%)
+    .hint = Espace au bord droit de la zone de tracé, en % de l'étendue des données. Un nouveau graphique écrit ses plages une fois. Par défaut 0.
+preferences-graphs-margin-bottom = Bas (%)
+    .hint = Espace au bord bas de la zone de tracé, en % de l'étendue des données, même sur un axe inversé. Un nouveau graphique écrit ses plages une fois. Par défaut 1.
+preferences-graphs-margin-top = Haut (%)
+    .hint = Espace au bord haut de la zone de tracé, en % de l'étendue des données, même sur un axe inversé. Un nouveau graphique écrit ses plages une fois. Par défaut 5.
 preferences-show-formula-help = Afficher l'aide de syntaxe des formules
     .hint = Affiche l'icône « ? » à côté des champs de texte qui acceptent une formule (titres, étiquettes, unités). Masquée, les champs gardent leur propre rappel.
 preferences-show-column-formula-help = Afficher l'aide de F(x)=
@@ -2305,7 +2316,21 @@ busy-stop = Arrêter
 status-import-stopped = Import arrêté. Rien n'a été importé
 status-page-edge-reached = Bord de la page atteint : tirez un coin pour agrandir la page
 status-figure-grew = L'image a dépassé la place gardée par la taille de figure Fixe. La zone de tracé a gardé sa taille
+status-ranges-written =
+    { $count ->
+        [one] La plage des axes de { $count } graphique a été écrite d'après les données. Enregistrez pour la conserver
+       *[other] Les plages des axes de { $count } graphiques ont été écrites d'après les données. Enregistrez pour les conserver
+    }
 status-recalculating = Recalcul en cours…
+status-axes-widened =
+    { $count ->
+        [one] Axe { $axes } élargi pour montrer la nouvelle série. Ctrl+Z annule la nouvelle plage
+       *[other] Axes { $axes } élargis pour montrer la nouvelle série. Ctrl+Z annule les nouvelles plages
+    }
+widen-axis-x = X
+widen-axis-y = Y
+widen-axis-top-x = X du haut
+widen-axis-right-y = Y de droite
 status-recalc-stopped = Recalcul arrêté. La modification a été annulée
 
 analysis-baseline-constant = Constante…

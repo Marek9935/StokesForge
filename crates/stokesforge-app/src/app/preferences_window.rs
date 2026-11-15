@@ -26,6 +26,7 @@ use eframe::egui;
 
 use super::dialogs::{modal_live_settings, DialogOutcome, InteractiveSize, SizeClass};
 use super::form::{choice, form, ChoiceOption};
+use super::hover_help::help_beside;
 use super::object_manager_ui::object_manager_group_label;
 use super::plot_settings::legend_template_field;
 use super::reorder_list::{move_before, reorder_move, reorder_row};
@@ -61,6 +62,7 @@ enum DisplayTab {
     Interface,
     ObjectManager,
     New,
+    Graphs,
 }
 
 /// Paints the window while it is open. Returns the chosen language, if
@@ -280,6 +282,7 @@ fn display_page(
             tr!("preferences-display-object-manager"),
         ),
         (DisplayTab::New, tr!("preferences-display-new")),
+        (DisplayTab::Graphs, tr!("preferences-display-graphs")),
     ];
     let current = *tab;
     // The row takes the whole height left (`ui.horizontal` would give about one).
@@ -298,6 +301,7 @@ fn display_page(
             DisplayTab::Interface => interface_tab(ui, state, actions),
             DisplayTab::ObjectManager => object_manager_tab(ui, state, actions),
             DisplayTab::New => new_tab(ui, state, actions),
+            DisplayTab::Graphs => graphs_tab(ui, state, actions),
         });
     });
 }
@@ -440,6 +444,60 @@ fn new_tab(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) {
     }
     if next != legend_text {
         actions.push(Action::SetNewGraphLegendText(next));
+    }
+}
+
+/// Display › Graphs: the margins of the automatic axis framing (#529), in % of
+/// the data extent. A user preference, not part of any project.
+fn graphs_tab(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) {
+    let before = state.auto_margins();
+    let mut margins = before;
+    form(ui, "preferences_display_graphs", |rows| {
+        rows.section(tr!("preferences-graphs-auto-range"));
+        rows.note(tr!("preferences-graphs-auto-range-note"));
+        rows.row(tr!("preferences-graphs-margin-left"), |ui| {
+            help_beside(ui, tr!("preferences-graphs-margin-left", "hint"), |ui| {
+                number_field(
+                    ui,
+                    "preferences_auto_margin_left",
+                    &mut margins.left,
+                    &quantities::AUTO_MARGIN_PERCENT,
+                );
+            });
+        });
+        rows.row(tr!("preferences-graphs-margin-right"), |ui| {
+            help_beside(ui, tr!("preferences-graphs-margin-right", "hint"), |ui| {
+                number_field(
+                    ui,
+                    "preferences_auto_margin_right",
+                    &mut margins.right,
+                    &quantities::AUTO_MARGIN_PERCENT,
+                );
+            });
+        });
+        rows.row(tr!("preferences-graphs-margin-bottom"), |ui| {
+            help_beside(ui, tr!("preferences-graphs-margin-bottom", "hint"), |ui| {
+                number_field(
+                    ui,
+                    "preferences_auto_margin_bottom",
+                    &mut margins.bottom,
+                    &quantities::AUTO_MARGIN_PERCENT,
+                );
+            });
+        });
+        rows.row(tr!("preferences-graphs-margin-top"), |ui| {
+            help_beside(ui, tr!("preferences-graphs-margin-top", "hint"), |ui| {
+                number_field(
+                    ui,
+                    "preferences_auto_margin_top",
+                    &mut margins.top,
+                    &quantities::AUTO_MARGIN_PERCENT,
+                );
+            });
+        });
+    });
+    if margins != before {
+        actions.push(Action::SetAutoMargins(margins));
     }
 }
 
@@ -1035,6 +1093,42 @@ mod tests {
         harness.get_by_label(&tr!("object-manager-reset")).click();
         harness.run();
         assert_eq!(harness.state().state.object_manager_settings(), initial);
+    }
+
+    /// #529: Display › Graphs holds the four margins of the automatic framing
+    /// with their defaults; a typed value is written to the preference, a refused
+    /// one is not.
+    #[test]
+    fn the_graphs_sub_tab_sets_the_auto_margins() {
+        let mut harness = bench();
+        go_to_display(&mut harness, &tr!("preferences-display-graphs"));
+        harness.get_by_label(&tr!("preferences-graphs-auto-range"));
+        for label in [
+            tr!("preferences-graphs-margin-left"),
+            tr!("preferences-graphs-margin-right"),
+            tr!("preferences-graphs-margin-bottom"),
+            tr!("preferences-graphs-margin-top"),
+        ] {
+            harness.get_by_label(&label);
+        }
+        let defaults = stokesforge_render::AutoMargins::default();
+        assert_eq!(harness.state().state.auto_margins(), defaults);
+        let top = harness.get_all_by_value("5").next().expect("Top field");
+        top.click();
+        harness.run();
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.run();
+        harness
+            .get_all_by_value("5")
+            .next()
+            .expect("Top field")
+            .type_text("7.5");
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+        let margins = harness.state().state.auto_margins();
+        assert_eq!(margins.top, 7.5);
+        assert_eq!(margins.left, defaults.left, "the others are untouched");
+        assert_eq!(margins.bottom, defaults.bottom);
     }
 
     /// The sub-tab is remembered when the rubric is left and reopened.

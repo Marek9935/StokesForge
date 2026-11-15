@@ -890,8 +890,7 @@ plot-axes-log-scale =
     .hint = Base-10 logarithm
 plot-axes-from = From
 plot-axes-from-auto = Auto
-    .hint = Bounds follow the data again. The axis keeps its direction
-    .disabled = The bounds already follow the data
+    .hint = Computes the range from the data now, with the margins of Preferences > Display > Graphs, and writes it in From and to. It no longer follows the data. The axis keeps its direction
 plot-axes-display-section = Display
 plot-axes-decimal-comma = Decimal comma on tick labels
     .hint = Writes 1,5 instead of 1.5 on every axis of this graph, on screen and in exports
@@ -1505,6 +1504,7 @@ history-plot-legend-text = Change Legend Text
 history-plot-color-bar = Change Color Bar
 history-plot-fit-page = Fit Page to Layout
 history-plot-fit-layout = Fit Layout to Page
+history-plot-widen-ranges = Widen Axis Ranges
 
 # Fixed panels and detached windows (#100)
 panel-expand = Expand the panel
@@ -2156,6 +2156,17 @@ preferences-display = Display
 preferences-display-interface = Interface
 preferences-display-object-manager = Object Manager
 preferences-display-new = New
+preferences-display-graphs = Graphs
+preferences-graphs-auto-range = Automatic axis range
+preferences-graphs-auto-range-note = Empty space left around the data when an axis is automatic, in % of the data extent. A new graph writes its ranges once with these values; graphs that already exist keep theirs. Logarithmic axes are not affected.
+preferences-graphs-margin-left = Left (%)
+    .hint = Empty space at the left edge of the plot area, in % of the data extent. A new graph writes its ranges once. Default 0.
+preferences-graphs-margin-right = Right (%)
+    .hint = Empty space at the right edge of the plot area, in % of the data extent. A new graph writes its ranges once. Default 0.
+preferences-graphs-margin-bottom = Bottom (%)
+    .hint = Empty space at the bottom edge of the plot area, in % of the data extent, even on a reversed axis. A new graph writes its ranges once. Default 1.
+preferences-graphs-margin-top = Top (%)
+    .hint = Empty space at the top edge of the plot area, in % of the data extent, even on a reversed axis. A new graph writes its ranges once. Default 5.
 preferences-show-formula-help = Show formula syntax help
     .hint = Shows the "?" icon next to the text fields that accept a formula (titles, labels, units). Hidden, the fields keep their own reminder.
 preferences-show-column-formula-help = Show F(x)= help
@@ -2307,6 +2318,20 @@ status-import-stopped = Import stopped. Nothing was imported
 status-recalculating = Recalculating…
 status-page-edge-reached = Page edge reached: drag a corner to enlarge the page
 status-figure-grew = The image grew beyond the room kept by the Fixed figure size. The plot area kept its size
+status-ranges-written =
+    { $count ->
+        [one] The axis range of { $count } graph was written from the data. Save to keep it
+       *[other] The axis ranges of { $count } graphs were written from the data. Save to keep them
+    }
+status-axes-widened =
+    { $count ->
+        [one] Widened the { $axes } axis to show the new series. Ctrl+Z undoes the new range
+       *[other] Widened the { $axes } axes to show the new series. Ctrl+Z undoes the new ranges
+    }
+widen-axis-x = X
+widen-axis-y = Y
+widen-axis-top-x = top X
+widen-axis-right-y = right Y
 status-recalc-stopped = Recalculation stopped. The change was undone
 
 analysis-baseline-constant = Constant…

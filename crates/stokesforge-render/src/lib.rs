@@ -74,6 +74,7 @@ pub mod color_bar;
 pub mod decimate;
 pub mod fonts;
 pub mod formula;
+pub mod framing;
 pub mod free_gesture;
 pub mod grid_gesture;
 pub mod hit;
@@ -124,6 +125,7 @@ impl std::error::Error for RenderError {}
 pub use color::{parse_hex, rgb_or};
 pub use decimate::lttb;
 pub use fonts::{available_families, FamilyEntry, FontChoice, FontSet, FontSource, ResolvedFonts};
+pub use framing::{auto_frame, AutoMargins, AxisRole};
 pub use free_gesture::{
     boundary_group, boxes_fitted_to_page, figure_to_stored, graph_boxes, layout_handle_at,
     moved_boundary, moved_box, moved_page_corner, nudged_box, page_fitted_to_layers,
@@ -133,9 +135,9 @@ pub use free_gesture::{
 };
 pub use grid_gesture::{
     grid_cell_at, grid_corners, grid_handle_at, grid_line_at, layout_fitted_to_page,
-    page_corner_slack, page_corner_slack_keeping_ratio, page_edge_bumped, resized_edge,
-    resized_frames, resized_line_alone, scaled_axis, splitter, EdgeSide, GridCorner, GridHandle,
-    GridLine, LineAxis, OuterEdge,
+    page_corner_ratio_delta, page_corner_slack, page_corner_slack_keeping_ratio, page_edge_bumped,
+    resized_edge, resized_frames, resized_line_alone, scaled_axis, splitter, EdgeSide, GridCorner,
+    GridHandle, GridLine, LineAxis, OuterEdge,
 };
 pub use hit::{
     component_at, component_at_with_tolerance, AxisSide, PlotComponent, AXIS_LINE_TOLERANCE_POINTS,

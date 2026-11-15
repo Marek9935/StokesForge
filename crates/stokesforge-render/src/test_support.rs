@@ -9,6 +9,7 @@ use crate::pipeline::{AxisAreas, DrawnPanel};
 /// to a test are then set on the returned value.
 pub(crate) fn panel(index: usize, row: usize, column: usize) -> DrawnPanel {
     DrawnPanel {
+        has_data: Default::default(),
         index,
         overlay: None,
         row,

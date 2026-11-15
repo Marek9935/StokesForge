@@ -169,6 +169,7 @@ use gauge::RecalcGauge;
 /// at startup (#333).
 pub const NEW_PROJECT_NAME: &str = "Project1";
 
+pub use actor::LoadNormaliser;
 pub use error::{SessionError, SessionResult};
 pub use gauge::RecalcEnd;
 pub use recalc::FormulaRecalc;
@@ -480,9 +481,24 @@ impl SessionHandle {
         path: &Path,
         limits: stokesforge_persistence::LoadLimits,
     ) -> SessionResult<(Revision, LoadReport)> {
+        self.load_normalised(path, limits, None)
+    }
+
+    /// Like [`Self::load_with_limits`], then runs `normaliser` once over the
+    /// loaded project, after the formulas were recalculated and before the
+    /// reply (#529). It writes with no history: the load exception of
+    /// invariant 1. The closure comes from the client, so the session knows
+    /// nothing of rendering.
+    pub fn load_normalised(
+        &self,
+        path: &Path,
+        limits: stokesforge_persistence::LoadLimits,
+        normaliser: Option<LoadNormaliser>,
+    ) -> SessionResult<(Revision, LoadReport)> {
         self.request(|reply| Request::Load {
             path: path.to_path_buf(),
             limits,
+            normaliser,
             reply,
         })?
     }

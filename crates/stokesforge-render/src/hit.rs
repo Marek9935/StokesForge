@@ -338,6 +338,7 @@ mod tests {
         };
         DrawnPlot {
             panels: vec![DrawnPanel {
+                has_data: Default::default(),
                 index: 0,
                 overlay: None,
                 row: 0,

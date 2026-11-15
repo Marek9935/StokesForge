@@ -201,11 +201,23 @@ fn the_tick_marks_and_the_minor_ticks_follow_the_labels() {
 #[test]
 fn long_numbers_lose_ticks_even_on_a_long_axis() {
     // "1234.55" is wide: the density alone would keep the eleven ticks.
-    let svg = export(&[1234.5, 1234.7, 1234.9], (392.0, 284.0), |_| {});
+    // Framed as before #529 (5 % each side), so that the test stays about
+    // label widths, not about the framing.
+    let svg = export(&[1234.5, 1234.7, 1234.9], (392.0, 284.0), |p| {
+        p.bottom.auto_range = false;
+        p.bottom.range_min = Some(1234.48);
+        p.bottom.range_max = Some(1234.92);
+    });
     let labels = bottom_labels(&svg);
     assert!(labels.len() >= 2, "{labels:?}");
     assert_no_overlap(&labels);
-    let plain = bottom_labels(&export(&RANGE, (392.0, 284.0), |_| {}));
+    // The range of the issue with the margins it had before #529, so that the
+    // comparison stays one of label widths, not of framing.
+    let plain = bottom_labels(&export(&RANGE, (392.0, 284.0), |p| {
+        p.bottom.auto_range = false;
+        p.bottom.range_min = Some(-86.75);
+        p.bottom.range_max = Some(336.75);
+    }));
     assert!(
         labels.len() < plain.len(),
         "{} vs {}",

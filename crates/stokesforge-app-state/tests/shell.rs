@@ -7943,10 +7943,12 @@ fn dropping_rows_on_a_graph_with_x_asks_which_axis() {
     assert_eq!(state.pending_row_drop(), None);
     let spec = state.plot_spec(graph).unwrap();
     assert_eq!(spec.panels.len(), 2, "one more layer");
-    assert_eq!(
-        spec.panels[0], before.panels[0],
-        "the original layer is intact"
-    );
+    // The new layer shares the Y axis of the covered one (#529, L5): the row
+    // (Y 3..9) goes above the written range, so that axis, and only it, widened.
+    let mut base = spec.panels[0].clone();
+    assert!(base.left.range_max > before.panels[0].left.range_max);
+    base.left = before.panels[0].left.clone();
+    assert_eq!(base, before.panels[0], "the rest of the original layer");
     assert!(spec.panels[1]
         .overlay
         .is_some_and(|o| o.x_top && !o.y_right));
@@ -7954,9 +7956,20 @@ fn dropping_rows_on_a_graph_with_x_asks_which_axis() {
     assert_eq!(spec.panels[1].series[0].row, Some(2));
     state.dispatch(Action::Undo);
     assert_eq!(
+        state.plot_spec(graph).unwrap().panels.len(),
+        2,
+        "layer kept"
+    );
+    assert_eq!(
+        state.plot_spec(graph).unwrap().panels[0],
+        before.panels[0],
+        "the first step gives the ranges back"
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(
         state.plot_spec(graph).unwrap(),
         before,
-        "a single step, layer included"
+        "the second step takes the layer"
     );
 
     // Present axis: the series join the targeted layer, without a new layer.
@@ -7993,6 +8006,9 @@ fn a_new_overlay_axis_switches_the_displayed_mirror_off_in_the_same_undo_step() 
     assert_eq!(spec.panels.len(), 2);
     assert!(!spec.panels[0].top.mirror, "the overlay axis wins");
 
+    // The row also widened the shared Y (#529, L5): that is a step of its own,
+    // undone first; the next Undo gives the layer and the mirror back.
+    state.dispatch(Action::Undo);
     state.dispatch(Action::Undo);
     assert_eq!(state.plot_spec(graph).unwrap(), before, "both come back");
 }
@@ -12497,7 +12513,12 @@ fn object_manager_deletes_a_curve_without_touching_the_data() {
     let drawn = layout_of(&before);
     after.frame_widths = drawn.frame_widths;
     after.frame_heights = drawn.frame_heights;
-    assert_eq!(graph_spec(&state, graph), after);
+    // The edit also writes the Auto ranges that have data (#529).
+    let written = graph_spec(&state, graph);
+    assert!(!written.panels[0].bottom.auto_range && !written.panels[0].left.auto_range);
+    after.panels.get_mut(0).unwrap().bottom = written.panels[0].bottom.clone();
+    after.panels.get_mut(0).unwrap().left = written.panels[0].left.clone();
+    assert_eq!(written, after);
     let model = object_tree(state.tree(), graph, None).unwrap();
     assert_eq!(model.layers[0].series.len(), 1);
     assert_eq!(model.layers[0].series[0].label, "Second series");
@@ -20207,4 +20228,77 @@ fn editing_the_frames_never_stores_a_bound_text() {
     .expect("fit");
     assert_eq!(draft.title, "#ln");
     assert_eq!(draft.panels[0].left.label, "#ln");
+}
+
+/// #529: the margins of the automatic framing are a preference of the user:
+/// 0 / 0 / 1 / 5 by default, remembered across sessions, held to 0..=100.
+#[test]
+fn the_auto_margins_are_a_remembered_preference_with_defaults() {
+    use stokesforge_render::AutoMargins;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (session, _state, _sheet, _columns) = kinetics(dir.path());
+    let file = dir.path().join("preferences.json");
+    let mut state = state_on_preferences(&session, dir.path(), &file);
+    assert_eq!(
+        state.auto_margins(),
+        AutoMargins {
+            left: 0.0,
+            right: 0.0,
+            bottom: 1.0,
+            top: 5.0
+        }
+    );
+    state.dispatch(Action::SetAutoMargins(AutoMargins {
+        left: 2.0,
+        right: 3.0,
+        bottom: 0.5,
+        top: 150.0,
+    }));
+    assert_eq!(state.auto_margins().top, 100.0, "held to 0..=100");
+    let next = state_on_preferences(&session, dir.path(), &file);
+    assert_eq!(next.auto_margins().left, 2.0);
+    assert_eq!(next.auto_margins().bottom, 0.5);
+}
+
+/// #529, L5: rows dropped on a graph that go beyond its written ranges widen
+/// the exceeded side in a second step; the first Ctrl+Z keeps the rows.
+#[test]
+fn dropping_rows_beyond_the_ranges_widens_them_in_a_second_step() {
+    use stokesforge_commands::{HistoryLabel, PlotEditKind};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, sheet, _) = kinetics(dir.path());
+    state.dispatch(Action::AddGraph);
+    let root = state.tree().root();
+    let graph = *state.tree().node(root).unwrap().children().last().unwrap();
+    let drop = |state: &mut AppState, row: usize| {
+        state.dispatch(Action::AddRowsToGraph {
+            graph,
+            panel: 0,
+            sheet,
+            rows: vec![row],
+            axis: RowAxis::Present,
+        });
+    };
+    // Row 0 reads 1, 4, 7: the first drop writes the ranges.
+    drop(&mut state, 0);
+    let first = state.plot_spec(graph).unwrap();
+    let top = first.panels[0].left.range_max.expect("written");
+    assert!(!first.panels[0].left.auto_range && top < 9.0);
+    // Row 2 reads 3, 6, 9: above the top.
+    drop(&mut state, 2);
+    let widened = state.plot_spec(graph).unwrap();
+    assert_eq!(widened.panels[0].series.len(), 2);
+    assert!(widened.panels[0].left.range_max.unwrap() >= 9.0);
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(PlotEditKind::WidenRanges))
+    );
+    assert_eq!(
+        state.status().map(|m| m.level),
+        Some(stokesforge_app_state::state::StatusLevel::Warning)
+    );
+    state.dispatch(Action::Undo);
+    let kept = state.plot_spec(graph).unwrap();
+    assert_eq!(kept.panels[0].series.len(), 2, "the rows stay");
+    assert_eq!(kept.panels[0].left.range_max, Some(top));
 }
