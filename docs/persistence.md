@@ -40,7 +40,12 @@ mode `Open`/`Maximized`/`Closed`, collapsed state, stacking rank among the open
 windows. `x`/`y`/`width`/`height` always stay the **floating** geometry there;
 detaching is never saved (a detached window is written `Open`), and neither is
 the position of a detached OS window. Absent `view` = default initial layout; an
-unknown mode reads as `Closed`.
+unknown mode reads as `Closed`. The views are restored at startup and on every
+Open (File > Open with or without the "Save?" confirmation, Recover Projects >
+Open) by the same function, `RestoredWindows::from_state`; a file where no
+geometry carries a `view` (old file) opens with no window (`new_from_file`); only a
+project not read from a file (in-memory demo, tests) opens its first workbook and
+first graph.
 
 Columns also carry `import_source` (issue #7, S2 of #323): an
 `ImportSourceRecord` with named fields — file path, recipe, column index,

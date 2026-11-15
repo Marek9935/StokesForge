@@ -404,6 +404,11 @@ pub(super) fn graph_view_contents(
         &stokesforge_app_state::figure_texts::figure_texts()
             .with_margins(published_auto_margins(ui.ctx())),
     );
+    // #512: a page-corner drag takes this frame's pointer before the figure is
+    // sized, so the size drawn is not one frame behind the display scale.
+    if layout_mode {
+        view.advance_page_corner_drag(ui.ctx());
+    }
     let layout = view.figure_layout(ui.ctx(), snapshot, graph_id).ok();
     let (fig_w, fig_h) = layout.as_ref().map_or(DEFAULT_FIGURE_SIZE, |l| l.size);
     if let Some(layout) = layout.clone() {
@@ -420,6 +425,17 @@ pub(super) fn graph_view_contents(
         contain.center(),
         egui::vec2(fig_w as f32 * scale, fig_h as f32 * scale),
     );
+    // #512: while a page corner is dragged, the figure is drawn anchored at the
+    // opposite corner of the page, at the scale of the drag, so the corner stays
+    // under the cursor; the display zooms out at the edge of `contain`. The
+    // centred fit above comes back at the release.
+    let rect = if layout_mode {
+        view.set_layout_contain(contain);
+        view.page_corner_rect((fig_w as f32, fig_h as f32))
+            .unwrap_or(rect)
+    } else {
+        rect
+    };
     let mut figure_ui = ui.new_child(egui::UiBuilder::new().max_rect(outer));
     // The page corner handles of the Page Layout Mode sit in the margin the
     // mode leaves inside `outer` (#426).

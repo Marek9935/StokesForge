@@ -243,7 +243,7 @@ To restore the default, right-click the letter and choose **Reset Width**. Chang
 2. Type the new value, or press <kbd>F2</kbd> or double-click to edit the current value.
 3. Press <kbd>Enter</kbd> to confirm, or <kbd>Esc</kbd> to cancel.
 
-Use the arrow keys to move between cells. <kbd>Tab</kbd> moves to the next column. <kbd>Enter</kbd> on the last row moves to the entry row.
+Use the arrow keys to move between cells. <kbd>Tab</kbd> moves to the next column. <kbd>Enter</kbd> on the last row moves to the entry row. When the active cell leaves the visible part of the sheet, the sheet scrolls just enough to show it; a click never scrolls.
 
 ### Add a row
 

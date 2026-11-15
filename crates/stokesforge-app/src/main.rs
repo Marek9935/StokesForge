@@ -77,6 +77,7 @@ fn main() -> anyhow::Result<()> {
     };
     let (session, path, report) =
         session_for_startup_with(&startup.source, preferences.load_limits(), Some(normaliser))?;
+    let from_file = matches!(startup.source, StartupSource::Load(_));
     let mut state = AppState::new(session.handle(), path.display().to_string())
         .context("first snapshot of the project")?;
     if let Some(report) = &report {
@@ -122,7 +123,7 @@ fn main() -> anyhow::Result<()> {
     let outcome = eframe::run_native(
         "stokesforge-app",
         options,
-        Box::new(|cc| {
+        Box::new(move |cc| {
             // Task R4.1: explicitly set **the** project's font definitions on
             // the context, rather than counting on egui's defaults being the
             // same. This is what makes the screen/export agreement a property
@@ -135,7 +136,11 @@ fn main() -> anyhow::Result<()> {
             // fonts: both belong to the same gesture ("what the app imposes on
             // the `Context` before the first rendering").
             stokesforge_app::theme::install(&cc.egui_ctx);
-            let mut app = StokesForgeApp::new(state);
+            let mut app = if from_file {
+                StokesForgeApp::new_from_file(state)
+            } else {
+                StokesForgeApp::new(state)
+            };
             app.set_logo(logo);
             app.load_toolbar_layout(&stokesforge_app_state::preferences::Preferences::load());
             // The remembered layout of the panels, once, before the first frame (#148).

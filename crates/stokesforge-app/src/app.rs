@@ -261,7 +261,6 @@ use stokesforge_app_state::file_picker::{FilePicker, PickRequest};
 use tab::{active_tab_kind, tab_for_window, tab_node, Tab};
 use transpose_ui::transpose_relink_window;
 use window_detach::snapshot_stamp;
-use window_placement::geometry_rect;
 use window_stack::window_nodes;
 
 use eframe::egui;
@@ -519,60 +518,23 @@ impl StokesForgeApp {
     /// value is silently ignored: the bench must not refuse
     /// to start because of verification tooling.
     pub fn new(state: AppState) -> Self {
+        Self::build(state, false)
+    }
+
+    /// Like [`Self::new`] for a project **read from a file** (#513): a file
+    /// without saved window states opens no window, where an in-memory project
+    /// (the demo, a test) opens its first workbook and first graph.
+    pub fn new_from_file(state: AppState) -> Self {
+        Self::build(state, true)
+    }
+
+    fn build(state: AppState, from_file: bool) -> Self {
         let autoquit = std::env::var(AUTOQUIT_ENV)
             .ok()
             .and_then(|raw| raw.trim().parse::<u64>().ok())
             .map(Duration::from_millis);
 
-        let saved_window_geometries: HashMap<NodeId, WindowGeometry> =
-            (*state.snapshot().window_geometries).clone();
-        let floating_rects: HashMap<NodeId, egui::Rect> = saved_window_geometries
-            .iter()
-            .map(|(node, geometry)| (*node, geometry_rect(geometry)))
-            .collect();
-        let mut floating_tabs = Vec::new();
-        let mut cascade_rank = HashMap::new();
-        let mut next_cascade = 0u32;
-        let mut collapsed_tabs = HashSet::new();
-        let mut maximized_tab = None;
-        let mut open_initial = |tab: Tab| {
-            floating_tabs.push(tab);
-            cascade_rank.insert(tab, next_cascade);
-            next_cascade = next_cascade.wrapping_add(1);
-        };
-        if saved_window_geometries
-            .values()
-            .any(|geometry| geometry.view.is_some())
-        {
-            // Project saved with the state of the windows (issue #16): it is
-            // restored as is, a detached window coming back floating.
-            let mut restored: Vec<(u32, Tab, stokesforge_session::WindowView)> = Vec::new();
-            for (node, kind) in window_nodes(&state.project_tree()) {
-                let Some(view) = saved_window_geometries.get(&node).and_then(|g| g.view) else {
-                    continue;
-                };
-                if view.mode != stokesforge_session::WindowMode::Closed {
-                    restored.push((view.stack, tab_for_window(node, kind), view));
-                }
-            }
-            restored.sort_by_key(|(stack, tab, _)| (*stack, tab_node(*tab).raw()));
-            for (_, tab, view) in restored {
-                open_initial(tab);
-                if view.collapsed {
-                    collapsed_tabs.insert(tab);
-                }
-                if view.mode == stokesforge_session::WindowMode::Maximized {
-                    maximized_tab = Some(tab);
-                }
-            }
-        } else {
-            if let Some((first_book, _)) = state.books().into_iter().next() {
-                open_initial(Tab::Book(first_book));
-            }
-            if let Some((first_graph, _)) = state.graphs().into_iter().next() {
-                open_initial(Tab::Graph(first_graph));
-            }
-        }
+        let restored = window_detach::RestoredWindows::from_state(&state, from_file);
         // Without a workbook or graph to show, no floating window
         // opens — neither the script console nor the Project Manager has its
         // place here, they are fixed panels.
@@ -599,13 +561,13 @@ impl StokesForgeApp {
             script_open: true,
             script_detached: false,
             active_detached: None,
-            floating_tabs,
-            cascade_rank,
-            next_cascade,
+            floating_tabs: restored.floating_tabs,
+            cascade_rank: restored.cascade_rank,
+            next_cascade: restored.next_cascade,
             focus_next: None,
             graph_views: HashMap::new(),
-            collapsed_tabs,
-            maximized_tab,
+            collapsed_tabs: restored.collapsed_tabs,
+            maximized_tab: restored.maximized_tab,
             layout_entries: HashMap::new(),
             layout_actions: Vec::new(),
             action_origins: Vec::new(),
@@ -623,8 +585,8 @@ impl StokesForgeApp {
             window_sizes: HashMap::new(),
             figure_follow: HashMap::new(),
             workspace_scroll: egui::Vec2::ZERO,
-            saved_window_geometries,
-            floating_rects,
+            saved_window_geometries: restored.saved_window_geometries,
+            floating_rects: restored.floating_rects,
             pm_selection: HashSet::new(),
             pm_last_active_tab: None,
             autoquit,
@@ -1932,6 +1894,7 @@ impl StokesForgeApp {
                 | Action::Save
                 | Action::SaveAs { .. }
                 | Action::ConfirmUnsaved(_)
+                | Action::RecoveryOpen { .. }
         );
         // The history and the gestures that change the rank of the series or the
         // composition of a group (#197, including its deletion: several
@@ -2070,6 +2033,8 @@ impl StokesForgeApp {
         }
         if replaces_project && self.state.snapshot().epoch != epoch_before {
             self.forget_project_views(ctx);
+            // The new project's windows come back as at startup (#513).
+            self.restore_project_windows(true);
         }
         if self.state.blocking_dialog() {
             ctx.request_repaint();
@@ -3538,6 +3503,234 @@ mod tests {
         assert!(app.collapsed_tabs.contains(&Tab::Graph(graph)));
         assert!(app.detached_books.is_empty(), "detaching is not remembered");
         assert_eq!(app.floating_rects[&graph], rect);
+    }
+
+    /// #513: a project with a maximised workbook over a collapsed graph, saved
+    /// to a file; the app keeps running on it.
+    struct SavedWindows {
+        session: Session,
+        app: StokesForgeApp,
+        graph: NodeId,
+        book: NodeId,
+        rect: egui::Rect,
+        path: String,
+        _dir: tempfile::TempDir,
+    }
+
+    fn saved_windows(detach_book: bool) -> SavedWindows {
+        let (session, graph) = plotted_graph();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let book = app.state.books()[0].0;
+        let rect = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(400.0, 300.0));
+        app.remember_window_geometry(Tab::Graph(graph), rect);
+        app.remember_window_geometry(Tab::Book(book), rect.translate(egui::vec2(7.0, 7.0)));
+        app.floating_tabs = vec![Tab::Graph(graph), Tab::Book(book)];
+        app.collapsed_tabs.insert(Tab::Graph(graph));
+        if detach_book {
+            app.detach_tab(Tab::Book(book));
+        } else {
+            app.maximized_tab = Some(Tab::Book(book));
+        }
+        app.sync_window_views();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("windows.stf");
+        app.state.dispatch(Action::SaveAs {
+            path: path.display().to_string(),
+        });
+        SavedWindows {
+            session,
+            app,
+            graph,
+            book,
+            rect,
+            path: path.display().to_string(),
+            _dir: dir,
+        }
+    }
+
+    impl SavedWindows {
+        /// Closes every window of the running app, without telling the session.
+        fn close_everything(&mut self) {
+            self.app.floating_tabs.clear();
+            self.app.collapsed_tabs.clear();
+            self.app.maximized_tab = None;
+            self.app.floating_rects.clear();
+        }
+
+        fn open(&mut self, ctx: &egui::Context) {
+            let path = self.path.clone();
+            self.app.dispatch_action(
+                ctx,
+                Action::OpenProject {
+                    path,
+                    pending_edits: false,
+                },
+            );
+        }
+
+        fn assert_restored(&self) {
+            let (graph, book) = (self.graph, self.book);
+            assert_eq!(
+                self.app.floating_tabs,
+                vec![Tab::Graph(graph), Tab::Book(book)]
+            );
+            assert_eq!(self.app.maximized_tab, Some(Tab::Book(book)));
+            assert!(self.app.collapsed_tabs.contains(&Tab::Graph(graph)));
+            assert!(!self.app.collapsed_tabs.contains(&Tab::Book(book)));
+            assert_eq!(self.app.floating_rects[&graph], self.rect);
+        }
+    }
+
+    /// #513: File > Open in a running app restores the windows as startup
+    /// does. Witness: remove `restore_project_windows` after the forget.
+    #[test]
+    fn opening_a_project_restores_its_windows() {
+        let mut saved = saved_windows(false);
+        saved.close_everything();
+        let ctx = egui::Context::default();
+        saved.open(&ctx);
+        saved.assert_restored();
+        saved.session.shutdown().unwrap();
+    }
+
+    /// #513: the same through the "Save?" confirmation. Witness: restore
+    /// before `forget_project_views`.
+    #[test]
+    fn opening_a_project_over_unsaved_work_restores_its_windows_after_discard() {
+        let mut saved = saved_windows(false);
+        let root = saved.app.state.tree().root();
+        let ctx = egui::Context::default();
+        saved
+            .app
+            .dispatch_action(&ctx, Action::AddFolder { parent: root });
+        saved.close_everything();
+        saved.open(&ctx);
+        assert!(saved.app.state.unsaved_pending().is_some());
+        assert!(saved.app.floating_tabs.is_empty());
+        saved.app.dispatch_action(
+            &ctx,
+            Action::ConfirmUnsaved(stokesforge_app_state::state::UnsavedChoice::Discard),
+        );
+        saved.assert_restored();
+        saved.session.shutdown().unwrap();
+    }
+
+    /// #513: a window detached at save time comes back docked and open.
+    /// Witness: keep the detaching on load.
+    #[test]
+    fn a_window_detached_at_save_time_comes_back_floating() {
+        let mut saved = saved_windows(true);
+        assert!(saved.app.detached_books.contains_key(&saved.book));
+        let ctx = egui::Context::default();
+        saved.open(&ctx);
+        assert!(saved.app.detached_books.is_empty());
+        assert!(saved.app.detached_graphs.is_empty());
+        assert_eq!(
+            saved.app.floating_tabs,
+            vec![Tab::Graph(saved.graph), Tab::Book(saved.book)]
+        );
+        saved.session.shutdown().unwrap();
+    }
+
+    /// #513: a file saved without window states opens no window, on Open and
+    /// at startup; an in-memory project still opens its first workbook and
+    /// first graph. Witness: drop the `from_file` condition (the file then
+    /// opens them), or delete the fallback (the in-memory project opens none).
+    #[test]
+    fn a_file_without_window_states_opens_no_window_but_an_in_memory_project_does() {
+        let (session, graph) = plotted_graph();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.stf");
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let book = app.state.books()[0].0;
+        assert_eq!(
+            app.floating_tabs,
+            vec![Tab::Book(book), Tab::Graph(graph)],
+            "in memory: the first workbook and first graph"
+        );
+        app.state.dispatch(Action::SaveAs {
+            path: path.display().to_string(),
+        });
+        let ctx = egui::Context::default();
+        app.dispatch_action(
+            &ctx,
+            Action::OpenProject {
+                path: path.display().to_string(),
+                pending_edits: false,
+            },
+        );
+        assert!(app.floating_tabs.is_empty(), "Open of a file");
+        // Startup from the same file.
+        let reloaded = Session::spawn(Project::new("Empty").unwrap(), None).unwrap();
+        reloaded.handle().load(&path).unwrap();
+        let state = AppState::new(reloaded.handle(), path.display().to_string()).unwrap();
+        assert!(StokesForgeApp::new_from_file(state)
+            .floating_tabs
+            .is_empty());
+        reloaded.shutdown().unwrap();
+        session.shutdown().unwrap();
+    }
+
+    /// #513: painting after an Open does not turn the project dirty (the
+    /// saved geometries match what is on screen). Witness: the helper leaves
+    /// `saved_window_geometries` empty.
+    #[test]
+    fn painting_after_an_open_leaves_the_project_clean() {
+        use eframe::App as _;
+        let mut saved = saved_windows(false);
+        saved.close_everything();
+        let context = egui::Context::default();
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        theme::install(&context);
+        egui_extras::install_image_loaders(&context);
+        saved.open(&context);
+        let mut frame = eframe::Frame::_new_kittest();
+        for _ in 0..2 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1100.0, 700.0),
+                )),
+                ..Default::default()
+            };
+            let mut output = context.run_ui(input, |ui| saved.app.ui(ui, &mut frame));
+            output.textures_delta.clear();
+        }
+        saved.app.dispatch_action(
+            &context,
+            Action::NewProject {
+                pending_edits: false,
+            },
+        );
+        assert!(saved.app.state.unsaved_pending().is_none());
+        saved.session.shutdown().unwrap();
+    }
+
+    /// #513: Recover Projects > Open restores the copy's windows and forgets
+    /// the old ones. Witness: drop `RecoveryOpen` from `replaces_project`.
+    #[test]
+    fn recovering_a_copy_restores_its_windows() {
+        let saved = saved_windows(false);
+        let recovery = saved._dir.path().join("recovery");
+        let snapshot = saved.session.handle().snapshot().unwrap();
+        let copy = stokesforge_app_state::recovery::write_copy(&recovery, "", &snapshot).unwrap();
+        let session = Session::spawn(Project::new("Empty").unwrap(), None).unwrap();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        assert!(app.floating_tabs.is_empty(), "nothing to lose");
+        app.state.set_recovery_dir(Some(recovery));
+        app.state.scan_recovery();
+        let ctx = egui::Context::default();
+        app.dispatch_action(&ctx, Action::RecoveryOpen(copy));
+        assert_eq!(app.maximized_tab, Some(Tab::Book(saved.book)));
+        assert_eq!(
+            app.floating_tabs,
+            vec![Tab::Graph(saved.graph), Tab::Book(saved.book)]
+        );
+        session.shutdown().unwrap();
+        saved.session.shutdown().unwrap();
     }
 
     /// Ctrl+" opens the import window, on an AZERTY keyboard (the 3 key
