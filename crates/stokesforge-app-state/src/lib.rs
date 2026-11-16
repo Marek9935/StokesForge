@@ -60,6 +60,7 @@ pub mod startup;
 pub mod state;
 pub mod text_format;
 pub mod theme_apply;
+pub mod theme_specimen;
 pub mod tree_drop;
 pub mod user_colors;
 pub mod user_themes;

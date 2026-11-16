@@ -488,6 +488,25 @@ colour and axes colour, each behind its family, and nothing else. Applying to
 N graphs is `Action::ApplyTheme`, one `MacroKind::ApplyTheme` step
 (`docs/commands-and-history.md`).
 
+**Theme specimens (#543, S6 of #514; the tiles come with the picker)**. A tile
+shows what a theme looks like by drawing its **structure and style on reference
+data shipped with the application**: `stokesforge_app_state::theme_specimen`.
+The reference project (`reference_tree`) is built once, lazily and
+deterministically, and is never part of the user's project nor saved: a
+« Wavelength » (nm) column with three Gaussian bands « Molecule A/B/C » (a.u.),
+and a « Reaction time » (h) column with two groups of three « Conversion »
+(mol/L) curves, each with its x' value for a colour bar. Long names and units
+are filled, so axis titles that read column variables look real.
+`specimen(&GraphTheme) -> PlotSpec` keeps the theme's whole structure and style
+and replaces the data layer by layer: 1, 2 or at least 3 ungrouped series give
+1, 2 or 3 curves in the theme's series styles, in order; at most 2 groups of at
+most 3 curves keep their gradient, name and colour bar segment (the segments of
+dropped groups go, and the bar with them when none is left); a layer without
+series gets one curve; axis ranges are automatic; annotations and shapes are
+dropped. A colour-only theme (Light, Dark) is a fresh new graph in its colours
+with three Gaussians. The drawing is cached per theme and scaled whole by
+`stokesforge_render_egui::drawings` (`docs/rendering.md`).
+
 **Color picker** (`crate::color_picker`): every color of the
 window is chosen with a swatch button (`color_field`/`color_button`)
 that opens a pop-up window, **collapsed**: palette, "Auto"
