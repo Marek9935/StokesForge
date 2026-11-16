@@ -26,6 +26,7 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- Series window: the Symbol section is shown only for the plot types that draw symbols (Scatter, Line + Symbol, Line + Error Bars), and a new **Symbol every** setting (fr « Un symbole sur ») draws one symbol every N points, counted by data row, identically on screen, SVG, PDF and PNG (#547). On a group page the section shows when at least one member draws symbols and edits reach only those members. The `.stf` file gains an additive `every` field in the symbol (format version unchanged; an older version that saves such a file again drops it without a message). `pyst.plot()` accepts `symbol_every` (API 0.8).
 - Graph themes can be saved in the project (#540): the `.stf` file gains an additive `project_themes` field (format version unchanged), changed by one undoable command per add, rename, overwrite or delete; a duplicate name in the project is refused, case ignored. An older version that saves such a file again drops the themes without a message. The picker and the Save as theme form follow in the same package (#514).
 - A series added to a graph (dragging columns onto it, Add rows, an analysis
   result plotted on it) that goes beyond the written axis range widens only the

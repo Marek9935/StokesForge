@@ -1375,6 +1375,13 @@ pub(crate) struct SymbolSpecRecord {
     pub(crate) size: f64,
     pub(crate) color: String,
     pub(crate) edge_color: String,
+    /// Additive field: a file without it reads 1 (a symbol on every row).
+    #[serde(default = "default_symbol_every")]
+    pub(crate) every: u32,
+}
+
+fn default_symbol_every() -> u32 {
+    1
 }
 
 /// [`stokesforge_plot::SymbolShape`], flat.

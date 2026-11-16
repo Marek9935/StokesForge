@@ -695,7 +695,7 @@ in `stokesforge-plot` (read before writing, as requested):
   Legend tab of Graph Properties, #510), then the line and symbol of the
   whole group: the first member is edited and what changes is copied into each
   member (`propagate_style`); the colors are not offered (the gradient gives
-  them, #213). The **curve page** has the fields of one series
+  them, #213). The Symbol section shows if at least one member draws symbols, with the values of the first of them, and `propagate_style` copies shape, size and density only to the members that draw symbols (#547). The **curve page** has the fields of one series
   (`series_curve_editor`: name, plot type, Bins or Width, Y axis, error
   columns, Show in legend), its **group** (dropdown None / group name / New
   group, and "Leave Group" which detaches it; group created on simultaneous
@@ -739,7 +739,7 @@ in `stokesforge-plot` (read before writing, as requested):
   series: `SeriesSpec::name`,
   `plot_type` (`PlotType`, all variants except `Unknown`, see
   below), `visible`, `show_in_legend`, `line` (`LineSpec::color`, `style`,
-  `width`) and `symbol` (`SymbolSpec::shape`, `size`, `color`); under the plot
+  `width`) and `symbol` (`SymbolSpec::shape`, `size`, `every`, `color`; the whole Symbol section is drawn only when `plot_type.draws_symbols()`, hidden values kept, and « Symbol every » is greyed with `disabled-symbol-every-no-shape` when the shape is None, #547); under the plot
   type, **Bins** (`histogram_bins`, whole number 1 to `MAX_HISTOGRAM_BINS`,
   written through `BinCount::new`) for a Histogram series only, and **Width
   (X units)** (`bar_width`) for a Bar series only (#359). Width follows S-C4:

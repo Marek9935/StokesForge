@@ -951,6 +951,8 @@ plot-series-line-width = Épaisseur (pt)
 plot-series-symbol-section = Symbole
 plot-series-symbol-shape = Forme
 plot-series-symbol-size = Taille (pt)
+plot-series-symbol-every = Un symbole sur
+    .hint = Ne dessiner un symbole que sur un point sur ce nombre, en commençant par le premier. 1 les dessine tous
 plot-series-symbol-color = Couleur du symbole
 
 # Fenêtre des séries et groupes (#177–#179)
@@ -2100,6 +2102,7 @@ disabled-visibility-empty = Rien à afficher ou masquer
 disabled-axis-blocked = Un calque au-dessus dessine déjà cet axe
 disabled-axis-on-overlay = Indisponible sur un calque superposé
 disabled-axis-own-scale-off = Cochez Échelle propre pour donner à ce calque sa propre échelle
+disabled-symbol-every-no-shape = Choisissez d'abord une forme : sans forme, aucun symbole n'est dessiné
 disabled-axis-side-base-x = L'axe X du calque { $layer } est tracé ici. L'axe X de ce calque est dans l'onglet { $tab }
 disabled-axis-side-base-y = L'axe Y du calque { $layer } est tracé ici. L'axe Y de ce calque est dans l'onglet { $tab }
 disabled-axis-side-mirror = Le calque { $layer } affiche son axe miroir ici. Décochez Afficher l'axe miroir dans son onglet { $tab } pour libérer ce côté

@@ -386,6 +386,7 @@ serves to identify its window, not to title the figure (#103).
 | `axis` | `left` or `right` for the series and its Y options; makes the right axis visible |
 | `x_error`, `y_error` | handles of the error columns; without them, each `y` takes the first X Error / Y Error column to its right, before the next Y (`compose::errors_for`, #360); `None` goes without |
 | `histogram_bins` | integer from 1 to 65,536 |
+| `symbol_every` | positive integer: one symbol every N points, counted by data row (default 1 = every point); only drawn for the types that draw symbols (#547) |
 
 A new graph (no `graph=`) whose `x_title` / `y_title` is not given gets the application's default axis titles (#506, `stokesforge_core::resolve::with_default_axis_titles`): the Typst template that reads the column. A title given, even `''`, wins.
 
@@ -709,7 +710,7 @@ difference with the module actually built, saying which one.
 ### API version (#356)
 
 `pyst.__api_version__` is a string `"MAJOR.MINOR"`, the constant
-`PYST_API_VERSION` of `stokesforge-script/src/surface.rs` (currently `"0.7"`).
+`PYST_API_VERSION` of `stokesforge-script/src/surface.rs` (currently `"0.8"`).
 It is independent of the software version.
 
 - **Alpha, `0.x`**: any change of the list (addition or break) raises the minor
@@ -843,6 +844,7 @@ axis
 x_error
 y_error
 histogram_bins
+symbol_every
 ```
 
 ```pyst-api options set_graph

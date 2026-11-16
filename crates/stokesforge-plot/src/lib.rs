@@ -40,7 +40,7 @@
 //!         ├── plot_type : scatter | line | line+scatter | bar | histogram | error_bar
 //!         ├── group : Option<u32>   (curve group of the panel, #177)
 //!         ├── line : LineSpec      (style, width, color)
-//!         ├── symbol : SymbolSpec  (shape, size, colors)
+//!         ├── symbol : SymbolSpec  (shape, size, colors, every)
 //!         └── axis : SeriesAxis    (left or right, and nothing else)
 //! ```
 //!
@@ -126,7 +126,8 @@ pub use spec::{
     FALLBACK_FRAME, MAX_FIGURE_EXTENT, MAX_FRAME_SIZE, MIN_CELL, MIN_FRAME_SIZE, TRANSPARENT,
 };
 pub use style::{
-    palette_color, parse_hex, LineSpec, LineStyle, SymbolShape, SymbolSpec, DEFAULT_PALETTE,
+    palette_color, parse_hex, LineSpec, LineStyle, SymbolEvery, SymbolShape, SymbolSpec,
+    DEFAULT_PALETTE,
 };
 pub use text_anchor::{TextAnchor, TextTarget};
 pub use text_font::TextFont;

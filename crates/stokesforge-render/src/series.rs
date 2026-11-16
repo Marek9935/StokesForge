@@ -37,6 +37,24 @@ fn known(fields: &stokesforge_core::ColumnFields, texts: &FigureTexts) -> Variab
     }
 }
 
+/// The one place where the symbol density is applied (#547, invariant 5: never
+/// in a backend). Keeps the items whose data row is a multiple of `every`
+/// (the first row carries the first symbol); `rows[i]` is the data row of
+/// `items[i]`.
+pub fn thin_symbols<T: Copy>(
+    items: &[T],
+    rows: &[usize],
+    every: stokesforge_plot::SymbolEvery,
+) -> Vec<T> {
+    let step = every.get() as usize;
+    items
+        .iter()
+        .zip(rows)
+        .filter(|(_, &row)| row % step == 0)
+        .map(|(item, _)| *item)
+        .collect()
+}
+
 /// A point in plot space.
 pub type Point = (f64, f64);
 
@@ -53,6 +71,10 @@ pub enum Geometry {
     Curve {
         /// The points, in column order.
         points: Vec<Point>,
+        /// Data row of each point (same length as `points`): a row dropped
+        /// for a non-finite value leaves a gap, so the symbol thinning
+        /// counts rows, not plotted points (#547).
+        rows: Vec<usize>,
         /// The error-bar whiskers, empty if the series has none.
         whiskers: Vec<Whisker>,
     },
@@ -266,6 +288,7 @@ fn curve_geometry(
     let y_errors = resolved.y_error.as_ref().map(|e| e.as_slice());
 
     let mut points = Vec::with_capacity(ys.len());
+    let mut rows = Vec::with_capacity(ys.len());
     let mut whiskers = Vec::new();
 
     for (index, &raw_y) in ys.iter().enumerate() {
@@ -282,6 +305,7 @@ fn curve_geometry(
             continue;
         };
         points.push((x, y));
+        rows.push(index);
 
         if let Some(half) = x_errors.and_then(|e| e.get(index)).copied() {
             if let Some(whisker) = whisker_along_x(raw_x, half, y, x_scale) {
@@ -295,7 +319,11 @@ fn curve_geometry(
         }
     }
 
-    Geometry::Curve { points, whiskers }
+    Geometry::Curve {
+        points,
+        rows,
+        whiskers,
+    }
 }
 
 /// Horizontal whisker around `center`, at an already transformed ordinate.
@@ -431,7 +459,9 @@ fn histogram_geometry(
 pub fn x_extent(geometry: &Geometry) -> Option<(f64, f64)> {
     match geometry {
         Geometry::Nothing => None,
-        Geometry::Curve { points, whiskers } => extent(
+        Geometry::Curve {
+            points, whiskers, ..
+        } => extent(
             points
                 .iter()
                 .map(|(x, _)| *x)
@@ -452,7 +482,9 @@ pub fn x_extent(geometry: &Geometry) -> Option<(f64, f64)> {
 pub fn y_extent(geometry: &Geometry) -> Option<(f64, f64)> {
     match geometry {
         Geometry::Nothing => None,
-        Geometry::Curve { points, whiskers } => extent(
+        Geometry::Curve {
+            points, whiskers, ..
+        } => extent(
             points
                 .iter()
                 .map(|(_, y)| *y)
