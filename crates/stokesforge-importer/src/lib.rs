@@ -15,6 +15,7 @@
 //! reading, default choice of sheets, plan and column construction.
 
 pub mod origin;
+pub mod planner;
 pub use origin::{
     default_origin_selection, is_origin_bytes, is_origin_file, is_origin_path, make_origin_column,
     origin_book_name, plan_origin_import, read_origin_file, OriginBookPlan, OriginSelection,
@@ -22,6 +23,8 @@ pub use origin::{
 };
 
 use std::path::{Path, PathBuf};
+
+use planner::{plan_tables, PlanColumn, PlanTable};
 
 use stokesforge_core::{
     Column, ColumnMeta, ColumnRole, ColumnType, ImportSource, MixedCell, ValueBlock,
@@ -162,50 +165,23 @@ pub fn plan_import(items: &[ImportItem], layout: FilesLayout) -> Vec<ImportPlan>
             None => base,
         }
     };
-    let kept = |item: usize| -> Vec<usize> {
-        let ImportItem { recipe, table, .. } = &items[item];
-        let count = table.as_ref().map_or(0, |t| t.columns.len());
-        (0..count)
-            .filter(|&c| recipe.column_role(c) != ColumnRoleChoice::Ignore)
-            .collect()
-    };
-    let readable: Vec<usize> = (0..items.len())
-        .filter(|&i| items[i].table.is_ok())
-        .collect();
-    match layout {
-        FilesLayout::SheetPerFile => readable
-            .iter()
-            .map(|&item| ImportPlan {
+    let tables: Vec<PlanTable> = (0..items.len())
+        .map(|item| {
+            let ImportItem { recipe, table, .. } = &items[item];
+            let count = table.as_ref().map_or(0, |t| t.columns.len());
+            PlanTable {
                 name: stem(item),
-                columns: kept(item)
-                    .into_iter()
-                    .map(|column| PlannedColumn { item, column })
+                columns: (0..count)
+                    .map(|c| PlanColumn {
+                        is_x: recipe.column_role(c) == ColumnRoleChoice::X,
+                        kept: recipe.column_role(c) != ColumnRoleChoice::Ignore,
+                    })
                     .collect(),
-                items: vec![item],
-            })
-            .collect(),
-        FilesLayout::SideBySide | FilesLayout::SharedX => {
-            let Some(&first) = readable.first() else {
-                return Vec::new();
-            };
-            let mut columns = Vec::new();
-            for &item in &readable {
-                for column in kept(item) {
-                    // Shared X: the first one's; the following ones bring none.
-                    let is_x = items[item].recipe.column_role(column) == ColumnRoleChoice::X;
-                    if layout == FilesLayout::SharedX && item != first && is_x {
-                        continue;
-                    }
-                    columns.push(PlannedColumn { item, column });
-                }
+                readable: table.is_ok(),
             }
-            vec![ImportPlan {
-                name: stem(first),
-                columns,
-                items: readable,
-            }]
-        }
-    }
+        })
+        .collect();
+    plan_tables(&tables, layout)
 }
 
 /// The values of a planned column, as a block ready to write: numbers, or
