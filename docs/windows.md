@@ -83,7 +83,7 @@ mandatory, S-F10).
 | **Confirmation** (S-F3 to S-F5) | `modal_confirm` | `Confirm` | `[message] [Cancel] [verbe]` | only what Ctrl+Z cannot recover |
 | **Save?** | `modal_save_changes` | `SaveChanges` | `[Discard Changes] [message] [Cancel] [Save]` | unsaved project |
 | **Serious failure** (S-M8) | `modal_alert` | `Alert` | `[action] [message] [Close]` | failure with a possible action |
-| **Content window** (non-modal) | `window_chrome::show_floating_window` | none | none | workbook, graph, matrix, note |
+| **Content window** (non-modal) | `window_chrome::show_floating_window` | none | none | workbook, graph, matrix, note, Script Settings |
 
 The first five building block rows all go through the same body
 `modal_frame` (same frame, same title bar, same blocking of the rest of
@@ -152,18 +152,36 @@ The alerts (failure, low R², lost session) share the identifier
 
 ## Content windows (non-modal)
 
-Workbook, graph, matrix, note: tabs of the workspace, painted as
+Workbook, graph, matrix, note, Script Settings: tabs of the workspace, painted as
 confined floating windows (`show_floating_window`). Only the workbook and the graph
 detach into an OS window (`window_detach.rs`; `Tab::is_detachable`, the single
-source of the header icon and of the guard of `detach_tab`, #473); a note and a
-matrix stay in the main window. The header has an icon header (collapse, detach,
+source of the header icon and of the guard of `detach_tab`, #473); a note, a
+matrix and a Script Settings object stay in the main window. The header has an icon header (collapse, detach,
 maximize, close; `HeaderPlacement::Floating` / `Detached`). No footer, no
 imposed initial focus. Default sizes (`window_placement.rs`): workbook
-373 x 420 (two thirds of 560), graph 560 x 460, matrix and note 560 x 420;
+373 x 420 (two thirds of 560), graph 560 x 460, matrix, note and Script Settings 560 x 420;
 minimum 220 x 140. Opening: `open_tab` (`window_stack.rs`), from the Project Manager; a
 second opening on the same entry brings the window to the front without
 duplicating it. Opening a project (startup, File > Open, Recover Projects) restores
 its saved windows (#513). Each new window is offset in a cascade.
+
+**Script Settings (#548).** The twin of the note, for the TOML a script reads
+(`app/settings_contents.rs`, opened with a double-click or Enter in the Project
+Manager, or created by File ▸ New ▸ Script Settings and File ▸ Import ▸ Script
+Settings…, which open it). Two tabs on top (`tab_strip`, `TabStripSide::Top`):
+**Form**, one scrolling page with fixed bold section headings (S-L5: never
+collapsible), a label column and one field per kind of value, and **Text**, the
+raw text. Form fields apply on Enter, Tab or leaving the field and Esc cancels
+(S-N3); a typed number out of its bounds is brought back to the bound, orange for 2 s
+(S-N7), an unreadable one is refused, red, with the old value back (S-N6); a
+stored value outside its hint is orange with a bubble and never rewritten
+(S-R8); a list has a `×` per element and a `+` (a copy of the last one, greyed
+with a reason when the list is empty). The Text tab applies when the editor
+loses focus (`SettingsEdit`, committed by a save like a note) and Esc abandons;
+a text that is not exact TOML is kept and saved, its line shows in red under the
+editor, and the Form tab freezes on the last readable form (greyed, a red banner
+names the line). Parsed once per text (`AppState::settings_view`), never per
+frame. One validation is one history entry.
 
 **Graph in the Page Layout Mode (#426).** The same window, same code
 (`graph_view_contents`), with two ruler strips (`RULER_WIDTH`) around the figure and
@@ -245,7 +263,7 @@ exist), and #472 removed it: no `AppHost`, no host rule, no veil.
 
 The detached graph, the detached workbook and the three detached panels read
 exactly three keys, Ctrl+Z, Ctrl+Y (with Ctrl+Shift+Z) and Ctrl+S, through
-`shortcuts::read_detached_history_and_save`. The note and the matrix, which
+`shortcuts::read_detached_history_and_save`. The note, the matrix and Script Settings, which
 #473 keeps in the main window, never detach. Everything else global (Ctrl+N, Ctrl+O, Ctrl+E,
 Ctrl+", Ctrl+Shift+S, Ctrl+Q) stays in the main window; Help › Keyboard Shortcuts
 and the manual say so.

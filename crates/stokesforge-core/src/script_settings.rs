@@ -170,6 +170,22 @@ impl Scalar {
         }
     }
 
+    /// A text read as a date or time of `kind` (the form's date field): `None`
+    /// for another kind, or for a text that is not a valid date of that kind
+    /// (a time where a date is stored, `2026-13-40`). The text is trimmed.
+    pub fn date_of_kind(kind: ScalarKind, text: &str) -> Option<Scalar> {
+        let text = text.trim().to_string();
+        let scalar = match kind {
+            ScalarKind::OffsetDateTime => Scalar::OffsetDateTime(text),
+            ScalarKind::LocalDateTime => Scalar::LocalDateTime(text),
+            ScalarKind::LocalDate => Scalar::LocalDate(text),
+            ScalarKind::LocalTime => Scalar::LocalTime(text),
+            _ => return None,
+        };
+        scalar.to_value()?;
+        Some(scalar)
+    }
+
     /// The TOML value for this scalar; a date that does not read back as its
     /// own kind is `None`.
     fn to_value(&self) -> Option<Value> {
@@ -229,6 +245,14 @@ pub struct Hint {
     pub min: Option<f64>,
     /// Inclusive upper bound.
     pub max: Option<f64>,
+}
+
+impl Hint {
+    /// Whether `value` is outside this hint's choices or bounds (one element of
+    /// a list, for the form's per-field orange frame).
+    pub fn rejects(&self, value: &Scalar) -> bool {
+        scalar_out_of_hint(value, self)
+    }
 }
 
 /// One key of a section.

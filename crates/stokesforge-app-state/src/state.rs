@@ -56,6 +56,7 @@ use stokesforge_core::compose::{
 };
 use stokesforge_core::node::NodeKind;
 use stokesforge_core::number_format::{format_exact, format_grid};
+use stokesforge_core::script_settings::{self, ParseError, Scalar, Seg, SettingsDoc};
 use stokesforge_core::tsv;
 use stokesforge_core::{
     same_name_ignoring_case, Cell, Column, ColumnMeta, ColumnRole, ColumnType, CopyInsertion,
@@ -434,6 +435,41 @@ pub enum Action {
         note: NodeId,
         /// New text.
         text: String,
+    },
+    /// Adds a Script Settings object with the commented example text in the
+    /// folder of the Project Manager selection (#548,
+    /// [`AppState::creation_folder`]); its window opens.
+    AddScriptSettings,
+    /// Imports a `.toml` file as a Script Settings object (#548). A text that
+    /// is not exact TOML creates nothing and says why, with the line.
+    ImportScriptSettings {
+        /// The `.toml` file.
+        path: PathBuf,
+    },
+    /// Writes the stored text of a Script Settings object to `path`, byte for
+    /// byte (#548).
+    ExportScriptSettings {
+        /// The Script Settings object.
+        settings: NodeId,
+        /// Destination file.
+        path: PathBuf,
+    },
+    /// Replaces the whole text of a Script Settings object (Text tab, leaving
+    /// the editor): one history entry, the text kept even when it is not
+    /// valid TOML (#548).
+    SetScriptSettingsText {
+        /// Target object.
+        settings: NodeId,
+        /// New text.
+        text: String,
+    },
+    /// Changes one value of the form (#548): the text is rewritten without
+    /// touching any other byte, one history entry.
+    ChangeScriptSettings {
+        /// Target object.
+        settings: NodeId,
+        /// What changes.
+        change: SettingsChange,
     },
     /// Runs the script currently in the input area
     /// ([`AppState::script_source`]).
@@ -2400,6 +2436,20 @@ pub fn note_text_in(tree: &Tree, note: NodeId) -> Option<String> {
     }
 }
 
+/// Stored TOML text of a Script Settings object (#548), or `None` if `settings`
+/// is not one.
+pub fn script_settings_text_in(tree: &Tree, settings: NodeId) -> Option<String> {
+    match tree.node(settings)?.kind() {
+        NodeKind::ScriptSettings { text, .. } => Some(text.clone()),
+        _ => None,
+    }
+}
+
+/// The commented example a new Script Settings object starts with (#548): a
+/// text value, a bounded number, a choice list, a list and a table of
+/// values, so that the form shows every kind of field at once.
+pub const SCRIPT_SETTINGS_EXAMPLE: &str = include_str!("script_settings_example.toml");
+
 /// Name of a node, or `"{missing} {id} (deleted)"` if it no longer exists in
 /// `tree` — counterpart of `stokesforge_app::app::tab::node_title`, factored over a `&Tree`
 /// for the same reason as [`cell_text_in`].
@@ -2982,6 +3032,70 @@ pub struct NoteEdit {
     pub buffer: String,
 }
 
+/// Input in progress in the Text tab of a Script Settings window (#548): the
+/// twin of [`NoteEdit`]. The buffer reaches the model only when the editor
+/// loses focus (or a save commits it), never on a keystroke: one entry, one
+/// history step.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SettingsEdit {
+    /// Script Settings being edited.
+    pub settings: NodeId,
+    /// Text typed so far.
+    pub buffer: String,
+}
+
+/// One value of the form of a Script Settings window that changes (#548). The
+/// path comes from the parsed document, so it designates a key that exists.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SettingsChange {
+    /// A scalar key gets `value`.
+    Scalar {
+        /// The key.
+        path: Vec<Seg>,
+        /// New value, of the kind of the stored one.
+        value: Scalar,
+    },
+    /// One element of a list gets `value`.
+    Element {
+        /// The list key.
+        path: Vec<Seg>,
+        /// 0-based index of the element.
+        index: usize,
+        /// New value.
+        value: Scalar,
+    },
+    /// A list gets a copy of its last element.
+    Append {
+        /// The list key.
+        path: Vec<Seg>,
+    },
+    /// A list loses one element.
+    Remove {
+        /// The list key.
+        path: Vec<Seg>,
+        /// 0-based index of the element.
+        index: usize,
+    },
+}
+
+/// The readable state of the text of a Script Settings object, for its form
+/// (#548): parsed once per text, not on every frame.
+#[derive(Clone)]
+pub struct SettingsView {
+    /// What the form shows: the current document when the text is exact TOML,
+    /// otherwise the last readable one (frozen), `None` when there never was one.
+    pub doc: Option<Arc<SettingsDoc>>,
+    /// Why the current text is refused, with its line; the form is frozen then.
+    pub error: Option<ParseError>,
+}
+
+/// Cache entry of [`AppState::settings_view`].
+struct SettingsParsed {
+    text: String,
+    parsed: Result<Arc<SettingsDoc>, ParseError>,
+    last_readable: Option<Arc<SettingsDoc>>,
+}
+
 /// Kind of active tab, as seen by [`AppState`] — a minimal mirror of the
 /// private `Tab` enum of `stokesforge_app::app`, just enough for the
 /// question "must the "Graph" menu be shown?"
@@ -3001,6 +3115,8 @@ pub enum ActiveTabKind {
     Matrix(NodeId),
     /// A note.
     Note(NodeId),
+    /// A Script Settings object (#548).
+    ScriptSettings(NodeId),
 }
 
 /// The selected graph, from the kind of the active tab — `None` except
@@ -3295,6 +3411,8 @@ pub struct ImportFolderChoice {
 pub struct DropPlan {
     /// `.stf` projects: each opens in a new StokesForge window.
     pub projects: Vec<PathBuf>,
+    /// `.toml` files: each becomes a Script Settings object (#548).
+    pub settings: Vec<PathBuf>,
     /// Data files to import.
     pub data: Vec<PathBuf>,
     /// Destination of the data files.
@@ -3306,14 +3424,21 @@ pub struct DropPlan {
 /// else a shared new workbook), the `.stf` extension makes a
 /// file a project to open rather than data to import.
 pub fn file_drop_plan(paths: &[PathBuf], target_book: Option<NodeId>) -> DropPlan {
-    let is_project = |path: &PathBuf| {
+    let has_extension = |path: &PathBuf, wanted: &str| {
         path.extension()
             .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("stf"))
+            .is_some_and(|ext| ext.eq_ignore_ascii_case(wanted))
     };
+    let is_project = |path: &PathBuf| has_extension(path, "stf");
+    let is_settings = |path: &PathBuf| has_extension(path, "toml");
     DropPlan {
         projects: paths.iter().filter(|p| is_project(p)).cloned().collect(),
-        data: paths.iter().filter(|p| !is_project(p)).cloned().collect(),
+        settings: paths.iter().filter(|p| is_settings(p)).cloned().collect(),
+        data: paths
+            .iter()
+            .filter(|p| !is_project(p) && !is_settings(p))
+            .cloned()
+            .collect(),
         destination: target_book.map_or(
             ImportDestination::NewBookForAll,
             ImportDestination::ActiveBook,
@@ -3513,6 +3638,8 @@ pub enum WindowKind {
     Matrix,
     /// Note — `Tab::Note`.
     Note,
+    /// Script Settings — `Tab::ScriptSettings` (#548).
+    ScriptSettings,
 }
 
 /// A node as the Project Manager panel shows it: an expandable
@@ -3678,6 +3805,12 @@ pub struct AppState {
     editing: Option<CellEdit>,
     /// Note entry in progress, if any (see [`NoteEdit`]).
     note_editing: Option<NoteEdit>,
+    /// Script Settings text entry in progress, if any (see [`SettingsEdit`]).
+    settings_editing: Option<SettingsEdit>,
+    /// Parsed text of the Script Settings objects shown (see [`SettingsView`]).
+    settings_cache: std::collections::HashMap<NodeId, SettingsParsed>,
+    /// Script Settings objects created by a gesture, to open as windows.
+    settings_to_open: Vec<NodeId>,
     /// Current draft of a graph's properties window, if there
     /// is one (see [`PlotEdit`]).
     plot_edit: Option<PlotEdit>,
@@ -3966,6 +4099,9 @@ impl AppState {
             dialog_error: None,
             editing: None,
             note_editing: None,
+            settings_editing: None,
+            settings_cache: std::collections::HashMap::new(),
+            settings_to_open: Vec::new(),
             plot_edit: None,
             plot_settings: None,
             plot_macro_open: false,
@@ -5925,6 +6061,223 @@ impl AppState {
         });
     }
 
+    // -- Script Settings (#548) --
+
+    /// Stored text of a Script Settings object, or `None` if `settings` is not
+    /// (or no longer) one.
+    pub fn script_settings_text(&self, settings: NodeId) -> Option<String> {
+        script_settings_text_in(&self.snapshot.tree, settings)
+    }
+
+    /// Text entry in progress in a Script Settings window, if there is one.
+    pub fn settings_editing(&self) -> Option<&SettingsEdit> {
+        self.settings_editing.as_ref()
+    }
+
+    /// Text entry in progress, mutable.
+    pub fn settings_editing_mut(&mut self) -> Option<&mut SettingsEdit> {
+        self.settings_editing.as_mut()
+    }
+
+    /// Opens the text entry of a Script Settings object, buffer initialized to
+    /// its stored text.
+    pub fn begin_settings_edit(&mut self, settings: NodeId) {
+        let buffer = self.script_settings_text(settings).unwrap_or_default();
+        self.settings_editing = Some(SettingsEdit { settings, buffer });
+    }
+
+    /// Abandons the text entry in progress without writing anything.
+    pub fn cancel_settings_edit(&mut self) {
+        self.settings_editing = None;
+    }
+
+    /// Commits the text entry in progress (equivalent to
+    /// [`Action::SetScriptSettingsText`] on the buffer). No effect if there is
+    /// no entry open.
+    pub fn commit_settings_edit(&mut self) {
+        self.gesture(Self::commit_settings_edit_in_gesture);
+    }
+
+    fn commit_settings_edit_in_gesture(&mut self) {
+        let Some(edit) = self.settings_editing.take() else {
+            return;
+        };
+        self.dispatch(Action::SetScriptSettingsText {
+            settings: edit.settings,
+            text: edit.buffer,
+        });
+    }
+
+    /// What the form of a Script Settings window shows, parsed again only when
+    /// the stored text changed (not on every frame). `None` if `settings` is
+    /// not a Script Settings object.
+    pub fn settings_view(&mut self, settings: NodeId) -> Option<SettingsView> {
+        let text = self.script_settings_text(settings)?;
+        let fresh = self
+            .settings_cache
+            .get(&settings)
+            .is_none_or(|cached| cached.text != text);
+        if fresh {
+            let parsed = script_settings::parse(&text).map(Arc::new);
+            let last_readable = match &parsed {
+                Ok(doc) => Some(doc.clone()),
+                Err(_) => self
+                    .settings_cache
+                    .get(&settings)
+                    .and_then(|cached| cached.last_readable.clone()),
+            };
+            self.settings_cache.insert(
+                settings,
+                SettingsParsed {
+                    text,
+                    parsed,
+                    last_readable,
+                },
+            );
+        }
+        let cached = self.settings_cache.get(&settings)?;
+        Some(match &cached.parsed {
+            Ok(doc) => SettingsView {
+                doc: Some(doc.clone()),
+                error: None,
+            },
+            Err(error) => SettingsView {
+                doc: cached.last_readable.clone(),
+                error: Some(error.clone()),
+            },
+        })
+    }
+
+    /// The Script Settings objects a gesture created since the last call: the
+    /// window layer opens a window on each.
+    pub fn take_settings_to_open(&mut self) -> Vec<NodeId> {
+        std::mem::take(&mut self.settings_to_open)
+    }
+
+    fn add_script_settings(&mut self) {
+        let parent = self.creation_folder();
+        self.create_script_settings(parent, None, SCRIPT_SETTINGS_EXAMPLE.to_string());
+    }
+
+    /// Adds the object and queues its window. The new child is found by
+    /// comparing the children of `parent` before and after: the command
+    /// answers nothing else.
+    fn create_script_settings(&mut self, parent: NodeId, name: Option<String>, text: String) {
+        let before: Vec<NodeId> = self.tree().children(parent).unwrap_or_default().to_vec();
+        self.execute(Command::AddScriptSettings { parent, name, text });
+        let created = self
+            .tree()
+            .children(parent)
+            .unwrap_or_default()
+            .iter()
+            .copied()
+            .find(|id| !before.contains(id));
+        if let Some(id) = created {
+            self.settings_to_open.push(id);
+        }
+    }
+
+    /// Reads a `.toml` file into a new Script Settings object. A file that is
+    /// not exact TOML creates nothing: the message says the line and the
+    /// parser's reason, nothing is repaired.
+    fn import_script_settings(&mut self, path: &Path) {
+        let shown = path.display().to_string();
+        let bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                self.fail(tr!(
+                    "error-settings-import-read",
+                    path = shown,
+                    cause = errors::io::error_message(&err)
+                ));
+                return;
+            }
+        };
+        let Ok(text) = String::from_utf8(bytes) else {
+            self.fail(tr!("error-settings-import-not-text", path = shown));
+            return;
+        };
+        if let Err(error) = script_settings::parse(&text) {
+            self.fail(tr!(
+                "error-settings-import-invalid",
+                path = shown,
+                message = errors::settings::parse_error_message(&error)
+            ));
+            return;
+        }
+        let parent = self.creation_folder();
+        // The file name, when it is a free valid name; otherwise "SettingsN".
+        let name = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .filter(|stem| stokesforge_core::check_name(stem).is_ok())
+            .filter(|stem| {
+                !self
+                    .tree()
+                    .children(parent)
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|id| self.tree().node(*id))
+                    .any(|node| same_name_ignoring_case(node.name(), stem))
+            })
+            .map(str::to_string);
+        self.create_script_settings(parent, name, text);
+    }
+
+    /// Writes the stored text, byte for byte (never a re-serialisation).
+    fn export_script_settings(&mut self, settings: NodeId, path: &Path) {
+        let Some(text) = self.script_settings_text(settings) else {
+            return;
+        };
+        match std::fs::write(path, text.as_bytes()) {
+            Ok(()) => self.notice(tr!(
+                "status-settings-exported",
+                path = path.display().to_string()
+            )),
+            Err(err) => self.fail(tr!(
+                "error-export-write",
+                path = path.display().to_string(),
+                detail = errors::io::error_message(&err)
+            )),
+        }
+    }
+
+    /// Replaces the whole text, unless it is already exactly that (no history
+    /// entry for nothing). A text that is not valid TOML is **kept**: the
+    /// window says why and freezes its form.
+    fn set_script_settings_text(&mut self, settings: NodeId, text: String) {
+        if self.script_settings_text(settings).as_ref() == Some(&text) {
+            return;
+        }
+        if text.len() > script_settings::MAX_TEXT_BYTES {
+            self.fail(tr!("error-settings-too-large"));
+            return;
+        }
+        self.execute(Command::SetScriptSettingsText { id: settings, text });
+    }
+
+    /// One value of the form: the new full text comes from core (every other
+    /// byte untouched), then one command, one history entry.
+    fn change_script_settings(&mut self, settings: NodeId, change: &SettingsChange) {
+        let Some(view) = self.settings_view(settings) else {
+            return;
+        };
+        // A frozen form is not editable.
+        let (Some(doc), None) = (view.doc, view.error) else {
+            return;
+        };
+        let edited = match change {
+            SettingsChange::Scalar { path, value } => doc.set_scalar(path, value),
+            SettingsChange::Element { path, index, value } => doc.set_element(path, *index, value),
+            SettingsChange::Append { path } => doc.append_element(path),
+            SettingsChange::Remove { path, index } => doc.remove_element(path, *index),
+        };
+        match edited {
+            Ok(text) => self.set_script_settings_text(settings, text),
+            Err(error) => self.fail(errors::settings::error_message(&error)),
+        }
+    }
+
     /// Current draft of a graph's properties window, if there
     /// is one.
     pub fn plot_edit(&self) -> Option<&PlotEdit> {
@@ -6230,9 +6583,11 @@ impl AppState {
                     // rewritten as is at save time, but the Project
                     // Manager has nothing to show for it.
                     NodeKind::Worksheet { .. } | NodeKind::Column(_) | NodeKind::Unknown(_) => None,
-                    // #548 L3: Script Settings has no tree entry or window
-                    // yet (lot L1 is the model only).
-                    NodeKind::ScriptSettings { .. } => None,
+                    NodeKind::ScriptSettings { .. } => Some(ProjectTreeNode::Window {
+                        id: *id,
+                        name,
+                        kind: WindowKind::ScriptSettings,
+                    }),
                 }
             })
             .collect()
@@ -6556,6 +6911,17 @@ impl AppState {
             Action::InsertRows { sheet, at, count } => self.rows(sheet, at, count, true),
             Action::DeleteRows { sheet, at, count } => self.rows(sheet, at, count, false),
             Action::SetNoteText { note, text } => self.set_note_text(note, text),
+            Action::AddScriptSettings => self.add_script_settings(),
+            Action::ImportScriptSettings { path } => self.import_script_settings(&path),
+            Action::ExportScriptSettings { settings, path } => {
+                self.export_script_settings(settings, &path);
+            }
+            Action::SetScriptSettingsText { settings, text } => {
+                self.set_script_settings_text(settings, text);
+            }
+            Action::ChangeScriptSettings { settings, change } => {
+                self.change_script_settings(settings, &change);
+            }
             Action::RunScript => self.run_script(),
             Action::InterruptScript => self.interrupt_script(),
             Action::CommitCellAndAdvance {
@@ -7677,6 +8043,9 @@ impl AppState {
         }
         let plan = file_drop_plan(&paths, target_book);
         self.projects_to_open.extend(plan.projects);
+        for path in &plan.settings {
+            self.import_script_settings(path);
+        }
         // The Origin chooser is open (#490): it takes Origin projects only.
         if self.origin_import_open() {
             let (origin, others): (Vec<PathBuf>, Vec<PathBuf>) = plan
@@ -8538,6 +8907,20 @@ impl AppState {
                 self.note_editing = None;
             }
         }
+        if let Some(edit) = &self.settings_editing {
+            if !matches!(
+                tree.node(edit.settings).map(Node::kind),
+                Some(NodeKind::ScriptSettings { .. })
+            ) {
+                self.settings_editing = None;
+            }
+        }
+        self.settings_cache.retain(|id, _| {
+            matches!(
+                tree.node(*id).map(Node::kind),
+                Some(NodeKind::ScriptSettings { .. })
+            )
+        });
         // A selection whose columns no longer exist (sheet or columns
         // deleted) makes no sense any more; see `Selection::columns`, which
         // returns an empty list in that case. A selected header field, on the
@@ -9086,6 +9469,10 @@ impl AppState {
         }
         if self.note_editing.is_some() {
             self.commit_note_edit();
+            committed = true;
+        }
+        if self.settings_editing.is_some() {
+            self.commit_settings_edit();
             committed = true;
         }
         committed
@@ -9872,6 +10259,7 @@ impl AppState {
             || pending_edits
             || self.editing.is_some()
             || self.note_editing.is_some()
+            || self.settings_editing.is_some()
             || self.header_editing.is_some()
     }
 
@@ -9889,6 +10277,7 @@ impl AppState {
                 self.editing = None;
                 self.header_editing = None;
                 self.note_editing = None;
+                self.settings_editing = None;
                 self.plot_edit = None;
                 self.plot_settings = None;
                 self.metadata_view = None;

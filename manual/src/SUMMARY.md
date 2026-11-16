@@ -20,6 +20,7 @@
 
 - [The script console](scripting/console.md)
 - [The pyst API](scripting/api.md)
+- [Script Settings](scripting/settings.md)
 
 # Reference
 

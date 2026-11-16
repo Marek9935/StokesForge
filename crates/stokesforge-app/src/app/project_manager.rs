@@ -47,6 +47,7 @@ use std::collections::HashSet;
 use eframe::egui;
 
 use crate::icons::{icon_image, Icon, IconRole};
+use stokesforge_app_state::file_picker::PickRequest;
 use stokesforge_app_state::state::{Action, ProjectTreeNode, WindowKind};
 use stokesforge_app_state::tr;
 use stokesforge_core::NodeId;
@@ -1229,6 +1230,7 @@ fn project_tree_node_ui(
                 WindowKind::Graph => (Icon::Graph, IconRole::Graph),
                 WindowKind::Matrix => (Icon::Matrix, IconRole::Matrix),
                 WindowKind::Note => (Icon::Note, IconRole::Note),
+                WindowKind::ScriptSettings => (Icon::ScriptSettings, IconRole::Neutral),
             };
             let tab = tab_for_window(*id, *kind);
             let entry = PmEntry::Window(tab);
@@ -1289,6 +1291,21 @@ fn project_tree_node_ui(
                                 interaction.close_requests.push(*tab);
                             }
                         }
+                        ui.close();
+                    }
+                    // Script Settings (#548): written as a `.toml` file, exactly as stored.
+                    if *kind == WindowKind::ScriptSettings
+                        && ui
+                            .button(tr!("action-export-script-settings"))
+                            .on_hover_text(tr!("action-export-script-settings", "hint"))
+                            .clicked()
+                    {
+                        interaction.actions.push(Action::PickFile(
+                            PickRequest::ExportScriptSettings {
+                                settings: *id,
+                                file_name: format!("{name}.toml"),
+                            },
+                        ));
                         ui.close();
                     }
                 });

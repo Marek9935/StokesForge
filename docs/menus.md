@@ -82,6 +82,19 @@ An empty section disappears with its separators.
 - **Detached windows**: same paints, same targets; the actions
   go up to the root like the others.
 
+## Script Settings (#548)
+
+- **File ▸ New ▸ Script Settings** adds the object in the creation folder (like
+  Add Workbook) with a commented example, and opens its window.
+- **File ▸ Import ▸ Script Settings…** reads a `.toml` file (a file that is not
+  exact TOML creates nothing and the status bar says the line). Dropping a `.toml`
+  file on the main window does the same.
+- **Right-click on the object in the Project Manager**: Open · Close · Export…
+  (writes the stored text, byte for byte) ─ Cut · Copy · Paste ─ Rename ·
+  Duplicate ─ Delete. *Export…* sits with Open and Close, as in the approved
+  mockup, rather than after Delete: it is the one entry specific to this
+  object.
+
 ## Tree by surface
 
 ### Graph (greyed header = target)

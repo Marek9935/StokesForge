@@ -112,6 +112,8 @@ pub enum Icon {
     Grip,
     /// A check mark: what is sure (Import window, #488).
     Check,
+    /// A Script Settings object (#548): a gear.
+    ScriptSettings,
 }
 
 macro_rules! svg {
@@ -368,6 +370,11 @@ const VARIANTS: &[(Icon, IconRole, Svg)] = &[
         svg!("dots-six-vertical.neutral.svg"),
     ),
     (Icon::Check, IconRole::Neutral, svg!("check.neutral.svg")),
+    (
+        Icon::ScriptSettings,
+        IconRole::Neutral,
+        svg!("gear-six.neutral.svg"),
+    ),
 ];
 
 /// Unreachable as long as every icon has a variant (test `the_variants_table_…`).

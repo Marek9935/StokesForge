@@ -34,6 +34,9 @@ pub(super) enum Tab {
     Matrix(NodeId),
     /// An open note, identified by its node.
     Note(NodeId),
+    /// An open Script Settings object, identified by its node (#548). Like
+    /// the note, it never detaches.
+    ScriptSettings(NodeId),
 }
 
 impl Tab {
@@ -53,6 +56,7 @@ pub(super) fn tab_for_window(id: NodeId, kind: WindowKind) -> Tab {
         WindowKind::Graph => Tab::Graph(id),
         WindowKind::Matrix => Tab::Matrix(id),
         WindowKind::Note => Tab::Note(id),
+        WindowKind::ScriptSettings => Tab::ScriptSettings(id),
     }
 }
 
@@ -60,7 +64,11 @@ pub(super) fn tab_for_window(id: NodeId, kind: WindowKind) -> Tab {
 /// node.
 pub(super) fn tab_node(tab: Tab) -> NodeId {
     match tab {
-        Tab::Book(id) | Tab::Graph(id) | Tab::Matrix(id) | Tab::Note(id) => id,
+        Tab::Book(id)
+        | Tab::Graph(id)
+        | Tab::Matrix(id)
+        | Tab::Note(id)
+        | Tab::ScriptSettings(id) => id,
     }
 }
 
@@ -82,6 +90,7 @@ pub(super) fn tab_title_from_tree(tree: &Tree, tab: Tab) -> String {
         Tab::Graph(id) => node_title_in(tree, id, || tr!("window-kind-graph")),
         Tab::Matrix(id) => node_title_in(tree, id, || tr!("window-kind-matrix")),
         Tab::Note(id) => node_title_in(tree, id, || tr!("window-kind-note")),
+        Tab::ScriptSettings(id) => node_title_in(tree, id, || tr!("window-kind-script-settings")),
     }
 }
 
@@ -95,6 +104,7 @@ pub(super) fn active_tab_kind(tab: Option<Tab>) -> ActiveTabKind {
         Some(Tab::Graph(id)) => ActiveTabKind::Graph(id),
         Some(Tab::Matrix(id)) => ActiveTabKind::Matrix(id),
         Some(Tab::Note(id)) => ActiveTabKind::Note(id),
+        Some(Tab::ScriptSettings(id)) => ActiveTabKind::ScriptSettings(id),
         None => ActiveTabKind::None,
     }
 }
@@ -106,11 +116,12 @@ mod tests {
     use stokesforge_plot::PlotSpec;
     use stokesforge_session::Session;
 
-    const KINDS: [WindowKind; 4] = [
+    const KINDS: [WindowKind; 5] = [
         WindowKind::Book,
         WindowKind::Graph,
         WindowKind::Matrix,
         WindowKind::Note,
+        WindowKind::ScriptSettings,
     ];
 
     /// Each window kind opens in its own tab, which does designate the node
@@ -126,7 +137,8 @@ mod tests {
                 Tab::Book(id),
                 Tab::Graph(id),
                 Tab::Matrix(id),
-                Tab::Note(id)
+                Tab::Note(id),
+                Tab::ScriptSettings(id)
             ]
         );
         for tab in &tabs {
@@ -141,12 +153,21 @@ mod tests {
         );
     }
 
+    /// Script Settings stays in the main window, like the note (#473).
+    #[test]
+    fn script_settings_never_detaches() {
+        let id = NodeId::from_raw(7);
+        assert!(!Tab::ScriptSettings(id).is_detachable());
+        assert!(!Tab::Note(id).is_detachable());
+        assert!(Tab::Book(id).is_detachable());
+    }
+
     /// A project holding one window of each kind, plus one of each kind
     /// added then removed from the tree: the tabs left open on the latter
     /// designate a vanished node. Returns the live state (and its session,
-    /// to keep alive), the four present tabs and the four vanished ones, in
-    /// the order Book, Graph, Matrix, Note.
-    fn fixture() -> (Session, AppState, [Tab; 4], [Tab; 4]) {
+    /// to keep alive), the five present tabs and the five vanished ones, in
+    /// the order Book, Graph, Matrix, Note, Script Settings.
+    fn fixture() -> (Session, AppState, [Tab; 5], [Tab; 5]) {
         let mut project = Project::new("Titles").unwrap();
         let root = project.root();
         let windows = |project: &mut Project, suffix: &str| {
@@ -171,6 +192,11 @@ mod tests {
                         .add_note(root, Some(&format!("Journal{suffix}")), "")
                         .unwrap(),
                 ),
+                Tab::ScriptSettings(
+                    project
+                        .add_script_settings(root, Some(&format!("Config{suffix}")), "")
+                        .unwrap(),
+                ),
             ]
         };
         let present = windows(&mut project, "");
@@ -189,7 +215,7 @@ mod tests {
     #[test]
     fn a_tab_title_is_the_name_of_its_node() {
         let (_session, state, present, _) = fixture();
-        let expected_names = ["Book", "Curve", "Map", "Journal"];
+        let expected_names = ["Book", "Curve", "Map", "Journal", "Config"];
         for (tab, expected) in present.into_iter().zip(expected_names) {
             assert_eq!(tab_title(&state, tab), expected, "{tab:?}");
             assert_eq!(tab_title_from_tree(state.tree(), tab), expected, "{tab:?}");
@@ -198,7 +224,7 @@ mod tests {
 
     /// Invariant 10: a tab left open on a vanished node does not panic
     /// and does not go blank; it says the kind of the lost window, its
-    /// identifier and that it was deleted. The witness: the four titles
+    /// identifier and that it was deleted. The witness: the titles
     /// are distinct, each naming **its** kind — a kind mistaken for another
     /// would show.
     #[test]
@@ -209,6 +235,7 @@ mod tests {
             tr!("window-kind-graph"),
             tr!("window-kind-matrix"),
             tr!("window-kind-note"),
+            tr!("window-kind-script-settings"),
         ];
         let mut titles = Vec::new();
         for (tab, kind) in vanished.into_iter().zip(kinds) {
@@ -241,6 +268,10 @@ mod tests {
             (Some(Tab::Graph(id)), ActiveTabKind::Graph(id)),
             (Some(Tab::Matrix(id)), ActiveTabKind::Matrix(id)),
             (Some(Tab::Note(id)), ActiveTabKind::Note(id)),
+            (
+                Some(Tab::ScriptSettings(id)),
+                ActiveTabKind::ScriptSettings(id),
+            ),
             (None, ActiveTabKind::None),
         ];
         for (tab, expected) in pairs {

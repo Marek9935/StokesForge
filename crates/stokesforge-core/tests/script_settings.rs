@@ -413,3 +413,31 @@ fn apply_values_refuses_malformed_text() {
         Err(EditError::Parse(_))
     ));
 }
+
+#[test]
+fn a_date_text_is_read_as_a_date_of_the_stored_kind() {
+    let date = Scalar::date_of_kind(ScalarKind::LocalDate, " 2026-11-16 ");
+    assert_eq!(date, Some(Scalar::LocalDate("2026-11-16".into())));
+    // A time where a date is stored, an impossible date, another kind: refused.
+    assert_eq!(
+        Scalar::date_of_kind(ScalarKind::LocalDate, "09:30:00"),
+        None
+    );
+    assert_eq!(
+        Scalar::date_of_kind(ScalarKind::LocalDate, "2026-13-40"),
+        None
+    );
+    assert_eq!(Scalar::date_of_kind(ScalarKind::String, "2026-11-16"), None);
+    assert!(Scalar::date_of_kind(ScalarKind::LocalTime, "09:30:00").is_some());
+}
+
+#[test]
+fn a_hint_rejects_one_scalar_at_a_time() {
+    let doc = parse("# between 1 and 10\nn = 50\n# choices: a | b\nc = 'z'\n").expect("parses");
+    let n = doc.entry(&key("n")).expect("n");
+    assert!(n.hint.rejects(&Scalar::Integer(50)));
+    assert!(!n.hint.rejects(&Scalar::Integer(5)));
+    let c = doc.entry(&key("c")).expect("c");
+    assert!(c.hint.rejects(&Scalar::String("z".into())));
+    assert!(!c.hint.rejects(&Scalar::String("a".into())));
+}
