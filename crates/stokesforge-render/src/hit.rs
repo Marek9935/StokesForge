@@ -313,7 +313,7 @@ fn axis_line_at(
 /// Axis or axis title, depending on the click depth in the area.
 fn axis_part(panel: usize, side: AxisSide, depth: f64, area: AxisArea) -> PlotComponent {
     let size = area.size as f64;
-    let band = AXIS_TITLE_BAND.min(size / 2.0);
+    let band = (AXIS_TITLE_BAND + f64::from(area.title_grow)).min(size / 2.0);
     if area.titled && depth > size - band {
         PlotComponent::AxisTitle { panel, side }
     } else {
@@ -335,6 +335,7 @@ mod tests {
             size,
             titled: true,
             offset: 0,
+            title_grow: 0,
         };
         DrawnPlot {
             panels: vec![DrawnPanel {
@@ -438,11 +439,13 @@ mod tests {
             size: 8,
             titled: false,
             offset: 0,
+            title_grow: 0,
         };
         second.axis_areas.top = AxisArea {
             size: 8,
             titled: false,
             offset: 8,
+            title_grow: 0,
         };
         plot.panels.push(second);
         // The plot area starts at y = 60: 0-8 px above for the
@@ -739,6 +742,7 @@ mod tests {
             size: 30,
             titled: false,
             offset: 0,
+            title_grow: 0,
         };
         second.axis_areas = AxisAreas {
             bottom: AxisArea::default(),
@@ -765,11 +769,13 @@ mod tests {
             size: 8,
             titled: false,
             offset: 0,
+            title_grow: 0,
         };
         second.axis_areas.top = AxisArea {
             size: 8,
             titled: false,
             offset: 8,
+            title_grow: 0,
         };
         second.axis_areas.bottom = AxisArea::default();
         second.axis_areas.left = AxisArea::default();
@@ -793,6 +799,7 @@ mod tests {
             size: 10,
             titled: false,
             offset: 0,
+            title_grow: 0,
         };
         // Clamped to 2 px: the centre (4 px from every edge) stays interior.
         assert_eq!(

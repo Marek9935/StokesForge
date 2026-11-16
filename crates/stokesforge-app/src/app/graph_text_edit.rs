@@ -487,6 +487,7 @@ pub(super) fn annotation_editor_ui(
     ctx: &egui::Context,
     view: &mut GraphView,
     graph: NodeId,
+    text_scale: f64,
     mut editor: AnnotationEditor,
     actions: &mut Vec<Action>,
 ) {
@@ -509,7 +510,11 @@ pub(super) fn annotation_editor_ui(
     let field = stokesforge_render_egui::annotation_field(
         center,
         size,
-        editor.draft.effective_size(),
+        // The size drawn: a text that follows the graph carries its text scale (#545).
+        editor.draft.resolved_size(stokesforge_plot::GraphText {
+            family: None,
+            scale: text_scale,
+        }),
         view.display_scale().unwrap_or(1.0),
     );
 
@@ -1075,7 +1080,7 @@ mod tests {
                     .ctx()
                     .data(|data| data.get_temp(annotation_editor_id(view)));
                 if let Some(editor) = editor {
-                    annotation_editor_ui(ui.ctx(), view, graph, editor, &mut actions);
+                    annotation_editor_ui(ui.ctx(), view, graph, 1.0, editor, &mut actions);
                 }
             });
             output.textures_delta.clear();

@@ -657,6 +657,52 @@ fn global_color_rows(form: &mut Form<'_>, spec: &mut PlotSpec, env: &mut PickerE
     commit
 }
 
+/// The families the font list offers: « Graph font » (the embedded default),
+/// the embedded and installed fonts, and `current` if it is not installed here
+/// (it stays visible, and selected). Shared by the legend and the General tab.
+fn font_options(current: &str) -> Vec<ChoiceOption<String>> {
+    let mut options = vec![ChoiceOption::new(String::new(), tr!("format-font-default"))];
+    options.extend(
+        stokesforge_render_egui::available_families()
+            .iter()
+            .map(|family| ChoiceOption::new(family.name.clone(), family.name.clone())),
+    );
+    if !options.iter().any(|option| option.value == current) {
+        options.push(ChoiceOption::new(current.to_owned(), current.to_owned()));
+    }
+    options
+}
+
+/// The graph font and the text scale of the General tab (#545): the graph
+/// default of every text left on Auto. Each is stored on the graph and read by
+/// rendering; a text with its own font or size keeps it. Auto (the first font
+/// entry, an emptied scale) clears the graph setting.
+fn global_text_rows(form: &mut Form<'_>, spec: &mut PlotSpec) -> bool {
+    let options = font_options(&spec.text_font);
+    let mut commit = form.row(tr!("format-font"), |ui| {
+        choice(ui, "plot_general_font", &mut spec.text_font, &options)
+    });
+    commit |= form.row(tr!("plot-general-text-scale"), |ui| {
+        let mut percent = spec.text_scale.map(|scale| (scale * 100.0).round());
+        let field = auto_number_field(
+            ui,
+            "plot_general_text_scale",
+            &mut percent,
+            &quantities::TEXT_SCALE_PERCENT,
+            &tr!("common-auto"),
+        );
+        field
+            .response
+            .on_hover_text(tr!("plot-general-text-scale", "hint"));
+        let changed = field.changed;
+        if changed {
+            spec.text_scale = percent.map(|percent| percent / 100.0);
+        }
+        changed
+    });
+    commit
+}
+
 /// Graph page: title, colors and size, as a two-column form (#227).
 fn graph_settings_page(
     ui: &mut egui::Ui,
@@ -690,6 +736,7 @@ fn graph_settings_page(
             env,
         );
         commit |= global_color_rows(form, spec, env);
+        commit |= global_text_rows(form, spec);
         form.note(tr!("plot-general-global-note"));
         form.note(tr!("plot-general-dark-note"));
         commit |= form.checkbox(
@@ -2305,22 +2352,7 @@ fn legend_font_section(
     env: &mut PickerEnv,
 ) -> bool {
     form.section(tr!("plot-legend-text-section"));
-    let mut options = vec![ChoiceOption::new(String::new(), tr!("format-font-default"))];
-    options.extend(
-        stokesforge_render_egui::available_families()
-            .iter()
-            .map(|family| ChoiceOption::new(family.name.clone(), family.name.clone())),
-    );
-    // A font that is not installed here stays visible, and selected.
-    if !options
-        .iter()
-        .any(|option| option.value == legend.font.family)
-    {
-        options.push(ChoiceOption::new(
-            legend.font.family.clone(),
-            legend.font.family.clone(),
-        ));
-    }
+    let options = font_options(&legend.font.family);
     let mut commit = form.row(tr!("format-font"), |ui| {
         choice(ui, "plot_legend_font", &mut legend.font.family, &options)
     });

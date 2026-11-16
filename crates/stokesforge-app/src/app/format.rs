@@ -129,18 +129,19 @@ impl StokesForgeApp {
                                     .or_else(|| view.selected_annotation()),
                                 annotation_editor.is_some(),
                             ))),
-                            family: Some(if annotation.font.trim().is_empty() {
-                                stokesforge_render_egui::FontSet::default()
-                                    .sans_family_name()
-                                    .into()
-                            } else {
-                                annotation.font.trim().into()
-                            }),
-                            size: Some(annotation.effective_size()),
+                            family: Some(
+                                annotation
+                                    .resolved_family(spec.graph_text())
+                                    .unwrap_or(
+                                        stokesforge_render_egui::FontSet::default()
+                                            .sans_family_name(),
+                                    )
+                                    .into(),
+                            ),
+                            size: Some(annotation.resolved_size(spec.graph_text())),
                             color: Some(annotation.color.clone()),
                             auto_family: annotation.font.trim().is_empty(),
-                            auto_size: annotation.size
-                                == stokesforge_plot::AnnotationSpec::DEFAULT_SIZE,
+                            auto_size: annotation.follows_graph_size,
                             align: Some(annotation.align),
                         }
                         .with_markup(&annotation.text),
@@ -180,13 +181,15 @@ impl StokesForgeApp {
                             editor.as_ref().map(|editor| editor.target),
                         ))),
                         family: Some(
-                            font.family()
+                            font.resolved_family(spec.graph_text())
                                 .unwrap_or(
                                     stokesforge_render_egui::FontSet::default().sans_family_name(),
                                 )
                                 .into(),
                         ),
-                        size: Some(font.effective_size(default_size)),
+                        // The size actually drawn: the graph text scale
+                        // included (#545), so "Auto (N)" shows the real N.
+                        size: Some(font.resolved_size(spec.graph_text(), default_size)),
                         color: target.color(&spec),
                         auto_family: font.family().is_none(),
                         auto_size: font.size.is_none(),
@@ -340,6 +343,7 @@ impl StokesForgeApp {
                     ctx.data_mut(|data| {
                         if let Some(mut editor) = data.get_temp::<AnnotationEditor>(id) {
                             editor.draft.size = stokesforge_plot::AnnotationSpec::DEFAULT_SIZE;
+                            editor.draft.follows_graph_size = true;
                             data.insert_temp(id, editor);
                         }
                     });
@@ -523,9 +527,14 @@ impl StokesForgeApp {
                 // Color and size of a free text are model fields.
                 match &format {
                     TextFormat::Color(color) => annotation.color = color.clone(),
-                    TextFormat::Size(size) => annotation.size = *size,
+                    TextFormat::Size(size) => {
+                        annotation.size = *size;
+                        // Set by hand: no longer follows the graph (#545).
+                        annotation.follows_graph_size = false;
+                    }
                     TextFormat::AutoSize => {
-                        annotation.size = stokesforge_plot::AnnotationSpec::DEFAULT_SIZE
+                        annotation.size = stokesforge_plot::AnnotationSpec::DEFAULT_SIZE;
+                        annotation.follows_graph_size = true;
                     }
                     _ => {
                         let length = annotation.text.chars().count();
@@ -863,6 +872,23 @@ mod tests {
                     Some(stokesforge_render_egui::FontSet::default().sans_family_name())
                 );
                 assert!(inherited.auto_size && inherited.auto_family);
+                // #545: « Auto (N) » shows the size drawn, the graph text scale
+                // included, and the graph font. Witness: the role constant.
+                let mut scaled = spec.clone();
+                scaled.text_scale = Some(1.5);
+                scaled.text_font = "Libertinus Sans".into();
+                app.state.dispatch(Action::SetPlotSpec {
+                    graph,
+                    spec: scaled,
+                });
+                let spec =
+                    stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
+                app.with_graph_view(graph, |view| view.select_text(Some(target), &spec));
+                let follows = app.text_format_state(&ctx, Some(Tab::Graph(graph)));
+                assert_eq!(follows.size, Some(size * 1.5));
+                assert_eq!(follows.family.as_deref(), Some("Libertinus Sans"));
+                assert!(follows.auto_size && follows.auto_family);
+                app.state.dispatch(Action::Undo);
                 app.state.dispatch(Action::SetTextFont {
                     graph,
                     target,
@@ -911,6 +937,7 @@ mod tests {
         let mut draft = target.get(&spec).unwrap().clone();
         draft.font = "Libertinus Sans".into();
         draft.size = 36.0;
+        draft.follows_graph_size = false;
         let id = app
             .with_graph_view(graph, |view| {
                 view.select_annotation(Some(target), &spec);

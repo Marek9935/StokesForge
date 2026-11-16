@@ -99,6 +99,7 @@ fn bar_band(spec: &PlotSpec) -> (u32, u32) {
     stokesforge_render::color_bar::band(
         spec.panels[0].color_bar.as_ref(),
         &spec.panels[0].legend.font,
+        spec.graph_text(),
         &probe,
     )
     .expect("band")
@@ -1766,4 +1767,73 @@ fn a_slack_on_the_left_and_top_moves_the_frames_and_a_hostile_one_is_bounded() {
             layout.size
         );
     }
+}
+
+// ── #545: the graph text scale grows the bands, never the frame ──────────
+
+/// A one-layer graph with stored frames, so that the bands are the whole
+/// difference between two figures.
+fn scaled_frame(scale: Option<f64>) -> PlotSpec {
+    let mut spec = grid("", 1, 1);
+    spec.frame_widths = vec![400.0];
+    spec.frame_heights = vec![300.0];
+    spec.text_scale = scale;
+    spec
+}
+
+/// Witnesses: scale 100 % moved a band (the constant kept at its role size
+/// would still pass this one), and a scale that leaves the bands alone (the
+/// bands keep the fixed constants: the 200 % case fails).
+#[test]
+fn a_text_scale_grows_the_axis_bands_and_keeps_the_frame() {
+    let plain = layout_of(&scaled_frame(None));
+    let same = layout_of(&scaled_frame(Some(1.0)));
+    assert_eq!(plain, same, "100 % is today's figure");
+    let big = layout_of(&scaled_frame(Some(2.0)));
+    assert_eq!(big.frame_widths, plain.frame_widths, "the frame stays");
+    assert_eq!(big.frame_heights, plain.frame_heights, "the frame stays");
+    // Ticks (30 / 46) and axis title (22 / 18) zones double their share.
+    assert_eq!(big.row_gutters[0].1 - plain.row_gutters[0].1, 30 + 22);
+    assert_eq!(big.column_gutters[0].0 - plain.column_gutters[0].0, 46 + 18);
+    assert!(big.size.0 > plain.size.0 && big.size.1 > plain.size.1);
+}
+
+/// A smaller scale keeps today's bands (they grow, never shrink).
+#[test]
+fn a_smaller_text_scale_keeps_the_bands() {
+    assert_eq!(layout_of(&scaled_frame(Some(0.5))), layout_of(&scaled_frame(None)));
+}
+
+/// A hand-set axis title size widens the band like the scale does, and only
+/// its own axis.
+#[test]
+fn a_hand_set_axis_title_size_grows_its_own_band() {
+    let plain = layout_of(&scaled_frame(None));
+    let mut spec = scaled_frame(None);
+    let mut panel = spec.panels[0].clone();
+    panel.bottom.title_font.size = Some(32.0);
+    spec = spec.with_panels(Panels::new(vec![panel]));
+    let grown = layout_of(&spec);
+    assert_eq!(grown.row_gutters[0].1 - plain.row_gutters[0].1, 22);
+    assert_eq!(grown.column_gutters, plain.column_gutters);
+}
+
+/// The first and last tick numbers must fit: at 200 % the edge numbers are
+/// measured at the scaled size, so the column gutter that holds them grows.
+/// Witness: the edge reserve measured at the built-in tick size.
+#[test]
+fn the_edge_reserve_is_measured_at_the_resolved_tick_size() {
+    let edge = |scale: Option<f64>| {
+        let mut spec = scaled_frame(scale);
+        let mut panel = spec.panels[0].clone();
+        panel.bottom.auto_range = false;
+        panel.bottom.range_min = Some(0.0);
+        panel.bottom.range_max = Some(1.0);
+        // Much larger left band than the edge needs: only the right gutter
+        // can show the reserve.
+        spec = spec.with_panels(Panels::new(vec![panel]));
+        layout_of(&spec).column_gutters[0].1
+    };
+    let (plain, scaled) = (edge(None), edge(Some(4.0)));
+    assert!(scaled > plain, "{scaled} vs {plain}");
 }

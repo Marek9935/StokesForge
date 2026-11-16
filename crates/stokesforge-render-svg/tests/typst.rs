@@ -374,3 +374,78 @@ fn the_pdf_contains_extractable_text() {
         "PDF text not extractable: {extracted:?}"
     );
 }
+
+// ── #545: the graph font and text scale ──────────────────────────────────
+
+/// The opening tag of the `<text>` element whose content is `content`
+/// (Plotters writes it on its own line, Typst right after the tag).
+fn text_tag<'a>(svg: &'a str, content: &str) -> Option<&'a str> {
+    let end = svg
+        .find(&format!("\n{content}\n</text>"))
+        .or_else(|| svg.find(&format!("{content}</text>")))?;
+    let start = svg[..end].rfind("<text")?;
+    Some(&svg[start..end])
+}
+
+/// One attribute of `tag`.
+fn attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    let from = tag.find(&format!("{name}=\""))? + name.len() + 2;
+    Some(&tag[from..from + tag[from..].find('"')?])
+}
+
+/// The `font-family` of the `<text>` element whose content is `content`.
+fn family_of(svg: &str, content: &str) -> Option<String> {
+    attribute(text_tag(svg, content)?, "font-family").map(str::to_owned)
+}
+
+/// Witnesses: the graph family ignored (title stays Noto), a local family
+/// overridden by the graph's, the ticks' family hard-coded to Noto.
+#[test]
+fn the_graph_font_reaches_every_text_and_a_local_family_wins() {
+    use stokesforge_render_svg::SvgTextMode::Text;
+    let mut spec = rich_spec();
+    spec.text_font = "Libertinus Sans".into();
+    let svg = svg_mode(&spec, Text);
+    for content in ["Spectrumalpha", "Time", "0.3"] {
+        let family = family_of(&svg, content).unwrap_or_else(|| panic!("{content} missing"));
+        assert!(family.contains("Libertinus Sans"), "{content}: {family}");
+    }
+    spec.title_font.family = "Fira Sans".into();
+    let svg = svg_mode(&spec, Text);
+    assert!(family_of(&svg, "Spectrumalpha").unwrap().contains("Fira Sans"));
+    assert!(family_of(&svg, "Time").unwrap().contains("Libertinus Sans"));
+    // No graph font: the default family, as before.
+    let svg = svg_mode(&rich_spec(), Text);
+    assert!(family_of(&svg, "0.3").unwrap().contains("Noto Sans"));
+}
+
+/// Scale 150 % grows an Auto text and leaves a hand-set size alone; 100 %
+/// is the export of a graph with no setting, byte for byte.
+#[test]
+fn the_text_scale_resizes_auto_texts_only() {
+    use stokesforge_render_svg::SvgTextMode::Text;
+    let size_of = |svg: &str, content: &str| -> f64 {
+        let tag = text_tag(svg, content).expect(content);
+        attribute(tag, "font-size").expect("size").parse().unwrap()
+    };
+    let plain = svg_mode(&rich_spec(), Text);
+    let mut spec = rich_spec();
+    spec.text_scale = Some(1.5);
+    let scaled = svg_mode(&spec, Text);
+    let ratio = size_of(&scaled, "0.3") / size_of(&plain, "0.3");
+    assert!((ratio - 1.5).abs() < 0.02, "tick ratio {ratio}");
+    let ratio = size_of(&scaled, "Spectrumalpha") / size_of(&plain, "Spectrumalpha");
+    assert!(ratio > 1.3, "title ratio {ratio}");
+    spec.title_font.size = Some(24.0);
+    let by_hand = svg_mode(&spec, Text);
+    let hand = size_of(&by_hand, "Spectrumalpha");
+    let alone = {
+        let mut spec = rich_spec();
+        spec.title_font.size = Some(24.0);
+        size_of(&svg_mode(&spec, Text), "Spectrumalpha")
+    };
+    assert!((hand - alone).abs() < 1e-6, "hand-set size scaled: {hand} vs {alone}");
+    spec.text_scale = Some(1.0);
+    spec.title_font.size = None;
+    assert_eq!(svg_mode(&spec, Text), plain);
+}
