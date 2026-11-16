@@ -121,7 +121,12 @@ impl AppState {
     /// [`AppState::apply_preview`] of a window the interface is editing (it
     /// writes it back to the state once the frame is painted).
     pub fn apply_preview_for(&self, window: &ApplyThemeWindow) -> Option<ApplyPreview> {
-        let before = self.plot_spec(*window.graphs().first()?)?;
+        let first = *window.graphs().first()?;
+        let before = if window.into_draft() {
+            self.spec_for_theme(first)?
+        } else {
+            self.plot_spec(first)?
+        };
         let theme = self.theme_of(window.shown_theme())?;
         let after = crate::theme_apply::themed_spec(
             &self.snapshot.tree,
@@ -180,12 +185,16 @@ impl AppState {
         let Some(theme) = self.theme_of(window.chosen()) else {
             return;
         };
-        self.apply_theme(
-            &theme,
-            window.families(),
-            window.graphs(),
-            window.add_missing(),
-        );
+        if window.into_draft() {
+            self.apply_theme_into_draft(&theme, &window);
+        } else {
+            self.apply_theme(
+                &theme,
+                window.families(),
+                window.graphs(),
+                window.add_missing(),
+            );
+        }
         if let ThemeSource::Theme(reference) = window.chosen() {
             match self.record_theme_use(reference) {
                 // A read-only library counts nothing, quietly: the apply worked.
@@ -194,6 +203,30 @@ impl AppState {
             }
         }
         self.apply_theme_window = None;
+    }
+
+    /// Apply from the Theme tab: the theme goes into the draft of Graph
+    /// Properties and the window commits it as it commits any other edit, so
+    /// the OK or the Cancel of Graph Properties decides and no history step is
+    /// made here.
+    fn apply_theme_into_draft(&mut self, theme: &GraphTheme, window: &ApplyThemeWindow) {
+        let Some(graph) = window.graphs().first().copied() else {
+            return;
+        };
+        let Some(current) = self.spec_for_theme(graph) else {
+            return;
+        };
+        let next = crate::theme_apply::themed_spec(
+            &self.snapshot.tree,
+            &current,
+            theme,
+            window.families(),
+            window.add_missing(),
+        );
+        if let Some(edit) = self.plot_edit.as_mut().filter(|edit| edit.graph == graph) {
+            edit.spec = next;
+            self.commit_plot_edit();
+        }
     }
 
     /// Opens the Save Theme As window on `graph` (target Mine by default).
@@ -240,14 +273,17 @@ impl AppState {
             return;
         }
         let saved: Result<(), UserThemeError> = match target {
-            ThemeTarget::Mine => self.add_user_theme(name.trim(), graph).map(|_| ()),
+            ThemeTarget::Mine => self.add_user_theme(name.trim(), graph).map(|id| {
+                self.theme_selection = ThemeSource::Theme(ThemeRef::User(id));
+            }),
             ThemeTarget::Project => {
-                let Some(spec) = self.plot_spec(graph) else {
+                let Some(spec) = self.spec_for_theme(graph) else {
                     return;
                 };
                 let mut themes = self.snapshot.tree.project_themes().to_vec();
                 themes.push(GraphTheme::capture(name.trim(), &spec));
                 self.execute(stokesforge_commands::Command::SetProjectThemes { themes });
+                self.theme_selection = ThemeSource::Theme(ThemeRef::project(name.trim()));
                 Ok(())
             }
         };

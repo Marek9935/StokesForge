@@ -199,6 +199,7 @@ mod preferences_window;
 mod project_dnd;
 mod project_manager;
 mod recovery;
+mod rename_theme_window;
 mod reorder_list;
 mod results_pane;
 mod save_theme_window;
@@ -213,6 +214,7 @@ mod tab;
 pub(crate) mod tab_strip;
 #[cfg(test)]
 mod test_support;
+mod theme_manager;
 mod theme_menu;
 mod theme_picker;
 mod transpose_ui;
@@ -1509,10 +1511,23 @@ impl StokesForgeApp {
         // other action.
         import_window(ctx, &mut self.state, actions);
         origin_import_window(ctx, &self.state, actions);
+        // The windows opened from the Theme tab of Graph Properties (#542) are
+        // painted **before** it: Escape goes to the first modal painted, and it
+        // must close only the one on top (the Apply Theme window, the name
+        // windows, the confirmation), never Graph Properties under it.
+        apply_theme_window::apply_theme_window(
+            ctx,
+            &mut self.state,
+            &mut self.theme_drawings,
+            actions,
+        );
+        save_theme_window::save_theme_window(ctx, &mut self.state, actions);
+        rename_theme_window::rename_theme_window(ctx, &mut self.state, actions);
+        confirmations::theme_delete_window(ctx, &self.state, actions);
         // Graph properties window: same family of transient
         // dialog as the import window, painted as long as
         // `self.state.plot_settings()` is `Some`.
-        plot_settings_window(ctx, &mut self.state);
+        plot_settings_window(ctx, &mut self.state, &mut self.theme_drawings);
         // A row chosen in the Series list selects it on the graph (#510).
         if let Some((graph, target)) = plot_settings::take_list_selection(ctx) {
             if let Some(spec) =
@@ -1542,13 +1557,6 @@ impl StokesForgeApp {
         column_use_window(ctx, &self.state, actions);
         full_copy_window(ctx, &self.state, actions);
         recovery_window(ctx, &self.state, actions);
-        apply_theme_window::apply_theme_window(
-            ctx,
-            &mut self.state,
-            &mut self.theme_drawings,
-            actions,
-        );
-        save_theme_window::save_theme_window(ctx, &mut self.state, actions);
         dialogs::sync_dialogs(ctx, &self.state, actions);
     }
 

@@ -46,6 +46,8 @@ use super::form::{choice, form, ChoiceOption, Form};
 use super::graph_window::{published_axis_bounds, PanelBounds};
 use super::hover_help::{help_text, hover_help};
 use super::tab_strip::{tab_strip, tab_strip_left_with_reasons, TabStripSide};
+use super::theme_manager::{theme_manager, ThemeTab};
+use super::theme_picker::Drawings;
 
 /// Key, in the egui context, of "the formula help icon is hidden" (#148).
 const FORMULA_HELP_HIDDEN: &str = "stokesforge_formula_help_hidden";
@@ -112,7 +114,11 @@ pub(super) fn take_list_selection(ctx: &egui::Context) -> Option<ListSelection> 
 /// **A single panel, no multi-panel**: only `PlotSpec::panels[0]`
 /// is editable here. Editing the first panel amounts, for now, to
 /// editing *the* graph.
-pub(super) fn plot_settings_window(ctx: &egui::Context, state: &mut AppState) {
+pub(super) fn plot_settings_window(
+    ctx: &egui::Context,
+    state: &mut AppState,
+    drawings: &mut Option<Drawings>,
+) {
     let Some(settings) = state.plot_settings() else {
         publish_list_selection(ctx, None);
         return;
@@ -158,7 +164,7 @@ pub(super) fn plot_settings_window(ctx: &egui::Context, state: &mut AppState) {
         super::graph_window::published_active_panel(ctx, settings.graph),
     );
     let outcome = modal_dialog(ctx, egui::Id::new(id), &title, size, |ui| {
-        plot_settings_contents(ui, state, &tree, settings)
+        plot_settings_contents(ui, state, &tree, settings, drawings)
     });
     match outcome {
         DialogOutcome::Open => {}
@@ -245,6 +251,7 @@ fn plot_settings_contents(
     state: &mut AppState,
     tree: &Tree,
     settings: PlotSettings,
+    drawings: &mut Option<Drawings>,
 ) {
     let mut chosen_tab = settings.tab;
     let mut chosen_axis = settings.axis;
@@ -291,6 +298,11 @@ fn plot_settings_contents(
     // #501: the draft's size is measured on the texts as drawn, variables bound.
     let (bind_tree, revision) = (state.tree().clone(), state.revision());
     let mut gradient_actions: Vec<Action> = Vec::new();
+    // The Theme tab reads the library and the project before the draft is
+    // borrowed (#542); its clicks come back as actions.
+    let mut theme_tab =
+        (chosen_tab == PlotSettingsTab::Theme).then(|| ThemeTab::read(state, settings.graph));
+    let mut theme_actions: Vec<Action> = Vec::new();
     let row_columns = legend_row_columns(state, settings.graph);
     // Saved colors, read before borrowing the draft; the
     // picker requests (save, remove) are translated into actions
@@ -372,6 +384,17 @@ fn plot_settings_contents(
                 }),
             };
             publish_list_selection(ui.ctx(), Some((settings.graph, target)));
+        } else if chosen_tab == PlotSettingsTab::Theme {
+            // The picker scrolls and the controls stay in view at the foot of
+            // the page (#542): no common scrolling.
+            if let Some(tab) = theme_tab.as_mut() {
+                theme_manager(
+                    ui,
+                    drawings.get_or_insert_with(Drawings::new),
+                    tab,
+                    &mut theme_actions,
+                );
+            }
         } else if chosen_tab == PlotSettingsTab::Axes {
             // Two levels (S-L9, #393): the vertical axis strip stays fixed and
             // only the page of the axis scrolls, so no common scrolling.
@@ -429,9 +452,8 @@ fn plot_settings_contents(
                     PlotSettingsTab::Axes => {}
                     // The series have their window: see above.
                     PlotSettingsTab::Series => {}
-                    PlotSettingsTab::Theme => {
-                        commit |= theme_editor(ui, spec, &mut env);
-                    }
+                    // The theme manager has its own layout: see above.
+                    PlotSettingsTab::Theme => {}
                     PlotSettingsTab::Legend => {
                         let Some(panel) = spec.panels.get_mut(edit.selected_panel) else {
                             return;
@@ -462,6 +484,12 @@ fn plot_settings_contents(
         }
     }
     for action in gradient_actions {
+        state.dispatch(action);
+    }
+    if let Some(tab) = &theme_tab {
+        state.select_theme(tab.selected().clone());
+    }
+    for action in theme_actions {
         state.dispatch(action);
     }
     for request in env.requests {
@@ -593,7 +621,43 @@ fn dialog_layout(
     Some(layout)
 }
 
-/// Graph page: title and background, as a two-column form (#227).
+/// The global colors of the General tab (#542, form 514-4 V5; they were on the
+/// Theme tab): the color of all texts and the color of all axes. Each is
+/// written into every local field (graph title, title and scale of each axis of
+/// each panel, free texts), so the last one set overwrites what was set one by
+/// one, and nothing more is remembered. Painting writes nothing: a value is
+/// written only when the user changed it, even if the local colors differ from
+/// what the row shows. The background is the row above it.
+fn global_color_rows(form: &mut Form<'_>, spec: &mut PlotSpec, env: &mut PickerEnv) -> bool {
+    let mut commit = false;
+    let mut text = spec.theme_text_color().to_string();
+    let text_committed = form.color(
+        &tr!("plot-general-text-color"),
+        &mut text,
+        ColorUsage::Text,
+        Some(&tr!("plot-color-auto-contrast")),
+        env,
+    );
+    if text != spec.theme_text_color() {
+        spec.set_text_color(&text);
+    }
+    commit |= text_committed;
+    let mut axes = spec.theme_axes_color().to_string();
+    let axes_committed = form.color(
+        &tr!("plot-general-axes-color"),
+        &mut axes,
+        ColorUsage::Text,
+        Some(&tr!("plot-color-auto-contrast")),
+        env,
+    );
+    if axes != spec.theme_axes_color() {
+        spec.set_axes_color(&axes);
+    }
+    commit |= axes_committed;
+    commit
+}
+
+/// Graph page: title, colors and size, as a two-column form (#227).
 fn graph_settings_page(
     ui: &mut egui::Ui,
     (tree, layout): (&Tree, Option<&FigureLayout>),
@@ -625,6 +689,8 @@ fn graph_settings_page(
             Some(&tr!("plot-color-auto-white")),
             env,
         );
+        commit |= global_color_rows(form, spec, env);
+        form.note(tr!("plot-general-global-note"));
         form.note(tr!("plot-general-dark-note"));
         commit |= form.checkbox(
             &mut spec.stale_warning,
@@ -1327,66 +1393,6 @@ pub(super) fn axes_settings_page(
         }
     }
     commit
-}
-
-/// "Theme" tab: background, text color and axes color, set
-/// globally (issue #11), plus predefined themes. The last setting
-/// overwrites what had been set one by one: see [`stokesforge_plot::theme`].
-/// Returns `true` if the draft must be committed.
-fn theme_editor(
-    ui: &mut egui::Ui,
-    spec: &mut stokesforge_plot::PlotSpec,
-    env: &mut PickerEnv,
-) -> bool {
-    form(ui, "plot_theme_page", |form| {
-        let mut commit = false;
-        form.section(tr!("plot-theme-themes"));
-        form.field(|ui| {
-            for (index, theme) in stokesforge_plot::THEMES.iter().enumerate() {
-                if ui
-                    .button(stokesforge_app_state::figure_texts::theme_name(index))
-                    .clicked()
-                {
-                    spec.apply_theme(theme);
-                    commit = true;
-                }
-            }
-        });
-        form.section(tr!("plot-theme-global-colors"));
-        commit |= form.color(
-            &tr!("plot-theme-background"),
-            &mut spec.background,
-            ColorUsage::Background,
-            Some(&tr!("plot-color-auto-white")),
-            env,
-        );
-        let mut text = spec.theme_text_color().to_string();
-        let text_committed = form.color(
-            &tr!("plot-theme-text"),
-            &mut text,
-            ColorUsage::Text,
-            Some(&tr!("plot-color-auto-contrast")),
-            env,
-        );
-        if text != spec.theme_text_color() {
-            spec.set_text_color(&text);
-        }
-        commit |= text_committed;
-        let mut axes = spec.theme_axes_color().to_string();
-        let axes_committed = form.color(
-            &tr!("plot-theme-axes"),
-            &mut axes,
-            ColorUsage::Text,
-            Some(&tr!("plot-color-auto-contrast")),
-            env,
-        );
-        if axes != spec.theme_axes_color() {
-            spec.set_axes_color(&axes);
-        }
-        commit |= axes_committed;
-        form.note(tr!("plot-theme-note"));
-        commit
-    })
 }
 
 /// The syntax reminder for the graph texts (issues #33, #197), as a hover
@@ -2599,15 +2605,15 @@ mod tests {
     use stokesforge_core::{Column, ColumnMeta, MetaLine, NodeId, Project};
     use stokesforge_plot::{
         LegendPosition, LineStyle, PanelSpec, PlotSpec, PlotType, RawVariant, SeriesAxis,
-        SeriesSpec, SymbolShape, THEMES,
+        SeriesSpec, SymbolShape,
     };
     use stokesforge_render_egui::formula;
     use stokesforge_session::Session;
 
     use super::{
         column_metadata_window, form, format_value, formula_field, formula_help, formula_memo_rows,
-        legend_position_label, line_style_label, plot_settings_window, plot_type_label,
-        symbol_shape_label, theme_editor, TickDirection, FORMULA_HELP_HIDDEN,
+        global_color_rows, legend_position_label, line_style_label, plot_settings_window,
+        plot_type_label, symbol_shape_label, TickDirection, FORMULA_HELP_HIDDEN,
     };
     use crate::color_picker::PickerEnv;
     use stokesforge_app_state::i18n::{self, pseudo, Language, LANGUAGE_VARIABLE};
@@ -2700,11 +2706,11 @@ mod tests {
     ) -> Vec<Text> {
         for _ in 0..3 {
             image(context, Vec::new(), |ui| {
-                plot_settings_window(ui.ctx(), state)
+                plot_settings_window(ui.ctx(), state, &mut None)
             });
         }
         texts(&image(context, events, |ui| {
-            plot_settings_window(ui.ctx(), state)
+            plot_settings_window(ui.ctx(), state, &mut None)
         }))
     }
 
@@ -2714,7 +2720,7 @@ mod tests {
         let painted = paint_window(context, state, Vec::new());
         let pos = text_exact(&painted, label).center;
         click(context, pos, egui::PointerButton::Primary, |ui| {
-            plot_settings_window(ui.ctx(), state)
+            plot_settings_window(ui.ctx(), state, &mut None)
         });
         paint_window(context, state, Vec::new())
     }
@@ -2767,7 +2773,7 @@ mod tests {
             (PlotSettingsTab::Axes, tr!("plot-axes-log-scale")),
             (PlotSettingsTab::Series, tr!("plot-series-line-width")),
             (PlotSettingsTab::Legend, tr!("plot-legend-show")),
-            (PlotSettingsTab::Theme, tr!("plot-theme-global-colors")),
+            (PlotSettingsTab::Theme, tr!("theme-mgr-use-for-new")),
         ]
     }
 
@@ -3237,7 +3243,7 @@ mod tests {
             )
             .center;
             click(&context, pos, egui::PointerButton::Primary, |ui| {
-                plot_settings_window(ui.ctx(), &mut harness.state)
+                plot_settings_window(ui.ctx(), &mut harness.state, &mut None)
             });
             scroll_down(
                 &context,
@@ -3289,7 +3295,7 @@ mod tests {
             // Left of the title's edge: the arrow, then the space that separates them.
             let point = egui::pos2(title.x - width / 2.0 - offset, title.y);
             click(&context, point, egui::PointerButton::Primary, |ui| {
-                plot_settings_window(ui.ctx(), &mut harness.state)
+                plot_settings_window(ui.ctx(), &mut harness.state, &mut None)
             });
             let painted = scroll_down(
                 &context,
@@ -3336,7 +3342,7 @@ mod tests {
         let painted = paint_window(context, &mut harness.state, Vec::new());
         let pos = text_exact(&painted, &tr!("common-advanced")).center;
         click(context, pos, egui::PointerButton::Primary, |ui| {
-            plot_settings_window(ui.ctx(), &mut harness.state)
+            plot_settings_window(ui.ctx(), &mut harness.state, &mut None)
         });
         scroll_page(context, harness, -1000.0);
     }
@@ -3535,7 +3541,7 @@ mod tests {
         .center
         .y;
         let output = image(context, Vec::new(), |ui| {
-            plot_settings_window(ui.ctx(), &mut harness.state)
+            plot_settings_window(ui.ctx(), &mut harness.state, &mut None)
         });
         let lock = super::super::window_chrome::tests::find_icon_centers(&output)
             .into_iter()
@@ -3544,7 +3550,7 @@ mod tests {
         // The test window is narrow: the icon is half clipped, press its visible part.
         let lock = egui::pos2(lock.x - 4.0, lock.y);
         click(context, lock, egui::PointerButton::Primary, |ui| {
-            plot_settings_window(ui.ctx(), &mut harness.state)
+            plot_settings_window(ui.ctx(), &mut harness.state, &mut None)
         });
         paint_window(context, &mut harness.state, Vec::new());
     }
@@ -3792,7 +3798,7 @@ mod tests {
         let painted = scroll_down(&context, &mut harness.state, &tr!("plot-size"));
         let pos = text_exact(&painted, &tr!("common-advanced")).center;
         click(&context, pos, egui::PointerButton::Primary, |ui| {
-            plot_settings_window(ui.ctx(), &mut harness.state)
+            plot_settings_window(ui.ctx(), &mut harness.state, &mut None)
         });
         // The page is taller than the window: "Size" is already scrolled out.
         scroll_page(&context, &mut harness, -1000.0);
@@ -3805,7 +3811,7 @@ mod tests {
         let history = harness.state.undo_label();
         let pos = text_exact(&painted, &tr!("plot-figure-size-fixed")).center;
         click(&context, pos, egui::PointerButton::Primary, |ui| {
-            plot_settings_window(ui.ctx(), &mut harness.state)
+            plot_settings_window(ui.ctx(), &mut harness.state, &mut None)
         });
         let model = harness.model();
         assert!(model.fixed_figure, "committed with the click");
@@ -4102,7 +4108,7 @@ mod tests {
         };
         let at = button(&mut harness);
         click(&context, at, egui::PointerButton::Primary, |ui| {
-            plot_settings_window(ui.ctx(), &mut harness.state)
+            plot_settings_window(ui.ctx(), &mut harness.state, &mut None)
         });
         let axis = harness.model().panels[0].bottom.clone();
         assert!(!axis.auto_range, "written, not tracking");
@@ -4115,7 +4121,7 @@ mod tests {
         // Same range computed again: no new entry.
         let at = button(&mut harness);
         click(&context, at, egui::PointerButton::Primary, |ui| {
-            plot_settings_window(ui.ctx(), &mut harness.state)
+            plot_settings_window(ui.ctx(), &mut harness.state, &mut None)
         });
         harness.state.close_plot_settings();
         harness.state.dispatch(Action::Undo);
@@ -4137,7 +4143,7 @@ mod tests {
         );
         let pos = text_exact(&open, &tr!("common-advanced")).center;
         click(&context, pos, egui::PointerButton::Primary, |ui| {
-            plot_settings_window(ui.ctx(), &mut harness.state)
+            plot_settings_window(ui.ctx(), &mut harness.state, &mut None)
         });
         let painted = scroll_down(
             &context,
@@ -4146,7 +4152,7 @@ mod tests {
         );
         let field = in_the_row(&painted, &tr!("plot-axes-tick-length"), &tr!("common-auto")).center;
         click(&context, field, egui::PointerButton::Primary, |ui| {
-            plot_settings_window(ui.ctx(), &mut harness.state)
+            plot_settings_window(ui.ctx(), &mut harness.state, &mut None)
         });
         one_frame(
             &context,
@@ -4494,7 +4500,7 @@ mod tests {
                 context,
                 pos - egui::vec2(70.0, 0.0),
                 egui::PointerButton::Primary,
-                |ui| plot_settings_window(ui.ctx(), state),
+                |ui| plot_settings_window(ui.ctx(), state, &mut None),
             );
         };
         open(&context, &mut harness.state);
@@ -4539,7 +4545,7 @@ mod tests {
             &context,
             name - egui::vec2(80.0, 0.0),
             egui::PointerButton::Primary,
-            |ui| plot_settings_window(ui.ctx(), &mut harness.state),
+            |ui| plot_settings_window(ui.ctx(), &mut harness.state, &mut None),
         );
         let colors: Vec<String> = harness.model().panels[0]
             .series
@@ -4577,7 +4583,7 @@ mod tests {
         let context = test_support::context();
         click_label(&context, &mut harness.state, "Initial title");
         image(&context, vec![egui::Event::Text("Z".into())], |ui| {
-            plot_settings_window(ui.ctx(), &mut harness.state);
+            plot_settings_window(ui.ctx(), &mut harness.state, &mut None);
         });
         let typed = harness.draft().title;
         assert!(typed.contains('Z'), "the keystroke reached the draft");
@@ -4601,13 +4607,15 @@ mod tests {
         let painted = paint_window(context, state, Vec::new());
         let center = text_exact(&painted, value).center;
         click(context, center, egui::PointerButton::Primary, |ui| {
-            plot_settings_window(ui.ctx(), state)
+            plot_settings_window(ui.ctx(), state, &mut None)
         });
         center
     }
 
     fn one_frame(context: &egui::Context, state: &mut AppState, events: Vec<egui::Event>) {
-        image(context, events, |ui| plot_settings_window(ui.ctx(), state));
+        image(context, events, |ui| {
+            plot_settings_window(ui.ctx(), state, &mut None)
+        });
     }
 
     /// A typed number commits the draft only on Enter (S-N3) — as long as the
@@ -4960,7 +4968,7 @@ mod tests {
     fn bins_refuse_a_fraction_and_clamp_to_the_bounds() {
         let frames = |context: &egui::Context, harness: &mut Harness, color| {
             let shapes = image(context, Vec::new(), |ui| {
-                plot_settings_window(ui.ctx(), &mut harness.state)
+                plot_settings_window(ui.ctx(), &mut harness.state, &mut None)
             });
             shapes
                 .iter()
@@ -5191,7 +5199,7 @@ mod tests {
             seen = texts(&image(
                 &context,
                 vec![egui::Event::PointerMoved(pos)],
-                |ui| plot_settings_window(ui.ctx(), &mut harness.state),
+                |ui| plot_settings_window(ui.ctx(), &mut harness.state, &mut None),
             ));
         }
         assert!(is_painted(&seen, &reason), "hovering says why");
@@ -5609,7 +5617,7 @@ mod tests {
         elsewhere: Option<egui::Pos2>,
     ) {
         click(context, pos, egui::PointerButton::Primary, |ui| {
-            plot_settings_window(ui.ctx(), &mut harness.state)
+            plot_settings_window(ui.ctx(), &mut harness.state, &mut None)
         });
         one_frame(
             context,
@@ -5619,7 +5627,7 @@ mod tests {
         match elsewhere {
             None => one_frame(context, &mut harness.state, vec![key(egui::Key::Enter)]),
             Some(away) => click(context, away, egui::PointerButton::Primary, |ui| {
-                plot_settings_window(ui.ctx(), &mut harness.state)
+                plot_settings_window(ui.ctx(), &mut harness.state, &mut None)
             }),
         }
         one_frame(context, &mut harness.state, Vec::new());
@@ -5673,7 +5681,7 @@ mod tests {
         assert_eq!(hints.len(), 4, "From and to of two rows");
         // Row 2 is not on the bar: typing there goes nowhere.
         click(&context, hints[2], egui::PointerButton::Primary, |ui| {
-            plot_settings_window(ui.ctx(), &mut harness.state)
+            plot_settings_window(ui.ctx(), &mut harness.state, &mut None)
         });
         one_frame(
             &context,
@@ -5963,7 +5971,7 @@ mod tests {
         );
         let pos = text_exact(&painted, &tr!("plot-legend-top-left")).center;
         click(&context, pos, egui::PointerButton::Primary, |ui| {
-            plot_settings_window(ui.ctx(), &mut harness.state)
+            plot_settings_window(ui.ctx(), &mut harness.state, &mut None)
         });
         let model = harness.model();
         let bar = model.panels[0].color_bar.as_ref().unwrap();
@@ -5994,7 +6002,7 @@ mod tests {
         );
         let pos = text_exact(&painted, &tr!("plot-legend-bottom-left")).center;
         click(&context, pos, egui::PointerButton::Primary, |ui| {
-            plot_settings_window(ui.ctx(), &mut harness.state)
+            plot_settings_window(ui.ctx(), &mut harness.state, &mut None)
         });
         let legend = harness.model().panels[0].legend.clone();
         assert_eq!(legend.position, LegendPosition::BottomLeft);
@@ -6043,7 +6051,7 @@ mod tests {
         );
         let pos = text_exact(&painted, &tr!("plot-color-bar-position-below")).center;
         click(&context, pos, egui::PointerButton::Primary, |ui| {
-            plot_settings_window(ui.ctx(), &mut harness.state)
+            plot_settings_window(ui.ctx(), &mut harness.state, &mut None)
         });
         let model = harness.model();
         let bar = model.panels[0].color_bar.as_ref().unwrap();
@@ -6249,7 +6257,7 @@ mod tests {
         let painted = paint_window(context, state, Vec::new());
         let button = text_exact(&painted, displayed).center;
         click(context, button, egui::PointerButton::Primary, |ui| {
-            plot_settings_window(ui.ctx(), state)
+            plot_settings_window(ui.ctx(), state, &mut None)
         });
         (paint_window(context, state, Vec::new()), button)
     }
@@ -6319,7 +6327,7 @@ mod tests {
             assert_ne!(read(&harness.model()), expected, "witness: not chosen yet");
             let pos = text_exact(&painted, &choice).center;
             click(&context, pos, egui::PointerButton::Primary, |ui| {
-                plot_settings_window(ui.ctx(), &mut harness.state)
+                plot_settings_window(ui.ctx(), &mut harness.state, &mut None)
             });
             assert_eq!(
                 read(&harness.model()),
@@ -6362,28 +6370,6 @@ mod tests {
         );
         assert_eq!(harness.model().panels[0].series[0].plot_type, unknown());
         assert!(is_painted(&painted, &tr!("plot-series-type-unknown")));
-    }
-
-    // -- The "Theme" tab ------------------------------------------------------
-
-    /// Paints [`theme_editor`] on `spec`; returns the last result and the
-    /// texts.
-    fn paint_theme(
-        context: &egui::Context,
-        spec: &mut PlotSpec,
-        events: Vec<egui::Event>,
-    ) -> (bool, Vec<Text>) {
-        let mut env = PickerEnv {
-            project: Default::default(),
-            user: Default::default(),
-            requests: Vec::new(),
-        };
-        let mut commit = true;
-        let painted = texts(&image(context, events, |ui| {
-            commit = theme_editor(ui, spec, &mut env);
-        }));
-        assert!(env.requests.is_empty(), "painting saves no color");
-        (commit, painted)
     }
 
     fn paint_axis(
@@ -6439,49 +6425,43 @@ mod tests {
         assert!(!is_painted(&painted, "4000"), "{painted:?}");
     }
 
-    /// #11: the "Theme" tab draws (themes, background, text, axes) without
-    /// changing anything as long as nothing is done — even when the local colors
-    /// differ from those it shows (the title of one axis, the scale of
-    /// another). Witness: a click on a theme does apply it and commits.
+    /// #11, #542: the General tab shows the global colors (all texts, all
+    /// axes) without changing anything as long as nothing is done, even when
+    /// the local colors differ from those it shows (the title of one axis, the
+    /// scale of another). Witness: a global color written by the row reaches
+    /// every local field.
     #[test]
-    fn the_theme_tab_draws_without_changing_anything() {
+    fn the_general_tab_draws_the_global_colors_without_changing_anything() {
         let mut spec = PlotSpec::empty("Figure").with_panels(PanelSpec::at(0, 0));
         spec.set_text_color("#336699");
         first_panel(&mut spec).left.title_color = "#aa0000".into();
         first_panel(&mut spec).left.tick_color = "#00aa00".into();
         let before = spec.clone();
         let context = test_support::context();
-        let (commit, painted) = paint_theme(&context, &mut spec, Vec::new());
-        assert!(!commit);
-        assert_eq!(spec, before);
+        let mut env = PickerEnv {
+            project: Default::default(),
+            user: Default::default(),
+            requests: Vec::new(),
+        };
+        let mut commit = true;
+        let painted = texts(&image(&context, Vec::new(), |ui| {
+            commit = form(ui, "trial", |form| {
+                global_color_rows(form, &mut spec, &mut env)
+            });
+        }));
+        assert!(!commit, "painting commits nothing");
+        assert_eq!(spec, before, "painting writes nothing");
         for label in [
-            tr!("plot-theme-themes"),
-            tr!("plot-theme-global-colors"),
-            tr!("plot-theme-background"),
-            tr!("plot-theme-text"),
-            tr!("plot-theme-axes"),
-            tr!("plot-theme-note"),
+            tr!("plot-general-text-color"),
+            tr!("plot-general-axes-color"),
         ] {
             assert!(is_painted(&painted, &label), "{label:?} missing");
         }
-        for label in [tr!("plot-theme-light"), tr!("plot-theme-dark")] {
-            assert!(is_painted(&painted, &label), "theme {label:?} missing");
-        }
-
-        let dark = &THEMES[1];
-        assert_ne!(spec.background, dark.background);
-        let pos = text_exact(&painted, &tr!("plot-theme-dark")).center;
-        let mut commits = Vec::new();
-        for events in [
-            vec![egui::Event::PointerMoved(pos)],
-            vec![click_event(pos, true)],
-            vec![click_event(pos, false)],
-        ] {
-            commits.push(paint_theme(&context, &mut spec, events).0);
-        }
-        assert_eq!(commits, [false, false, true], "the click commits once");
-        assert_eq!(spec.background, dark.background);
-        assert_eq!(spec.panels[0].left.title_color, dark.text);
+        // What the rows write is the whole graph at once, in one step.
+        spec.set_text_color("#112233");
+        spec.set_axes_color("#445566");
+        assert_eq!(first_panel(&mut spec).left.title_color, "#112233");
+        assert_eq!(first_panel(&mut spec).left.tick_color, "#445566");
     }
 
     // -- The formula reminder -------------------------------------------------
@@ -6877,7 +6857,7 @@ mod tests {
             context,
             text_exact(&painted, row).center,
             egui::PointerButton::Primary,
-            |ui| plot_settings_window(ui.ctx(), state),
+            |ui| plot_settings_window(ui.ctx(), state, &mut None),
         );
         let painted = paint_window(context, state, Vec::new());
         let top = text_exact(&painted, row).center.y;
@@ -6888,7 +6868,7 @@ mod tests {
             .unwrap_or_else(|| panic!("{label} not painted below {row}"))
             .center;
         click(context, pos, egui::PointerButton::Primary, |ui| {
-            plot_settings_window(ui.ctx(), state)
+            plot_settings_window(ui.ctx(), state, &mut None)
         });
         paint_window(context, state, Vec::new());
     }

@@ -492,6 +492,17 @@ impl UserThemes {
         self.write()
     }
 
+    /// Moves the use count of `from` to `to` (a renamed project theme keeps
+    /// its rank). Nothing to move: nothing written.
+    pub fn move_use(&mut self, from: &ThemeRef, to: &ThemeRef) -> Result<(), UserThemeError> {
+        self.writable()?;
+        let Some(count) = self.uses.remove(&from.key()) else {
+            return Ok(());
+        };
+        *self.uses.entry(to.key()).or_insert(0) += count;
+        self.write()
+    }
+
     fn prune_project_counts(&mut self) {
         let mut projects: Vec<(String, u64)> = self
             .uses

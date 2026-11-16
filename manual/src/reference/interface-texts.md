@@ -56,6 +56,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Delete Calculation… | Supprimer le calcul… |
 | Delete Layer | Supprimer le calque |
 | Delete Recovery Copy | Supprimer la copie de secours |
+| Delete Theme | Supprimer le thème |
 | Detach from Calculation | Détacher du calcul |
 | Detach Project Manager | Détacher le gestionnaire de projet |
 | Direct Deconvolution… | Déconvolution directe… |
@@ -156,6 +157,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Relink transposed sheet | Relier de nouveau la feuille transposée |
 | Remove Formula, Keep Data | Retirer la formule, garder les données |
 | Rename | Renommer |
+| Rename Theme | Renommer le thème |
 | Reopen Last Import… | Rouvrir le dernier import… |
 | Replace File | Remplacer le fichier |
 | Replace original data | Remplacer les données originales |

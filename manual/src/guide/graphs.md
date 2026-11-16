@@ -119,13 +119,15 @@ While the window is open, your changes show on the graph at once. Click **OK** t
 
 | Tab | What you set |
 |---|---|
-| **General** | **Title**, **Title color**, **Background**, **Warn about out-of-date data**, **Size**, and the closed **Advanced** block (**When axes are added**) |
+| **General** | **Title**, **Title color**, **Background**, **Color of all texts**, **Color of all axes**, **Warn about out-of-date data**, **Size**, and the closed **Advanced** block (**When axes are added**) |
 | **Plot Area** | **Layer title**, vertical and horizontal **Gridlines** |
 | **Axes** | One axis at a time: title, scale, range, ticks, color |
 | **Legend** | **Show legend**, **Position**, **Text from**, the **Text**, **Frame** and **Layout** settings, and the folded **Color bar** section at the bottom |
-| **Theme** | **Light** or **Dark** theme, and **Global colors** |
+| **Theme** | The themes as tiles, and what to do with the selected one: **Save Theme As…**, **Rename…**, **Update From This Graph**, **Reset**, **Delete**, **Use for new graphs** and **Apply Theme…** |
 
 A new graph has no background color: the figure is transparent when exported, and white on screen. Choose a dark background and the automatic text turns white.
+
+**Color of all texts** and **Color of all axes** set a color for every title, axis, tick and gridline of the graph at once. They replace the colors you set one by one in the other tabs, and the last one you set wins. Nothing else is remembered: set a color in another tab afterwards and only that text changes.
 
 ### Graph size
 
@@ -388,6 +390,20 @@ The right side previews the first selected graph with the theme applied. Rest th
 ### Keep a theme
 
 Choose **Graph ▸ Save Theme As…**, type a name, and choose where to keep it: **Mine** (for every project on this computer, the default) or **Project** (in this project's file, so it travels with the project; **Ctrl+Z** takes it back). A name that is already used is refused.
+
+### Manage your themes
+
+The **Theme** tab of Graph Properties is the place to look after themes. The tiles are the same as in the **Apply Theme** window: click one to select it. Under them are the things you can do with the selected theme. A button that cannot act is greyed out, and a bubble on it says why.
+
+- **Save Theme As…** keeps this graph as it is now in the window, under a new name, in **Mine** or in **Project**. The new theme is selected.
+- **Rename…** gives a user theme or a project theme another name. A built-in theme keeps its name. A renamed theme keeps its place in the order of the tiles.
+- **Update From This Graph** replaces the style of the selected theme with the style of this graph. Done on a built-in theme, it edits it: its tile carries a small dot, and **Reset** gives its original style back. **Reset** is greyed out for a theme that was not edited.
+- **Delete** deletes a user theme or a project theme. A built-in theme cannot be deleted. A theme of **Mine** is not part of the project, so **Ctrl+Z** cannot bring it back and StokesForge asks you first. A project theme is deleted at once, and **Ctrl+Z** takes it back.
+- **Use for new graphs** makes the selected theme the one every new graph starts with: all of it except the texts and the axis ranges, which the new graph keeps. Graphs that already exist and graphs made by scripts do not change. A project theme cannot be the default, since it belongs to one project. The box is the same setting as **Default theme** in **File ▸ Preferences… ▸ Display ▸ New**.
+- **Apply Theme…** opens the **Apply Theme** window on this graph. The theme goes into the window you are in, not into the graph: **OK** keeps it with your other changes as one step, **Cancel** or **Esc** in Graph Properties takes it back. **Esc** in the **Apply Theme** window closes only that window.
+
+Changes to a theme of **Mine** are kept at once, whatever you do with **OK** or **Cancel**. Changes to a project theme made from this tab are part of the Graph Properties step: **Cancel** takes them back.
+
 
 ## Titles and formulas
 

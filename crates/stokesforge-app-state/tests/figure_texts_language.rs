@@ -3,7 +3,8 @@
 //! One test, in its own binary: the language is global, and two tests that
 //! switch it in parallel would trample each other.
 
-use stokesforge_app_state::figure_texts::{figure_texts, theme_name};
+use stokesforge_app_state::builtin_themes::display_name as theme_name;
+use stokesforge_app_state::figure_texts::figure_texts;
 use stokesforge_app_state::i18n::{self, build_loader, Language};
 use stokesforge_app_state::object_manager::object_tree;
 use stokesforge_app_state::state::{series_list_label, Action, AppState};

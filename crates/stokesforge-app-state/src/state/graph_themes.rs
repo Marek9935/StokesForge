@@ -52,7 +52,7 @@ impl AppState {
         name: &str,
         graph: stokesforge_core::NodeId,
     ) -> Result<u64, UserThemeError> {
-        let spec = self.plot_spec(graph).ok_or(UserThemeError::Unknown)?;
+        let spec = self.spec_for_theme(graph).ok_or(UserThemeError::Unknown)?;
         self.user_themes.add_from_graph(name, &spec)
     }
 
@@ -73,7 +73,7 @@ impl AppState {
         id: u64,
         graph: stokesforge_core::NodeId,
     ) -> Result<(), UserThemeError> {
-        let spec = self.plot_spec(graph).ok_or(UserThemeError::Unknown)?;
+        let spec = self.spec_for_theme(graph).ok_or(UserThemeError::Unknown)?;
         self.user_themes.overwrite_from_graph(id, &spec)
     }
 
@@ -83,7 +83,7 @@ impl AppState {
         index: usize,
         graph: stokesforge_core::NodeId,
     ) -> Result<(), UserThemeError> {
-        let spec = self.plot_spec(graph).ok_or(UserThemeError::Unknown)?;
+        let spec = self.spec_for_theme(graph).ok_or(UserThemeError::Unknown)?;
         self.user_themes.set_builtin_from_graph(index, &spec)
     }
 

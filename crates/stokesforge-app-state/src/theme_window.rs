@@ -98,6 +98,7 @@ pub struct ApplyThemeWindow {
     hover_theme: Option<ThemeSource>,
     hover_families: Option<ThemeFamilies>,
     hover_add_missing: Option<bool>,
+    into_draft: bool,
 }
 
 impl ApplyThemeWindow {
@@ -111,7 +112,24 @@ impl ApplyThemeWindow {
             hover_theme: None,
             hover_families: None,
             hover_add_missing: None,
+            into_draft: false,
         }
+    }
+
+    /// A window opened from the Theme tab of Graph Properties (#542): it
+    /// previews and applies **into the open draft** of `graph`, so the OK or
+    /// Cancel of Graph Properties decides and no history step of its own is
+    /// made.
+    pub fn new_into_draft(graph: NodeId, chosen: ThemeSource) -> Self {
+        Self {
+            into_draft: true,
+            ..Self::new(vec![graph], chosen)
+        }
+    }
+
+    /// True when the theme goes into the Graph Properties draft.
+    pub fn into_draft(&self) -> bool {
+        self.into_draft
     }
 
     /// The graphs the theme goes to, in order.
@@ -221,6 +239,32 @@ pub struct SaveThemeWindow {
     pub name: String,
     /// Where it goes.
     pub target: ThemeTarget,
+}
+
+/// The Rename Theme window (#542): the new name of a user or project theme.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RenameThemeWindow {
+    /// The theme being renamed.
+    pub theme: ThemeRef,
+    /// The name being typed (starts as the current name).
+    pub name: String,
+}
+
+/// What the Theme tab of Graph Properties offers for the selected theme: each
+/// control is `None` when it can act, `Some(reason)` when it is greyed (every
+/// greyed control says why).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThemeButtons {
+    /// Rename…
+    pub rename: Option<String>,
+    /// Update From This Graph.
+    pub update: Option<String>,
+    /// Reset (an edited built-in only).
+    pub reset: Option<String>,
+    /// Delete (user and project themes).
+    pub delete: Option<String>,
+    /// Use for new graphs (a built-in or a user theme).
+    pub use_for_new: Option<String>,
 }
 
 /// What an entry of the theme menus does for a target, with the reason when it

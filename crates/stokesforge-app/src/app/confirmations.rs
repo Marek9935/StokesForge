@@ -34,6 +34,37 @@ use super::dialogs::{
 // All blocking dialogs are of class Small (S-F11), the default size of their
 // nature, except two read-only ones that ask for it.
 
+/// The confirmation before a user theme is deleted (#542). The user's library
+/// has no history: Ctrl+Z cannot bring a theme back (a project theme is
+/// undoable and asks nothing). Painted by `show_edit_dialogs` **before** Graph
+/// Properties, so that its Escape cancels this question only; it does not
+/// block the other actions, the modal backdrop already blocks the clicks.
+pub(super) fn theme_delete_window(
+    ctx: &egui::Context,
+    state: &AppState,
+    actions: &mut Vec<Action>,
+) {
+    let Some(theme) = state.pending_theme_delete() else {
+        return;
+    };
+    let name = state.theme_display_name(theme);
+    match modal_confirm(
+        ctx,
+        egui::Id::new("stokesforge_delete_theme"),
+        &tr!("theme-delete-title"),
+        PlainSize::Default,
+        &tr!("theme-delete-verb"),
+        &tr!("theme-delete-verb", "hint"),
+        |ui| {
+            ui.label(tr!("theme-delete-body", name = name.as_str()));
+        },
+    ) {
+        ConfirmOutcome::Open => {}
+        ConfirmOutcome::Confirm => actions.push(Action::ConfirmDeleteTheme),
+        ConfirmOutcome::Cancel => actions.push(Action::CancelDeleteTheme),
+    }
+}
+
 /// Paints the pending blocking dialog, if there is one, and pushes its answer.
 pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Action>) {
     if let Some(gesture) = state.unsaved_pending() {

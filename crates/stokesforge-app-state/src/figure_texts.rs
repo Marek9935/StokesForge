@@ -70,15 +70,6 @@ pub fn variable_help_rows() -> Vec<(String, String)> {
         .collect()
 }
 
-/// The displayed name of the predefined theme `index` of
-/// [`stokesforge_plot::THEMES`] (clamped), in the current language.
-pub fn theme_name(index: usize) -> String {
-    match index.min(stokesforge_plot::THEMES.len() - 1) {
-        0 => tr!("plot-theme-light"),
-        _ => tr!("plot-theme-dark"),
-    }
-}
-
 /// The label of a « Text from » choice of a legend (#499), in the current
 /// language. The names of the header rows are those of the worksheet.
 pub fn legend_text_from_label(from: &stokesforge_plot::LegendTextFrom) -> String {

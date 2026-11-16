@@ -425,7 +425,7 @@ select a graph in the foreground with nothing selected in it, Ctrl+C, then
 (`wl-paste -t image/png > figure.png` to read a representation).
 
 **Tabs** (`state::PlotSettingsTab`, `plot-tab-*` keys, in English):
-"General" (title and its color, background), "Plot Area" (layer title,
+"General" (title and its color, background, the color of all texts and of all axes), "Plot Area" (layer title,
 grid lines), "Axes" (one side of the cell at a time, chosen in the vertical
 strip at the left of the page: axis title (quantity and units), scale, display,
 axis color; see "Axes tab: four sides" below),
@@ -449,15 +449,54 @@ Typst text (interface side: "Math", #322) goes through `formula_field`; any othe
 The test `each_reminder_example_compiles` checks that each example compiles. A
 series name left empty takes that of the column, displayed as is.
 
-**"Theme" tab**: two predefined themes (`stokesforge_plot::THEMES`, identified by `Theme::id`
-`light` and `dark`; named `plot-theme-light`/`plot-theme-dark`) and three global colors: background, text, axes. A global
-color is **written into all the local fields** (graph title,
-title and scale of each axis of each panel;
-`PlotSpec::set_text_color`/`set_axes_color`/`apply_theme`): the last
-setting overwrites what had been set one by one, and nothing more is remembered
-(the `.stf` format does not change). Everything stays in the draft of the
-window: a single history step on confirmation. The themes leave the
-text and the axes on automatic, so they follow the background.
+**Global colors (General tab, #542)**: the color of all texts and the color of all axes
+(`plot-general-text-color`, `plot-general-axes-color`; the background is the row
+above them; they were on the Theme tab, form 514-4 V5) are laid out with the
+other rows of the General form (`global_color_rows` in `plot_settings.rs`, no
+collapsible section, S-L5). A global color is **written into all the local
+fields** (graph title, title and scale of each axis of each panel, free texts;
+`PlotSpec::set_text_color`/`set_axes_color`): the last setting overwrites what
+had been set one by one, and nothing more is remembered (the `.stf` format does
+not change). Painting writes nothing: a value is written only when the user
+changed it. Everything stays in the draft of the window: a single history step
+on confirmation. `stokesforge_plot::THEMES` (Light and Dark) now only holds the
+colors of the two first built-in themes (`builtin_themes`); the old two-button
+list of the Theme tab and `figure_texts::theme_name` are gone.
+
+**"Theme" tab: the theme manager (#542, S5 of #514)**. The shared picker
+(`app/theme_picker.rs`: rows Project and Mine, specimen tiles, More themes)
+chooses a theme (`AppState::theme_selection`, session state; a theme that goes
+falls back to Light). The picker scrolls; the controls stay at the foot of the
+page (`app/theme_manager.rs`, their height measured the frame before because
+they wrap): in one wrapping row **Save Theme As…** (the #541 window, from this
+graph as the Properties draft holds it: `AppState::spec_for_theme`, never the
+model alone), **Rename…** (the Rename Theme window, `rename_theme_window.rs`),
+**Update From This Graph**, **Reset** (an edited built-in only), **Delete**
+(destructive look); then the box **Use for new graphs** with its « ? » and
+**Apply Theme…**. What each control allows, with the reason when it is greyed,
+is `AppState::theme_buttons` (`ThemeButtons`: Rename and Delete greyed on a
+built-in and on the Copied Theme; Reset on an unedited built-in and on any
+other theme; Use for new graphs on a project theme; a library that is
+read-only greys what writes it). Library writes (`AppState::rename_user_theme`,
+`overwrite_user_theme`, `edit_builtin_theme`, `reset_builtin_theme`) are not in
+the history: **Delete of a user theme asks a confirmation**
+(`pending_theme_delete`, `confirmations::theme_delete_window`, Cancel is the
+default); a project theme is `Command::SetProjectThemes`: a delete is **undoable
+and asks nothing**. Opened from Graph Properties, a project change joins the
+Graph Properties macro, so Cancel takes it back, like any other change of the
+window. A renamed user theme keeps its id and so its use count; a renamed
+project theme moves its count (`UserThemes::move_use`). **Apply Theme…**
+opens the #541 window **into the draft** (`ApplyThemeWindow::new_into_draft`,
+`Action::OpenApplyThemeIntoDraft`): its preview starts from the draft, Apply
+puts `themed_spec(...)` into the draft and commits it as any other edit
+(no history step of its own; OK keeps it, Cancel of Graph Properties takes it
+back), and counts the use. **Use for new graphs** and the Preferences row
+**Default theme** (Display › New, choice: None, the built-ins, the user's themes)
+are one setting (`Action::SetNewGraphTheme`, `AppState::new_graph_theme`).
+The windows opened from the tab (Apply Theme, Save Theme As, Rename Theme, the
+delete confirmation) are painted **before** Graph Properties in
+`show_edit_dialogs`: Escape goes to the first modal painted, and must close
+only the one on top.
 
 **Themes engine (#538, engine only: no screen yet)**. A graph theme is a style
 snapshot of a whole graph, applied to other graphs **by families** (#514, forms
