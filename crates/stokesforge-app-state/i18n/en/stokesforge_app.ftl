@@ -597,6 +597,7 @@ history-set-column-meta = Edit Column Properties
 history-set-column-meta-of = Edit Properties of Column { $column }
 history-set-plot-spec = Edit Graph
 history-set-plot-spec-named = Edit Graph “{ $name }”
+history-set-project-themes = Edit Project Themes
 history-set-saved-colors = Edit Saved Colors
 history-sort-folder = Sort Folder
 history-sort-folder-named = Sort Folder “{ $name }”

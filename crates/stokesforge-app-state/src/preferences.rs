@@ -303,6 +303,11 @@ struct PreferencesFile {
     /// finds it again. Missing or unreadable: empty.
     #[serde(default, deserialize_with = "lenient")]
     new_graph_legend_template: Option<String>,
+    /// Default theme of **new** graphs (#539), a [`crate::user_themes::ThemeRef`]
+    /// key (built-in or user theme); missing, unreadable or a project theme:
+    /// none.
+    #[serde(default, deserialize_with = "lenient")]
+    new_graph_theme: Option<String>,
     /// "Keep in Results" remembered per analysis operation (M5, #148), by
     /// [`OperationKind::key`]. Kept raw: an unreadable entry is dropped alone.
     #[serde(default)]
@@ -385,6 +390,7 @@ pub struct Preferences {
     new_graph_decimal_comma: bool,
     auto_margins: stokesforge_render::AutoMargins,
     new_graph_legend_text: stokesforge_plot::LegendText,
+    new_graph_theme: Option<crate::user_themes::ThemeRef>,
     analysis_keep_by_operation: BTreeMap<String, bool>,
     panels: PanelLayout,
     default_folders: [Option<String>; 3],
@@ -466,6 +472,11 @@ impl Preferences {
                 template: file.new_graph_legend_template.unwrap_or_default(),
                 row_column: None,
             },
+            new_graph_theme: file
+                .new_graph_theme
+                .as_deref()
+                .and_then(crate::user_themes::ThemeRef::from_key)
+                .filter(|theme| !matches!(theme, crate::user_themes::ThemeRef::Project(_))),
             analysis_keep_by_operation: read_keep_by_operation(file.analysis_keep_by_operation),
             panels: PanelLayout::from_json(file.panels.as_ref()),
             default_folders: [
@@ -712,6 +723,29 @@ impl Preferences {
         ];
         self.new_graph_legend_text = text;
         self.save_fields(fields)
+    }
+
+    /// Default theme of new graphs (#539): a built-in or a user theme, never a
+    /// project theme. Whether it still exists is for the library to say (a
+    /// deleted one falls back to none, see `AppState::new_graph_theme`).
+    pub fn new_graph_theme(&self) -> Option<&crate::user_themes::ThemeRef> {
+        self.new_graph_theme.as_ref()
+    }
+
+    /// Remembers the default theme of new graphs (`None`: no theme), in one
+    /// write, without replacing the other preferences. A project theme is
+    /// refused (stored as none): it belongs to one project.
+    pub fn save_new_graph_theme(
+        &mut self,
+        theme: Option<crate::user_themes::ThemeRef>,
+    ) -> std::io::Result<()> {
+        let theme =
+            theme.filter(|theme| !matches!(theme, crate::user_themes::ThemeRef::Project(_)));
+        let value = theme
+            .as_ref()
+            .map_or(serde_json::Value::Null, |theme| theme.key().into());
+        self.new_graph_theme = theme;
+        self.save_field("new_graph_theme", value)
     }
 
     /// Size cap of a `.stf` on open, in MB (A2, #316); 512 by default, always within

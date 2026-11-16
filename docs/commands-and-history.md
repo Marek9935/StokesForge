@@ -43,6 +43,7 @@ Authoritative list: `stokesforge-commands/src/command.rs` (`Command`,
 | `SetPlotSpec { graph, spec }` | data |
 | `EditPlotSpec { graph, spec, kind }` | data (same spec delta, with a `PlotEditKind` reason) |
 | `SetSavedColors { colors }` | data |
+| `SetProjectThemes { themes }` | data (#540: the graph themes saved in the project, as a whole list, `DataDelta::ProjectThemes`; label `SetProjectThemes`). Add, rename, overwrite and delete are each one replacement, hence one undo step. Refused with nothing written, and no history entry: an empty or over-long name (`MAX_THEME_NAME_CHARS`), a name taken twice with case and outer spaces ignored (`same_theme_name`), more than `MAX_THEMES`. Two stores (project, user) may hold the same name |
 | `SetFolderOrder { folder, manual }` | data (#425: automatic or manual order of a folder, `DataDelta::FolderOrder`; label `SortFolder`) |
 
 The empty graph of "File › Add Graph" (#73) reuses `AddGraph` with

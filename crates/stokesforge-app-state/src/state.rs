@@ -81,10 +81,12 @@ use crate::selection::{ColumnRanks, GridCursor, Selection};
 use crate::tr;
 use crate::tree_drop::{final_order, plan_moves, MovePlace};
 use crate::user_colors::UserColors;
+use crate::user_themes::UserThemes;
 
 mod analysis;
 mod autosave;
 mod column_use;
+mod graph_themes;
 mod import_advanced;
 mod import_apply;
 mod import_auto;
@@ -1218,6 +1220,41 @@ pub enum Action {
         /// A graph with fewer layers than the theme gets empty layers up to
         /// the theme's count; off, only its existing layers are styled.
         add_missing_layers: bool,
+    },
+    /// Saves the style of `graph` as a new theme of the project (#540): one
+    /// undo step ([`Command::SetProjectThemes`]). The data is stripped
+    /// ([`stokesforge_plot::GraphTheme::capture`]). A name already used in the
+    /// project (case ignored) or an empty one is refused with a message and
+    /// nothing changes.
+    AddProjectTheme {
+        /// The graph whose style is captured.
+        graph: NodeId,
+        /// Name of the theme.
+        name: String,
+    },
+    /// Renames the project theme `name` to `new_name` (#540), keeping its
+    /// place. Refused like [`Action::AddProjectTheme`]; renaming a theme to
+    /// the same name with another case is allowed.
+    RenameProjectTheme {
+        /// Current name (case ignored).
+        name: String,
+        /// New name.
+        new_name: String,
+    },
+    /// Deletes the project theme `name` (#540). Nothing happens when there is
+    /// none.
+    DeleteProjectTheme {
+        /// Name of the theme (case ignored).
+        name: String,
+    },
+    /// Replaces the style of the project theme `name` with the one captured
+    /// from `graph` (#540), keeping its name and its place. Nothing happens
+    /// when there is no such theme.
+    OverwriteProjectTheme {
+        /// Name of the theme (case ignored).
+        name: String,
+        /// The graph whose style is captured.
+        graph: NodeId,
     },
     /// Opens (or brings to the wanted tab) the properties window of the
     /// graph `graph` — right-click on a graph component, or the
@@ -3471,6 +3508,9 @@ pub struct AppState {
     /// Colors saved for the user, outside the project (see
     /// [`crate::user_colors`]).
     user_colors: UserColors,
+    /// The user's graph themes, kept on this machine (#539, see
+    /// [`crate::user_themes`]).
+    user_themes: UserThemes,
     /// Current grid selection of each displayed sheet — pure UI
     /// state, never in the history (see the head doc of
     /// [`crate::selection`]). Missing key = no selection in this
@@ -3664,6 +3704,7 @@ impl AppState {
     ) -> SessionResult<Self> {
         let snapshot = handle.snapshot()?;
         let analysis_recent = preferences.analysis_recent().to_vec();
+        let preferences_folder = preferences.config_folder().map(Path::to_path_buf);
         // Never deduced from `path`: a file that exists is not a loaded
         // project (#315). `main` sets the mark through [`AppState::mark_loaded`].
         let saved_revision = None;
@@ -3725,6 +3766,11 @@ impl AppState {
             plot_macro_open: false,
             figure_grew_in_window: false,
             user_colors: UserColors::load(),
+            // Next to the preferences actually in use: a test that injects a
+            // preferences file never reads the real library of the machine.
+            user_themes: UserThemes::load_from(
+                preferences_folder.map(|folder| folder.join(crate::user_themes::FILE_NAME)),
+            ),
             selection: std::collections::HashMap::new(),
             header_editing: None,
             formula_refusal_memo: std::cell::RefCell::new(None),
@@ -6769,6 +6815,44 @@ impl AppState {
             Action::SetPlotSpec { graph, spec } => {
                 self.execute(Command::SetPlotSpec { graph, spec })
             }
+            Action::AddProjectTheme { graph, name } => {
+                if let Some(spec) = self.plot_spec(graph) {
+                    let mut themes = self.snapshot.tree.project_themes().to_vec();
+                    themes.push(stokesforge_plot::GraphTheme::capture(name, &spec));
+                    self.execute(Command::SetProjectThemes { themes });
+                }
+            }
+            Action::RenameProjectTheme { name, new_name } => {
+                let mut themes = self.snapshot.tree.project_themes().to_vec();
+                if let Some(theme) = themes
+                    .iter_mut()
+                    .find(|t| stokesforge_plot::same_theme_name(&t.name, &name))
+                {
+                    theme.name = new_name;
+                    self.execute(Command::SetProjectThemes { themes });
+                }
+            }
+            Action::DeleteProjectTheme { name } => {
+                let mut themes = self.snapshot.tree.project_themes().to_vec();
+                let before = themes.len();
+                themes.retain(|t| !stokesforge_plot::same_theme_name(&t.name, &name));
+                if themes.len() != before {
+                    self.execute(Command::SetProjectThemes { themes });
+                }
+            }
+            Action::OverwriteProjectTheme { name, graph } => {
+                let Some(spec) = self.plot_spec(graph) else {
+                    return;
+                };
+                let mut themes = self.snapshot.tree.project_themes().to_vec();
+                if let Some(theme) = themes
+                    .iter_mut()
+                    .find(|t| stokesforge_plot::same_theme_name(&t.name, &name))
+                {
+                    *theme = stokesforge_plot::GraphTheme::capture(theme.name.clone(), &spec);
+                    self.execute(Command::SetProjectThemes { themes });
+                }
+            }
             Action::ApplyTheme {
                 theme,
                 families,
@@ -8957,12 +9041,22 @@ impl AppState {
     /// file keeps its own), and the axis titles read from the columns (#506,
     /// [`stokesforge_core::resolve::with_default_axis_titles`]). All of it
     /// rides in the creation command itself: one history step.
-    fn with_new_graph_defaults(&self, mut spec: PlotSpec) -> PlotSpec {
+    fn with_new_graph_defaults(&self, spec: PlotSpec) -> PlotSpec {
+        // The default theme first (#539: every family but the texts and the
+        // ranges), then what the Preferences say about the legend text, which
+        // wins over it. A full theme brings its own legend look, frame included; Light and Dark
+        // (colours only) leave the no-frame default alone.
+        let themed = self
+            .new_graph_theme()
+            .is_some_and(|(_, theme)| !theme.colors_only);
+        let mut spec = self.with_default_theme(spec);
         let text = self.new_graph_legend_text();
         for panel in spec.panels.iter_mut() {
             panel.legend.text.from = text.from.clone();
             panel.legend.text.template = text.template.clone();
-            panel.legend.frame = false;
+            if !themed {
+                panel.legend.frame = false;
+            }
         }
         stokesforge_core::resolve::with_default_axis_titles(&self.snapshot.tree, spec)
     }

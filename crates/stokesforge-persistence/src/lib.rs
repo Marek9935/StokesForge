@@ -99,6 +99,7 @@ mod convert;
 mod error;
 mod recipe_record;
 mod schema;
+mod themes;
 mod transposes;
 mod unknown;
 mod version;
@@ -114,6 +115,7 @@ use convert::ConvertError;
 use schema::{FileBody, NodeRecord, FORMAT_VERSION, MAGIC};
 
 pub use error::{PersistenceError, PersistenceResult};
+pub use themes::{decode_theme, decode_themes, encode_theme, encode_themes, MAX_THEME_BYTES};
 
 /// Maximum size of a `.stf` at open when the caller sets none
 /// (A2, #316): 512 MB. The file not being compressed, this is also the
@@ -375,6 +377,7 @@ pub fn save_with_geometries(
         nodes,
         save_counter,
         saved_colors: convert::saved_colors_to_record(tree.saved_colors()),
+        project_themes: themes::themes_to_records(tree.project_themes()),
         calculations: calculations::calculations_to_records(tree),
         correction_traces: calculations::corrections_to_records(tree),
         transposes: transposes::transposes_to_records(tree),
@@ -678,6 +681,7 @@ fn build_project_reported(body: FileBody, path: &Path) -> PersistenceResult<(Pro
             source,
         })?
         .with_saved_colors(convert::record_to_saved_colors(body.saved_colors))
+        .with_project_themes(themes::records_to_themes(body.project_themes))
         .with_manual_order(
             body.manual_order_folders
                 .iter()
@@ -1018,6 +1022,7 @@ mod tests {
             nodes: vec![root, child],
             save_counter: 0,
             saved_colors: Default::default(),
+            project_themes: Default::default(),
             manual_order_folders: Default::default(),
             calculations: Default::default(),
             correction_traces: Default::default(),
@@ -1048,6 +1053,7 @@ mod tests {
             nodes: vec![root, orphan],
             save_counter: 0,
             saved_colors: Default::default(),
+            project_themes: Default::default(),
             manual_order_folders: Default::default(),
             calculations: Default::default(),
             correction_traces: Default::default(),
@@ -1095,6 +1101,7 @@ mod tests {
             nodes: vec![root, orphan],
             save_counter: 0,
             saved_colors: Default::default(),
+            project_themes: Default::default(),
             manual_order_folders: Default::default(),
             calculations: Default::default(),
             correction_traces: Default::default(),
@@ -1117,6 +1124,7 @@ mod tests {
             nodes: vec![a, b],
             save_counter: 0,
             saved_colors: Default::default(),
+            project_themes: Default::default(),
             manual_order_folders: Default::default(),
             calculations: Default::default(),
             correction_traces: Default::default(),
@@ -1148,6 +1156,7 @@ mod tests {
             nodes: vec![root],
             save_counter: 0,
             saved_colors: Default::default(),
+            project_themes: Default::default(),
             manual_order_folders: Default::default(),
             calculations: Default::default(),
             correction_traces: Default::default(),
@@ -1198,6 +1207,7 @@ mod tests {
             nodes: vec![root, column],
             save_counter: 0,
             saved_colors: Default::default(),
+            project_themes: Default::default(),
             manual_order_folders: Default::default(),
             calculations: Default::default(),
             correction_traces: Default::default(),
@@ -1538,6 +1548,7 @@ mod tests {
             ],
             save_counter: 0,
             saved_colors: Default::default(),
+            project_themes: Default::default(),
             manual_order_folders: Default::default(),
             calculations: Default::default(),
             correction_traces: Default::default(),
@@ -1732,6 +1743,7 @@ mod tests {
             ],
             save_counter: 0,
             saved_colors: Default::default(),
+            project_themes: Default::default(),
             manual_order_folders: Default::default(),
             calculations: Default::default(),
             correction_traces: Default::default(),

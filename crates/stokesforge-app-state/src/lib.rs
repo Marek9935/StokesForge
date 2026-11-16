@@ -63,4 +63,5 @@ pub mod theme_apply;
 pub mod theme_specimen;
 pub mod tree_drop;
 pub mod user_colors;
+pub mod user_themes;
 pub mod widen;

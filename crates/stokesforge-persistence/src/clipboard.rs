@@ -236,6 +236,7 @@ fn decode_copies(
             next_id_hint: wrapper,
             nodes,
             saved_colors: Default::default(),
+            project_themes: Default::default(),
             // Keys that are not folders of the objects are dropped on build.
             manual_order_folders: manual_folders,
             calculations,

@@ -597,6 +597,7 @@ history-set-column-meta = Modifier les propriétés de la colonne
 history-set-column-meta-of = Modifier les propriétés de la colonne { $column }
 history-set-plot-spec = Modifier le graphique
 history-set-plot-spec-named = Modifier le graphique « { $name } »
+history-set-project-themes = Modifier les thèmes du projet
 history-set-saved-colors = Modifier les couleurs enregistrées
 history-sort-folder = Trier le dossier
 history-sort-folder-named = Trier le dossier « { $name } »
