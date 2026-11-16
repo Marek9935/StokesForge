@@ -23,6 +23,7 @@ Project
                   ├── Graph      { spec, … }    a PlotSpec
                   ├── Matrix     { … }
                   ├── Note       { … }
+                  ├── ScriptSettings { …, text }  raw TOML text, opaque (#548)
                   └── Unknown(RawVariant)       read from a newer file
 ```
 

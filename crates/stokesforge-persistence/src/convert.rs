@@ -1175,6 +1175,12 @@ pub(crate) fn kind_to_record(kind: &NodeKind) -> KindRecord {
             comment: meta.comment.clone(),
             text: text.clone(),
         },
+        NodeKind::ScriptSettings { meta, text } => KindRecord::ScriptSettings {
+            hidden: meta.hidden,
+            label: meta.label.clone(),
+            comment: meta.comment.clone(),
+            text: text.clone(),
+        },
         // The model already carries the raw name and content (C5, level 2):
         // making them go through identically is what makes two
         // successive saves byte-identical (B20) even for a node
@@ -1331,6 +1337,19 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
             comment,
             text,
         } => NodeKind::Note {
+            meta: WindowMeta {
+                label,
+                comment,
+                hidden,
+            },
+            text,
+        },
+        KindRecord::ScriptSettings {
+            hidden,
+            label,
+            comment,
+            text,
+        } => NodeKind::ScriptSettings {
             meta: WindowMeta {
                 label,
                 comment,

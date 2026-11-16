@@ -206,6 +206,7 @@ fn info<'py>(py: Python<'py>, handle: &Handle) -> PyResult<Bound<'py, PyDict>> {
             NodeKind::Graph { .. } => "graph",
             NodeKind::Matrix { .. } => "matrix",
             NodeKind::Note { .. } => "note",
+            NodeKind::ScriptSettings { .. } => "script_settings",
             NodeKind::Unknown(_) => "unknown",
         },
     )?;

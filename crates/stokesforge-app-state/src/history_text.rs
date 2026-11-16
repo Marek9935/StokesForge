@@ -95,6 +95,7 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
         HistoryLabel::AddGraph => tr!("history-add-graph"),
         HistoryLabel::AddMatrix => tr!("history-add-matrix"),
         HistoryLabel::AddNote => tr!("history-add-note"),
+        HistoryLabel::AddScriptSettings => tr!("history-add-script-settings"),
         HistoryLabel::RemoveNode { name: None } => tr!("history-remove-node"),
         HistoryLabel::RemoveNode { name: Some(name) } => {
             tr!("history-remove-node-named", name = name.as_str())
@@ -110,6 +111,15 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
         HistoryLabel::SetNoteText { name: None } => tr!("history-set-note-text"),
         HistoryLabel::SetNoteText { name: Some(name) } => {
             tr!("history-set-note-text-named", name = name.as_str())
+        }
+        HistoryLabel::SetScriptSettingsText { name: None } => {
+            tr!("history-set-script-settings-text")
+        }
+        HistoryLabel::SetScriptSettingsText { name: Some(name) } => {
+            tr!(
+                "history-set-script-settings-text-named",
+                name = name.as_str()
+            )
         }
         HistoryLabel::SetColumnMeta { column: None } => tr!("history-set-column-meta"),
         HistoryLabel::SetColumnMeta { column: Some(c) } => {

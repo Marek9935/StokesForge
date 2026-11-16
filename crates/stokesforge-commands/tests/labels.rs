@@ -89,10 +89,12 @@ fn rank(command: &Command) -> usize {
         Command::SetFolderOrder { .. } => 34,
         Command::SetTransposeAuto { .. } => 35,
         Command::SetSheetRawMark { .. } => 36,
+        Command::AddScriptSettings { .. } => 38,
+        Command::SetScriptSettingsText { .. } => 39,
     }
 }
 
-const VARIANTS: usize = 38;
+const VARIANTS: usize = 40;
 
 fn named(name: &str) -> Option<String> {
     Some(name.to_string())
@@ -280,6 +282,14 @@ fn samples(w: &World) -> Vec<(Command, HistoryLabel)> {
             HistoryLabel::AddNote,
         ),
         (
+            Command::AddScriptSettings {
+                parent: root,
+                name: None,
+                text: String::new(),
+            },
+            HistoryLabel::AddScriptSettings,
+        ),
+        (
             Command::RemoveNode { id: w.sheet },
             HistoryLabel::RemoveNode {
                 name: named("Sheet1"),
@@ -309,6 +319,15 @@ fn samples(w: &World) -> Vec<(Command, HistoryLabel)> {
                 text: String::new(),
             },
             HistoryLabel::SetNoteText {
+                name: named("Book1"),
+            },
+        ),
+        (
+            Command::SetScriptSettingsText {
+                id: w.book,
+                text: String::new(),
+            },
+            HistoryLabel::SetScriptSettingsText {
                 name: named("Book1"),
             },
         ),

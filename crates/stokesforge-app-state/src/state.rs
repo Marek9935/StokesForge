@@ -6230,6 +6230,9 @@ impl AppState {
                     // rewritten as is at save time, but the Project
                     // Manager has nothing to show for it.
                     NodeKind::Worksheet { .. } | NodeKind::Column(_) | NodeKind::Unknown(_) => None,
+                    // #548 L3: Script Settings has no tree entry or window
+                    // yet (lot L1 is the model only).
+                    NodeKind::ScriptSettings { .. } => None,
                 }
             })
             .collect()

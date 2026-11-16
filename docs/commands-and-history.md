@@ -39,6 +39,8 @@ Authoritative list: `stokesforge-commands/src/command.rs` (`Command`,
 | `SetWindowMeta { id, meta }` | data |
 | `SetSheetRawMark { sheet, mark }` | data (#488: the mark of an untouched import on a sheet, `DataDelta::RawMark`; label `SetSheetRawMark`) |
 | `SetNoteText { id, text }` | data |
+| `AddScriptSettings { parent, name, text }` | structure (#548: a Script Settings object, raw TOML text, default name "SettingsN"; label `AddScriptSettings`) |
+| `SetScriptSettingsText { id, text }` | data (#548: `DataDelta::ScriptSettingsText`; label `SetScriptSettingsText`; refused on a node that is not a Script Settings) |
 | `SetColumnMeta { column, meta }` | data |
 | `SetPlotSpec { graph, spec }` | data |
 | `EditPlotSpec { graph, spec, kind }` | data (same spec delta, with a `PlotEditKind` reason) |

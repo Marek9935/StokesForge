@@ -141,6 +141,15 @@ pub enum DataDelta {
         /// Mark after.
         after: Option<RawSheetMark>,
     },
+    /// Replacing the text of a Script Settings object (#548).
+    ScriptSettingsText {
+        /// Target Script Settings.
+        id: NodeId,
+        /// Text before.
+        before: String,
+        /// Text after.
+        after: String,
+    },
     /// Replacing the text of a note.
     NoteText {
         /// Target note.
@@ -1187,6 +1196,10 @@ impl History {
                 project.add_note(parent, name.as_deref(), &text)?;
                 Ok(structural(before, project, label))
             }
+            Command::AddScriptSettings { parent, name, text } => {
+                project.add_script_settings(parent, name.as_deref(), &text)?;
+                Ok(structural(before, project, label))
+            }
             Command::RemoveNode { id } => {
                 project.remove(id)?;
                 Ok(structural(before, project, label))
@@ -1235,6 +1248,7 @@ impl History {
             | Command::SetWindowMeta { .. }
             | Command::SetSheetRawMark { .. }
             | Command::SetNoteText { .. }
+            | Command::SetScriptSettingsText { .. }
             | Command::SetColumnMeta { .. }
             | Command::SetPlotSpec { .. }
             | Command::EditPlotSpec { .. }
@@ -1463,6 +1477,17 @@ impl History {
                     label,
                 })
             }
+            Command::SetScriptSettingsText { id, text } => {
+                let before = project.set_script_settings_text(id, &text)?;
+                Ok(Entry::Data {
+                    delta: Box::new(DataDelta::ScriptSettingsText {
+                        id,
+                        before,
+                        after: text,
+                    }),
+                    label,
+                })
+            }
             Command::SetColumnMeta { column, meta } => {
                 // A formula on an output column of a calculation: two
                 // sources of truth for the same cells.
@@ -1555,6 +1580,7 @@ impl History {
             | Command::AddGraph { .. }
             | Command::AddMatrix { .. }
             | Command::AddNote { .. }
+            | Command::AddScriptSettings { .. }
             | Command::RemoveNode { .. }
             | Command::ReplaceAnalysisData { .. }
             | Command::AddCalculation { .. }
@@ -1678,6 +1704,10 @@ impl History {
                 project.set_note_text(*id, before)?;
                 Ok(())
             }
+            DataDelta::ScriptSettingsText { id, before, .. } => {
+                project.set_script_settings_text(*id, before)?;
+                Ok(())
+            }
             DataDelta::ColumnMeta {
                 column,
                 before,
@@ -1784,6 +1814,10 @@ impl History {
                 project.set_note_text(*id, after)?;
                 Ok(())
             }
+            DataDelta::ScriptSettingsText { id, after, .. } => {
+                project.set_script_settings_text(*id, after)?;
+                Ok(())
+            }
             DataDelta::ColumnMeta { column, after, .. } => {
                 project.set_column_meta(*column, ColumnMeta::clone(after))?;
                 Ok(())
@@ -1858,6 +1892,7 @@ fn entry_has_no_effect(entry: &Entry) -> bool {
             | DataDelta::WindowMeta { .. }
             | DataDelta::RawMark { .. }
             | DataDelta::NoteText { .. }
+            | DataDelta::ScriptSettingsText { .. }
             | DataDelta::ColumnMeta { .. }
             | DataDelta::PlotSpec { .. }
             | DataDelta::SavedColors { .. }
@@ -2343,6 +2378,7 @@ fn data_delta_footprint(delta: &DataDelta) -> Footprint {
         DataDelta::WindowMeta { .. }
         | DataDelta::RawMark { .. }
         | DataDelta::NoteText { .. }
+        | DataDelta::ScriptSettingsText { .. }
         | DataDelta::PlotSpec { .. }
         | DataDelta::SavedColors { .. }
         | DataDelta::ProjectThemes { .. }
@@ -2422,6 +2458,7 @@ fn prior_columns(tree: &Tree, command: &Command) -> PriorColumns {
         | Command::AddGraph { .. }
         | Command::AddMatrix { .. }
         | Command::AddNote { .. }
+        | Command::AddScriptSettings { .. }
         | Command::RemoveNode { .. }
         | Command::ReplaceAnalysisData { .. }
         | Command::AddCalculation { .. }
@@ -2434,6 +2471,7 @@ fn prior_columns(tree: &Tree, command: &Command) -> PriorColumns {
         | Command::SetWindowMeta { .. }
         | Command::SetSheetRawMark { .. }
         | Command::SetNoteText { .. }
+        | Command::SetScriptSettingsText { .. }
         | Command::SetColumnMeta { .. }
         | Command::SetPlotSpec { .. }
         | Command::EditPlotSpec { .. }
@@ -2481,6 +2519,7 @@ fn just_orphaned_by_write(prior: &PriorColumns, delta: &DataDelta) -> Footprint 
         DataDelta::WindowMeta { .. }
         | DataDelta::RawMark { .. }
         | DataDelta::NoteText { .. }
+        | DataDelta::ScriptSettingsText { .. }
         | DataDelta::ColumnMeta { .. }
         | DataDelta::PlotSpec { .. }
         | DataDelta::SavedColors { .. }

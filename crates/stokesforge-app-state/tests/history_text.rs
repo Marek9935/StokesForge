@@ -56,10 +56,12 @@ fn rank(label: &HistoryLabel) -> usize {
         HistoryLabel::SortFolder { .. } => 32,
         HistoryLabel::SetTransposeAuto { .. } => 33,
         HistoryLabel::SetSheetRawMark { .. } => 34,
+        HistoryLabel::AddScriptSettings => 36,
+        HistoryLabel::SetScriptSettingsText { .. } => 37,
     }
 }
 
-const VARIANTS: usize = 36;
+const VARIANTS: usize = 38;
 
 /// Each variant, in **each** of its forms (known target or not, 0, 1 and
 /// several rows, each kind of group).
@@ -121,6 +123,11 @@ fn all_labels() -> Vec<HistoryLabel> {
         HistoryLabel::SetSheetRawMark { name: None },
         HistoryLabel::SetSheetRawMark {
             name: name("Sheet1"),
+        },
+        HistoryLabel::AddScriptSettings,
+        HistoryLabel::SetScriptSettingsText { name: None },
+        HistoryLabel::SetScriptSettingsText {
+            name: name("Settings1"),
         },
         HistoryLabel::SetNoteText { name: None },
         HistoryLabel::SetNoteText { name: name("N1") },

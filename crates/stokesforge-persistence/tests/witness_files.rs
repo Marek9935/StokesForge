@@ -374,6 +374,16 @@ fn witness_project() -> (Project, ViewTables) {
         ])
         .expect("project themes");
 
+    // Script Settings (#548): a raw TOML text kept as written, CRLF and
+    // Unicode included.
+    project
+        .add_script_settings(
+            root,
+            Some("Settings1"),
+            "# Réglages\r\n[fit]\r\nname = \"Lorentz é\"\r\n",
+        )
+        .expect("script settings");
+
     // A folder shown in manual order (#425), next to the automatic ones.
     let manual = project.add_folder(root, "Hand-ordered").expect("folder");
     project
@@ -464,6 +474,28 @@ fn a_file_written_before_the_project_themes_reads_back_without_any() {
         .map(|theme| theme.name.as_str())
         .collect();
     assert_eq!(names, ["Zeta thesis", "Dark copy"]);
+}
+
+/// The V1 witness as it was before Script Settings (#548): the kind is
+/// absent from it, and it reads back clean with none.
+#[test]
+fn a_file_written_before_script_settings_reads_back_without_any() {
+    let path = witnesses_dir()
+        .join("v1-before-script-settings")
+        .join("project.stf");
+    let (read_back, _, report) = load_with_report(&path).expect("the old witness reads back");
+    assert!(report.is_clean(), "{report:?}");
+    assert!(read_back.resolve_path("[Settings1]").is_err());
+    // The current witness carries one, text intact.
+    let (current, _, report) = load_with_report(&v1_file()).expect("current witness");
+    assert!(report.is_clean(), "{report:?}");
+    let id = current.resolve_path("[Settings1]").expect("settings");
+    match current.tree().get(id).expect("node").kind() {
+        stokesforge_core::NodeKind::ScriptSettings { text, .. } => {
+            assert_eq!(text, "# Réglages\r\n[fit]\r\nname = \"Lorentz é\"\r\n");
+        }
+        other => panic!("expected script settings, got {other:?}"),
+    }
 }
 
 #[test]

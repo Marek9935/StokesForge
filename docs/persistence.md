@@ -935,6 +935,23 @@ name repeats an earlier one (case ignored) is dropped, a name is cut at
 read back with no theme (`witness_files.rs`); `b3_hostile_project_themes`,
 `b13_project_themes_are_bounded`.
 
+## Script Settings: additive node kind (#548)
+
+`KindRecord::ScriptSettings { hidden, label, comment, text }` (and its strict
+mirror `KindRecordKnown::ScriptSettings`), the twin of `Note`: a raw TOML text
+that scripts read (`NodeKind::ScriptSettings`). The text is an **opaque
+string** at the format level: no parsing at load or save, nothing normalised
+(CRLF, control characters and Unicode come back byte for byte). **`FORMAT_VERSION`
+did not move.** Same shape as the Mixed precedent below: an older reader does
+not know the variant, its strict decoding fails, `unknown.rs` keeps the node as
+`KindRecord::Unknown` and a re-save gives it back unchanged (invariant 10), so
+it loses only that node, never the file. Witnesses:
+`tests/witnesses/v1/project.stf` regenerated with a `Settings1` node;
+`tests/witnesses/v1-before-script-settings/project.stf` is the previous bytes,
+frozen, read back with none (`witness_files.rs`); the disk and clipboard round
+trip in `clipboard.rs`; `b3_hostile_script_settings_text_is_kept_as_written`,
+and the b14 sweep plays `AddScriptSettings` / `SetScriptSettingsText`.
+
 ## The user's themes file (#539)
 
 The graph themes kept on this machine (offered in every project) are not in a

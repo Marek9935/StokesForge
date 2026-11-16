@@ -753,6 +753,27 @@ impl Project {
         )
     }
 
+    /// Adds a Script Settings object carrying the raw TOML `text`
+    /// (opaque here, #548). `name: None` → first free "SettingsN".
+    pub fn add_script_settings(
+        &mut self,
+        parent: NodeId,
+        name: Option<&str>,
+        text: &str,
+    ) -> CoreResult<NodeId> {
+        let name = self.window_name(parent, name, "Settings");
+        let index = self.tree.children(parent)?.len();
+        self.insert_node(
+            parent,
+            index,
+            &name,
+            NodeKind::ScriptSettings {
+                meta: WindowMeta::default(),
+                text: text.to_string(),
+            },
+        )
+    }
+
     /// Inserts a generic node **without children** at `index` in `parent`.
     /// Low-level facade of the `add_*` methods.
     ///
@@ -965,6 +986,24 @@ impl Project {
             .node_mut(id)?
             .note_text_mut()
             .ok_or_else(|| CoreError::Structure(format!("{id} is not a note")))?;
+        Ok(std::mem::replace(slot, text.to_string()))
+    }
+
+    /// Replaces the text of a Script Settings object. Returns the previous
+    /// one. `Err(Structure)` if `id` is not a Script Settings.
+    pub fn set_script_settings_text(&mut self, id: NodeId, text: &str) -> CoreResult<String> {
+        let node = self.tree.get(id)?;
+        if !matches!(node.kind(), NodeKind::ScriptSettings { .. }) {
+            return Err(CoreError::Structure(format!(
+                "{id} is not script settings but {}",
+                node.kind().with_article()
+            )));
+        }
+        let tree = Arc::make_mut(&mut self.tree);
+        let slot = tree
+            .node_mut(id)?
+            .script_settings_text_mut()
+            .ok_or_else(|| CoreError::Structure(format!("{id} is not script settings")))?;
         Ok(std::mem::replace(slot, text.to_string()))
     }
 
@@ -1289,6 +1328,7 @@ impl Project {
             | NodeKind::Graph { .. }
             | NodeKind::Matrix { .. }
             | NodeKind::Note { .. }
+            | NodeKind::ScriptSettings { .. }
             | NodeKind::Unknown(_) => ObjectPath {
                 folders: self.folder_names_above(id)?,
                 window: Some(node.name().to_string()),

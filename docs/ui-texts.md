@@ -63,6 +63,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Restore | Restaurer | Reopen a closed or minimized window | Rétablir | G |
 | Status bar | Barre d'état | Bottom line: last message | Barre de statut | G |
 | Script | Script | Python program run on the project | Macro, Programme | — |
+| Script Settings | Réglages de script | Project object holding the TOML settings a script reads (#548) | Config, Paramètres, Options | #548 |
 | Run / Stop | Exécuter / Arrêter | Start / interrupt a script | Lancer, Interrompre, Kill | G |
 | Output | Sortie | Text written by a script | Résultat, Log | G |
 | Traceback | Trace d'appels | Call stack of a Python exception | Backtrace, Pile | D |

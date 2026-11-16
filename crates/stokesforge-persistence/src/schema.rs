@@ -289,6 +289,16 @@ pub(crate) enum KindRecord {
         /// Text of the note.
         text: String,
     },
+    /// Script Settings (#548): raw TOML text, opaque for the schema.
+    ScriptSettings {
+        hidden: bool,
+        /// Window label.
+        label: String,
+        /// Window comment.
+        comment: String,
+        /// Raw TOML text.
+        text: String,
+    },
     /// Kind of node that none of the variants above names: a
     /// newer version of StokesForge wrote this file. Raw name and content,
     /// kept for a faithful rewrite.
@@ -352,6 +362,13 @@ enum KindRecordKnown {
         comment: String,
     },
     Note {
+        #[serde(default)]
+        hidden: bool,
+        label: String,
+        comment: String,
+        text: String,
+    },
+    ScriptSettings {
         #[serde(default)]
         hidden: bool,
         label: String,
@@ -437,6 +454,17 @@ impl From<KindRecordKnown> for KindRecord {
                 comment,
                 text,
             } => KindRecord::Note {
+                hidden,
+                label,
+                comment,
+                text,
+            },
+            KindRecordKnown::ScriptSettings {
+                hidden,
+                label,
+                comment,
+                text,
+            } => KindRecord::ScriptSettings {
                 hidden,
                 label,
                 comment,
@@ -536,6 +564,12 @@ enum KindRecordRef<'a> {
         comment: &'a str,
         text: &'a str,
     },
+    ScriptSettings {
+        hidden: bool,
+        label: &'a str,
+        comment: &'a str,
+        text: &'a str,
+    },
 }
 
 impl Serialize for KindRecord {
@@ -625,6 +659,18 @@ impl Serialize for KindRecord {
                 comment,
                 text,
             } => KindRecordRef::Note {
+                hidden: *hidden,
+                label,
+                comment,
+                text,
+            }
+            .serialize(serializer),
+            KindRecord::ScriptSettings {
+                hidden,
+                label,
+                comment,
+                text,
+            } => KindRecordRef::ScriptSettings {
                 hidden: *hidden,
                 label,
                 comment,
