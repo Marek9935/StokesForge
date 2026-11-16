@@ -5,6 +5,7 @@ Read when creating or changing a content window, dialog, wizard, confirmation or
 ## Where the rule lives
 
 - Catalogue, natures and size classes (S-F11), types, model window per type, anatomy: `docs/windows.md` § Natures and size classes ; `docs/windows.md` § The types ; `docs/windows.md` § Anatomy of a new window ; `docs/windows.md` § Reference window by type.
+- Where a graph setting lives, Graph Properties or the Series window (the theme rule): `docs/ui-principles.md` § 2.
 - What the building block does alone (size, position, Escape, focus): `docs/windows.md` § Size, position, Esc, focus: what the building block does by itself.
 - Dialogs, footer, buttons, errors, confirmations: `docs/interface-standard.md` § Windows and dialogs ; `docs/interface-standard.md` § Confirmations.
 - Building blocks (`show_window_in_layer`, `modal_dialog_with`, `modal_wizard`, `modal_live_settings`, `modal_read_only`, `modal_confirm`…): `.claude/rules/app.md` § Application (`stokesforge-app` and `stokesforge-app-state`): building blocks and guards, point "every window goes through the common building block".

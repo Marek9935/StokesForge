@@ -432,16 +432,23 @@ fn paint_gradient(
         ui.painter().rect_filled(rect, 0.0, fill);
         return response;
     }
+    paint_gradient_at(ui.painter(), rect, colors);
+    response
+}
+
+/// The slices of `colors` painted left to right in `rect` (the body of a
+/// gradient strip, also used by the colour bar preview of the graph
+/// properties, #510).
+pub(crate) fn paint_gradient_at(painter: &egui::Painter, rect: Rect, colors: &[String]) {
     let step = rect.width() / colors.len() as f32;
     for (index, color) in colors.iter().enumerate() {
         if let Some(rgba) = parse_hex(color) {
             let min = rect.min + Vec2::new(index as f32 * step, 0.0);
             let slice =
                 Rect::from_min_size(min, Vec2::new(step.ceil(), rect.height())).intersect(rect);
-            paint_swatch(ui.painter(), slice, rgba);
+            paint_swatch(painter, slice, rgba);
         }
     }
-    response
 }
 
 /// Paints `rgba` in `rect`, on a checkerboard if it is not opaque.

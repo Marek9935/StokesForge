@@ -234,10 +234,10 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Delete Group | Supprimer le groupe | Removes the group and all its series from the graph (#197); in menus, it is « Delete » / « Supprimer » applied to the group | Effacer le groupe | G |
 | Select Members | Sélectionner les membres | Selects the group: the handles of all its series are shown (#197) | Sélectionner le groupe | G |
 | Series (Object Manager) | Séries | The node under a layer that lists its series; formerly « Plot Group » / « Groupe de tracés », renamed; do not call it a group (#177) | Plot Group, Groupe de tracés | G |
-| Whole group / This series only | Tout le groupe / Cette série seulement | Scope of the settings of a series that is in a group; the settings specific to one series are greyed out in "group" scope (#177) | Appliquer à tous | G |
 | Leave Group | Quitter le groupe | Detaches the series from its group, style kept (#177) | Dissocier, Sortir | G |
 | Sort | Trier | Puts a Project Manager folder back in automatic order: folders first, then natural name order (#425) | Order, Classer | G |
 | Color gradient | Nuancier | Gradient of colors spread over the series of a group: Blue to Red / Bleu vers Rouge… (#178; the arrow → is not in the interface font: a square is shown in its place, do not use it); can be saved in the project or for the user, with its name | Palette (qualitative, sans ordre), Dégradé | G |
+| Color bar: Groups / Breaks / Value / Look | Barre de couleurs : Groupes / Ruptures / Valeur / Aspect | The four sub-headings of the Color bar section of Graph Properties › Legend (#510): the groups on the bar (table: tick, gradient, range), the label of each break between two neighbours on the bar with the chaining (shown with two groups or more), where the value comes from and its scale, and the place, orientation, ticks and title of the bar | Placement / Emplacement (the Position of the bar sits in Look) | G |
 | Plot type | Type de tracé | Way of plotting a series | Mode | O |
 | Bins | Classes | Number of bars of a Histogram series, whole number 1 to 65536 (#359) | Intervalles, Bacs | O |
 | Width (X units) | Largeur (unités X) | Width of the bars of a Bar series, in X axis units; Auto by default, « Auto (0.8) » in gray (#359) | Épaisseur | O |
