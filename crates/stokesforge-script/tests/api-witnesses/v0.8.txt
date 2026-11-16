@@ -102,18 +102,6 @@ enum symbol	none
 enum symbol	plus
 enum symbol	square
 enum symbol	triangle
-enum theme_family	axes
-enum theme_family	axis-ranges
-enum theme_family	background
-enum theme_family	color-bar
-enum theme_family	curves
-enum theme_family	legend
-enum theme_family	size-and-page
-enum theme_family	texts
-enum theme_family	title-fonts
-enum theme_source	builtin
-enum theme_source	project
-enum theme_source	user
 enum type	datetime
 enum type	mixed
 enum type	numeric
@@ -122,10 +110,8 @@ module pyst	exception BrokenReferenceError
 module pyst	exception ConcurrentWriteError
 module pyst	exception InvalidValueError
 module pyst	exception UnknownPathError
-module pyst	exception UnknownThemeError
 module pyst	function add_shape(graph, kind, x1, y1, x2, y2, *, panel=(0, 0), axis='left', line_color='', line_width=1.5, fill_color='')
 module pyst	function apply_gradient(graph, group, gradient, *, panel=(0, 0))
-module pyst	function apply_theme(graph, theme, *, families=None, add_missing_layers=False)
 module pyst	function children(handle=None)
 module pyst	function color_bar(graph, groups=None, *, value_from=None, row_column=Ellipsis, chain=None, scale=None, orientation=None, position=None, ticks=None, title=None, labels=None, ranges=None, length=None, thickness=None, visible=None, panel=(0, 0))
 module pyst	function column(handle)
@@ -162,7 +148,6 @@ module pyst	function set_group_style(graph, group, *, panel=(0, 0), line_style=N
 module pyst	function set_note(note, text)
 module pyst	function set_series_group(graph, index, group, *, panel=(0, 0))
 module pyst	function set_values(handle, values, *, expected_version=None)
-module pyst	function themes()
 module pyst	function undo()
 module pyst	function ungroup(graph, group, *, panel=(0, 0))
 module pyst	function values(handle)
@@ -185,6 +170,7 @@ options plot	line_style
 options plot	line_width
 options plot	plot_type
 options plot	symbol
+options plot	symbol_every
 options plot	symbol_size
 options plot	title
 options plot	x_error
@@ -303,7 +289,3 @@ returns series.item	y
 returns series_groups.item	id
 returns series_groups.item	members
 returns series_groups.item	name
-returns themes.item	key
-returns themes.item	modified
-returns themes.item	name
-returns themes.item	source

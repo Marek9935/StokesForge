@@ -951,6 +951,8 @@ plot-series-line-width = Épaisseur (pt)
 plot-series-symbol-section = Symbole
 plot-series-symbol-shape = Forme
 plot-series-symbol-size = Taille (pt)
+plot-series-symbol-every = Un symbole sur
+    .hint = Ne dessiner un symbole que sur un point sur ce nombre, en commençant par le premier. 1 les dessine tous
 plot-series-symbol-color = Couleur du symbole
 
 # Fenêtre des séries et groupes (#177–#179)
@@ -2053,16 +2055,20 @@ origin-import-summary = À créer : { $sheets ->
    *[other] { $books } classeurs
     }
 origin-import-partial = Une partie de ce fichier n'a pas pu être lue : certains classeurs gardent leurs données mais perdent noms longs, unités et rôles X/Y
+origin-import-own-x = Ces feuilles gardent un X propre, ses valeurs diffèrent du premier X : { $names }
+status-import-own-x = Ces fichiers gardent un X propre, ses valeurs diffèrent du premier X : { $names }
+status-import-folder-gone = Le dossier choisi pour l'import n'existe plus : les classeurs ont été créés à la racine du projet
+import-folder-root = Projet
 origin-import-accept =
     Importer
-    .hint = Crée un classeur pour chaque classeur coché de la liste (Entrée)
+    .hint = Crée les classeurs et les feuilles que demandent les colonnes cochées (Entrée)
 origin-import-check-all =
     Tout cocher
-    .hint = Coche toutes les feuilles qui ont des colonnes
+    .hint = Coche toutes les colonnes de toutes les feuilles
 origin-import-check-none =
     Ne rien cocher
-    .hint = Décoche toutes les feuilles
-origin-import-book-hint = Coche ou décoche toutes les feuilles de ce classeur
+    .hint = Décoche toutes les colonnes de toutes les feuilles
+origin-import-book-hint = Coche ou décoche toutes les colonnes de ce classeur
 origin-import-sheet-size = { $columns ->
     [one] { $columns } colonne
    *[other] { $columns } colonnes
@@ -2096,6 +2102,7 @@ disabled-visibility-empty = Rien à afficher ou masquer
 disabled-axis-blocked = Un calque au-dessus dessine déjà cet axe
 disabled-axis-on-overlay = Indisponible sur un calque superposé
 disabled-axis-own-scale-off = Cochez Échelle propre pour donner à ce calque sa propre échelle
+disabled-symbol-every-no-shape = Choisissez d'abord une forme : sans forme, aucun symbole n'est dessiné
 disabled-axis-side-base-x = L'axe X du calque { $layer } est tracé ici. L'axe X de ce calque est dans l'onglet { $tab }
 disabled-axis-side-base-y = L'axe Y du calque { $layer } est tracé ici. L'axe Y de ce calque est dans l'onglet { $tab }
 disabled-axis-side-mirror = Le calque { $layer } affiche son axe miroir ici. Décochez Afficher l'axe miroir dans son onglet { $tab } pour libérer ce côté
@@ -2108,8 +2115,10 @@ disabled-copy-last-format = Au moins un format doit être offert
 disabled-nothing-to-redo = Rien à rétablir
 disabled-new-project-busy = Terminez ou annulez d'abord le script, l'import ou la modification en cours
 disabled-no-source-file = Aucune colonne de cette feuille ne peut être relue depuis son fichier
-disabled-origin-import-nothing-ticked = Cochez d'abord au moins une feuille
+disabled-origin-import-nothing-ticked = Cochez d'abord au moins une colonne
 disabled-origin-sheet-empty = Cette feuille n'a aucune colonne à importer
+disabled-import-folder-name-empty = Saisissez d'abord un nom pour le nouveau dossier
+disabled-import-folder-name-taken = Le dossier choisi contient déjà un élément portant ce nom
 disabled-no-last-import = Aucun import terminé à rouvrir
 disabled-needs-sheet = Mettez d'abord une feuille de classeur au premier plan
 disabled-no-window = Aucune fenêtre à agrandir
@@ -2661,6 +2670,19 @@ import-format-short-decimal = Décimale
 import-format-short-thousands = Milliers
 import-format-short-encoding = Encodage
 import-footer-to = Vers : { $value }
+import-footer-folder = Dossier : { $value }
+import-folder-new = Nouveau dossier…
+import-folder-name-hint = Nom du dossier
+origin-import-where-per-book = Un classeur par classeur Origin
+origin-import-sheets = Feuilles Origin
+origin-import-layout-per-sheet = Une feuille par feuille Origin
+origin-import-layout-side-by-side = Une feuille, côte à côte (X Y X Y…)
+origin-import-layout-shared-x = Une feuille, X de la première feuille Origin partagé
+origin-import-column-hint = Clic pour cocher ou décocher, Maj+clic pour une plage, clic droit pour toutes les feuilles
+origin-import-column-check-in-all = Cocher « { $name } » dans toutes les feuilles
+origin-import-column-uncheck-in-all = Décocher « { $name } » dans toutes les feuilles
+origin-import-sheet-hint = Coche ou décoche toutes les colonnes de cette feuille
+disabled-import-folder-active-book = Le dossier n'est pas utilisé quand on importe dans le classeur actif
 import-footer-template = Modèle : { $value }
 import-footer-template-auto = Auto · { $name }
 import-footer-template-yours = { $name }

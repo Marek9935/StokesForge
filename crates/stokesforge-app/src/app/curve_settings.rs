@@ -176,11 +176,17 @@ fn propagate_style(panel: &mut PanelSpec, group: u32, before: &SeriesSpec, index
         if edited.line.width != before.line.width {
             other.line.width = edited.line.width;
         }
-        if edited.symbol.shape != before.symbol.shape {
-            other.symbol.shape = edited.symbol.shape;
-        }
-        if edited.symbol.size != before.symbol.size {
-            other.symbol.size = edited.symbol.size;
+        // The symbol only reaches the members that draw one (#547).
+        if other.plot_type.draws_symbols() {
+            if edited.symbol.shape != before.symbol.shape {
+                other.symbol.shape = edited.symbol.shape;
+            }
+            if edited.symbol.size != before.symbol.size {
+                other.symbol.size = edited.symbol.size;
+            }
+            if edited.symbol.every != before.symbol.every {
+                other.symbol.every = edited.symbol.every;
+            }
         }
         // Bins and bar width (#359) only reach the members they concern.
         if edited.histogram_bins != before.histogram_bins
@@ -530,6 +536,7 @@ fn curve_page(
                 .is_some_and(|bar| bar.visible && bar.segment_of(*group).is_some())
         })
         .map(|_| tr!("curve-color-by-bar"));
+    let symbols = panel.series[*index].plot_type.draws_symbols();
     commit |= crate::field_state::for_target(ui, (layer, false, *index), |ui| {
         // A color set here overrides the gradient of the group (#510 D4).
         let hint = (color_reason.is_none()
@@ -541,6 +548,7 @@ fn curve_page(
             env,
             (color_reason, hint),
             true,
+            symbols,
         )
     });
     commit
@@ -592,6 +600,17 @@ fn group_page(
         stokesforge_core::resolve::bar_width(resolved.x.as_ref().map(|x| x.as_slice()), None)
     };
     let has_overlay = panel.overlay.is_some();
+    // The Symbol section shows if at least one member draws symbols, with the
+    // values of the first of them (#547). The page edits `first`: when `first`
+    // draws none, it borrows those values for the time of the page.
+    let symbol_source = panel
+        .group_members(group)
+        .into_iter()
+        .find(|&member| panel.series[member].plot_type.draws_symbols());
+    let own_symbol = panel.series[first].symbol.clone();
+    if let Some(source) = symbol_source {
+        panel.series[first].symbol = panel.series[source].symbol.clone();
+    }
     let before = panel.series[first].clone();
     commit |= crate::field_state::for_target(ui, (layer, true, group), |ui| {
         series_group_editor(
@@ -610,9 +629,19 @@ fn group_page(
         }
     }
     commit |= crate::field_state::for_target(ui, (layer, true, group), |ui| {
-        series_style_editor(ui, &mut panel.series[first], env, (None, None), false)
+        series_style_editor(
+            ui,
+            &mut panel.series[first],
+            env,
+            (None, None),
+            false,
+            symbol_source.is_some(),
+        )
     });
     propagate_style(panel, group, &before, first);
+    if !panel.series[first].plot_type.draws_symbols() {
+        panel.series[first].symbol = own_symbol;
+    }
     commit
 }
 
@@ -1049,7 +1078,7 @@ fn gradient_editor(
 mod tests {
     use super::*;
     use stokesforge_core::NodeId;
-    use stokesforge_plot::LineStyle;
+    use stokesforge_plot::{LineStyle, PlotType};
 
     fn sample_panel() -> PanelSpec {
         let mut panel = PanelSpec::default();
@@ -1065,6 +1094,9 @@ mod tests {
     #[test]
     fn the_changed_style_is_copied_to_the_group_without_overwriting_the_rest() {
         let mut panel = sample_panel();
+        for series in &mut panel.series {
+            series.plot_type = PlotType::LineScatter;
+        }
         panel.series[2].line.width = 4.0; // exception set by hand
         let before = panel.series[1].clone();
         panel.series[1].line.style = LineStyle::Dash;
@@ -1083,6 +1115,60 @@ mod tests {
         assert_eq!(
             panel.series[0].symbol.size,
             SeriesSpec::new(NodeId::from_raw(1)).symbol.size
+        );
+    }
+
+    /// #547: the symbol edits of a group page reach only the members that
+    /// draw symbols; a Line member keeps its own.
+    #[test]
+    fn symbol_edits_skip_the_group_members_that_draw_none() {
+        let mut panel = sample_panel();
+        panel.series[1].plot_type = PlotType::Scatter;
+        panel.series[2].plot_type = PlotType::Line;
+        panel.series[3].plot_type = PlotType::LineScatter;
+        let own = panel.series[2].symbol.clone();
+        let before = panel.series[1].clone();
+        panel.series[1].symbol.every = stokesforge_plot::SymbolEvery::new(5).unwrap();
+        panel.series[1].symbol.size = 12.0;
+        panel.series[1].symbol.shape = stokesforge_plot::SymbolShape::Square;
+        propagate_style(&mut panel, 1, &before, 1);
+        assert_eq!(panel.series[3].symbol.every.get(), 5);
+        assert_eq!(panel.series[3].symbol.size, 12.0);
+        assert_eq!(
+            panel.series[3].symbol.shape,
+            stokesforge_plot::SymbolShape::Square
+        );
+        assert_eq!(panel.series[2].symbol, own, "the Line member is untouched");
+    }
+
+    /// #547: a group page shows the Symbol section when at least one member
+    /// draws symbols, and not when none does; painting the page never
+    /// changes the symbol of a member that draws none.
+    #[test]
+    fn the_group_page_shows_the_symbol_section_when_one_member_draws_symbols() {
+        let ctx = super::super::test_support::context();
+        let section = tr!("plot-series-symbol-section");
+        let painted = |panel: &mut PanelSpec| {
+            let mut selected = 1;
+            let mut group: Option<u32> = Some(1);
+            page(&ctx, panel, (&mut selected, &mut group), Vec::new());
+            let (output, _) = page(&ctx, panel, (&mut selected, &mut group), Vec::new());
+            super::super::test_support::texts(&output.shapes)
+                .iter()
+                .any(|t| t.text == section)
+        };
+        let mut panel = layer_with_group();
+        for member in 1..=3 {
+            panel.series[member].plot_type = PlotType::Line;
+        }
+        assert!(!painted(&mut panel), "only Line members: hidden");
+        panel.series[3].plot_type = PlotType::Scatter;
+        panel.series[3].symbol.size = 13.0;
+        let first_symbol = panel.series[1].symbol.clone();
+        assert!(painted(&mut panel), "a Scatter member: shown");
+        assert_eq!(
+            panel.series[1].symbol, first_symbol,
+            "the Line first member keeps its own symbol"
         );
     }
 

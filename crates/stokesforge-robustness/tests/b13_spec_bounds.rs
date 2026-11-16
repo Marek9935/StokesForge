@@ -266,6 +266,7 @@ mod hostile {
         pub size: f64,
         pub color: String,
         pub edge_color: String,
+        pub every: u32,
     }
     impl Default for SymbolSpecRecord {
         fn default() -> Self {
@@ -274,6 +275,7 @@ mod hostile {
                 size: 5.0,
                 color: String::new(),
                 edge_color: String::new(),
+                every: 1,
             }
         }
     }
@@ -318,6 +320,11 @@ mod hostile {
             histogram_bins: bins,
             ..SeriesSpecRecord::default()
         };
+        project_with_series(dir, series)
+    }
+
+    /// A valid file holding a single graph with this one raw series.
+    pub(super) fn project_with_series(dir: &TempDir, series: SeriesSpecRecord) -> PathBuf {
         let panel = PanelSpecRecord {
             series: vec![series],
             ..PanelSpecRecord::default()
@@ -391,6 +398,34 @@ fn b13_histogram_bins_from_disk_is_bounded() {
          stokesforge-alloc-probe -- histogram_bins 4294967295`)",
         u32::MAX
     );
+}
+
+/// #547: a hostile symbol density of 0 (a zero step would divide by zero in
+/// the thinning) reads back as 1, a huge one is kept, nothing panics.
+#[test]
+fn b13_a_hostile_symbol_density_of_zero_reads_as_one() {
+    let dir = TempDir::new().expect("temporary directory");
+    for (stored, expected) in [(0u32, 1u32), (7, 7), (u32::MAX, u32::MAX)] {
+        let series = hostile::SeriesSpecRecord {
+            symbol: hostile::SymbolSpecRecord {
+                every: stored,
+                ..hostile::SymbolSpecRecord::default()
+            },
+            ..hostile::SeriesSpecRecord::default()
+        };
+        let path = hostile::project_with_series(&dir, series);
+        let project = stokesforge_persistence::load(&path).expect("loads");
+        let graph = project
+            .tree()
+            .node(stokesforge_core::NodeId::from_raw(4))
+            .expect("the graph");
+        match graph.kind() {
+            stokesforge_core::NodeKind::Graph { spec, .. } => {
+                assert_eq!(spec.panels[0].series[0].symbol.every.get(), expected);
+            }
+            other => panic!("expected a graph, got {other:?}"),
+        }
+    }
 }
 
 // -- frame sizes (#394) ------------------------------------------------------

@@ -354,6 +354,7 @@ impl From<&SymbolSpec> for SymbolSpecRecord {
             size: value.size,
             color: value.color.clone(),
             edge_color: value.edge_color.clone(),
+            every: value.every.get(),
         }
     }
 }
@@ -365,6 +366,7 @@ impl From<SymbolSpecRecord> for SymbolSpec {
             size: value.size,
             color: value.color,
             edge_color: value.edge_color,
+            every: stokesforge_plot::SymbolEvery::from_stored(value.every),
         }
     }
 }

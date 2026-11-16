@@ -1975,7 +1975,8 @@ pub(super) fn series_curve_editor(
 /// only) and the page of a group (the first member, copied to the others by
 /// the page). `colors` is false on the group page: the gradient provides
 /// them; `color_hint` is the hover of an editable color that overrides the
-/// group's gradient (#510 D4); `color_reason` greys them out, with its sentence, when the color bar
+/// group's gradient (#510 D4); `symbols` shows the Symbol section (#547);
+/// `color_reason` greys them out, with its sentence, when the color bar
 /// of the layer provides them.
 pub(super) fn series_style_editor(
     ui: &mut egui::Ui,
@@ -1983,6 +1984,7 @@ pub(super) fn series_style_editor(
     env: &mut PickerEnv,
     (color_reason, color_hint): (Option<String>, Option<String>),
     colors: bool,
+    symbols: bool,
 ) -> bool {
     form(ui, "plot_series_style", |form| {
         let mut commit = false;
@@ -2037,6 +2039,11 @@ pub(super) fn series_style_editor(
             .changed
         });
 
+        // The section exists only for a plot type that draws symbols (#547);
+        // the values of a hidden section are kept.
+        if !symbols {
+            return commit;
+        }
         form.section(tr!("plot-series-symbol-section"));
         commit |= form.row(tr!("plot-series-symbol-shape"), |ui| {
             choice(
@@ -2064,6 +2071,29 @@ pub(super) fn series_style_editor(
             )
             .changed
         });
+        let has_shape = series.symbol.shape != SymbolShape::None;
+        let every = form.enabled(has_shape, |form| {
+            form.row(tr!("plot-series-symbol-every"), |ui| {
+                let mut value = f64::from(series.symbol.every.get());
+                let changed = number_field(
+                    ui,
+                    "series_symbol_every",
+                    &mut value,
+                    &quantities::SYMBOL_EVERY,
+                )
+                .changed;
+                if changed {
+                    series.symbol.every = stokesforge_plot::SymbolEvery::from_stored(value as u32);
+                }
+                changed
+            })
+        });
+        if !has_shape {
+            every
+                .response
+                .on_disabled_hover_text(tr!("disabled-symbol-every-no-shape"));
+        }
+        commit |= every.inner;
         if colors {
             let out = form.enabled(color_reason.is_none(), |form| {
                 form.color(
@@ -4292,6 +4322,8 @@ mod tests {
         let mut harness = harness(|spec| {
             let panel = first_panel(spec);
             panel.series[0].name = "First".into();
+            // The Symbol section exists only for a type that draws symbols.
+            panel.series[0].plot_type = PlotType::LineScatter;
             let mut second = panel.series[0].clone();
             second.name = "Second".into();
             panel.series.push(second);
@@ -4885,6 +4917,29 @@ mod tests {
         );
         one_frame(context, &mut harness.state, vec![key(egui::Key::Enter)]);
         one_frame(context, &mut harness.state, Vec::new());
+    }
+
+    /// The Symbol section (#547) is painted exactly when the type draws
+    /// symbols, and its "Symbol every" row is greyed with Shape None.
+    #[test]
+    fn the_symbol_section_follows_the_plot_type() {
+        let context = test_support::context();
+        let section = tr!("plot-series-symbol-section");
+        let every = tr!("plot-series-symbol-every");
+        for plot_type in [
+            PlotType::Line,
+            PlotType::Scatter,
+            PlotType::LineScatter,
+            PlotType::Bar,
+            PlotType::Histogram,
+            PlotType::ErrorBar,
+        ] {
+            let mut harness = typed_harness(plot_type.clone());
+            let painted = paint_window(&context, &mut harness.state, Vec::new());
+            let shown = plot_type.draws_symbols();
+            assert_eq!(is_painted(&painted, &section), shown, "{plot_type:?}");
+            assert_eq!(is_painted(&painted, &every), shown, "{plot_type:?}: every");
+        }
     }
 
     /// Bins (Histogram only) and Width (Bar only): a Line series has neither.

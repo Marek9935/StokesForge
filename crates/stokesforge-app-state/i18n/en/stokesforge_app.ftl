@@ -952,6 +952,8 @@ plot-series-line-width = Line width (pt)
 plot-series-symbol-section = Symbol
 plot-series-symbol-shape = Shape
 plot-series-symbol-size = Size (pt)
+plot-series-symbol-every = Symbol every
+    .hint = Draw a symbol on only one point out of this many, starting with the first. 1 draws them all
 plot-series-symbol-color = Symbol color
 
 # Series window and groups (#177–#179)
@@ -2054,16 +2056,20 @@ origin-import-summary = To create: { $sheets ->
    *[other] { $books } workbooks
     }
 origin-import-partial = Part of this file could not be read: some workbooks keep their data but lose long names, units and X/Y roles
+origin-import-own-x = These sheets keep an X of their own, its values differ from the first X: { $names }
+status-import-own-x = These files keep an X of their own, its values differ from the first X: { $names }
+status-import-folder-gone = The folder chosen for the import no longer exists: the workbooks were created at the root of the project
+import-folder-root = Project
 origin-import-accept =
     Import
-    .hint = Creates a workbook for each checked workbook of the list (Enter)
+    .hint = Creates the workbooks and sheets that the checked columns call for (Enter)
 origin-import-check-all =
     Check All
-    .hint = Checks every sheet that has columns
+    .hint = Checks every column of every sheet
 origin-import-check-none =
     Check None
-    .hint = Unchecks every sheet
-origin-import-book-hint = Checks or unchecks all the sheets of this workbook
+    .hint = Unchecks every column of every sheet
+origin-import-book-hint = Checks or unchecks all the columns of this workbook
 origin-import-sheet-size = { $columns ->
     [one] { $columns } column
    *[other] { $columns } columns
@@ -2097,6 +2103,7 @@ disabled-visibility-empty = Nothing to show or hide
 disabled-axis-blocked = A layer above already draws this axis
 disabled-axis-on-overlay = Not available on a layer drawn on top
 disabled-axis-own-scale-off = Tick Own scale to give this layer its own scale
+disabled-symbol-every-no-shape = Choose a shape first: with no shape, no symbol is drawn
 disabled-axis-side-base-x = The X axis of Layer { $layer } is drawn here. This layer's X axis is on the { $tab } tab
 disabled-axis-side-base-y = The Y axis of Layer { $layer } is drawn here. This layer's Y axis is on the { $tab } tab
 disabled-axis-side-mirror = Layer { $layer } shows its mirror axis here. Untick Show mirror axis on its { $tab } tab to free this side
@@ -2111,8 +2118,10 @@ disabled-new-project-busy = Finish or cancel the running script, import or edit 
 disabled-column-type-formula = This column is computed by a formula. Remove the formula to change its type
 disabled-column-type-calculated = This column is produced by a calculation. Detach it from the calculation to change its type
 disabled-no-source-file = No column of this sheet can be read again from its file
-disabled-origin-import-nothing-ticked = Check at least one sheet first
+disabled-origin-import-nothing-ticked = Check at least one column first
 disabled-origin-sheet-empty = This sheet has no column to import
+disabled-import-folder-name-empty = Type a name for the new folder first
+disabled-import-folder-name-taken = The chosen folder already holds an item with this name
 disabled-no-last-import = No finished import to reopen
 disabled-needs-sheet = Bring a workbook sheet to the front first
 disabled-no-window = No window to maximize
@@ -2662,6 +2671,19 @@ import-format-short-decimal = Decimal
 import-format-short-thousands = Thousands
 import-format-short-encoding = Encoding
 import-footer-to = To: { $value }
+import-footer-folder = Folder: { $value }
+import-folder-new = New Folder…
+import-folder-name-hint = Folder name
+origin-import-where-per-book = One Workbook per Origin Workbook
+origin-import-sheets = Origin sheets
+origin-import-layout-per-sheet = One sheet per Origin sheet
+origin-import-layout-side-by-side = One sheet, side by side (X Y X Y…)
+origin-import-layout-shared-x = One sheet, X of first Origin sheet shared
+origin-import-column-hint = Click to check or uncheck, Shift+click to check or uncheck a range, right-click for all sheets
+origin-import-column-check-in-all = Check “{ $name }” in All Sheets
+origin-import-column-uncheck-in-all = Uncheck “{ $name }” in All Sheets
+origin-import-sheet-hint = Checks or unchecks all the columns of this sheet
+disabled-import-folder-active-book = The folder is not used when importing into the active workbook
 import-footer-template = Template: { $value }
 import-footer-template-auto = Auto · { $name }
 import-footer-template-yours = { $name }
