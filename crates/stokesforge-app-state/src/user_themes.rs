@@ -79,7 +79,7 @@ pub const PINNED_BUILTINS: usize = 2;
 
 /// A theme designated independently of where it is stored (module
 /// documentation, « Identity »).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ThemeRef {
     /// A built-in, by its index in the catalogue
     /// ([`crate::builtin_themes::KEYS`]: Light `0`, Dark `1`, then the others).
@@ -489,6 +489,17 @@ impl UserThemes {
         self.writable()?;
         *self.uses.entry(reference.key()).or_insert(0) += 1;
         self.prune_project_counts();
+        self.write()
+    }
+
+    /// Moves the use count of `from` to `to` (a renamed project theme keeps
+    /// its rank). Nothing to move: nothing written.
+    pub fn move_use(&mut self, from: &ThemeRef, to: &ThemeRef) -> Result<(), UserThemeError> {
+        self.writable()?;
+        let Some(count) = self.uses.remove(&from.key()) else {
+            return Ok(());
+        };
+        *self.uses.entry(to.key()).or_insert(0) += count;
         self.write()
     }
 

@@ -1063,6 +1063,10 @@ fn background_menu(
             }
         });
     });
+    // Graph themes (#541): exactly Copy Theme, Paste Theme and Apply Theme….
+    sections.section(ui, true, |ui| {
+        super::theme_menu::theme_menu_entries(ui, &[graph_id], false, actions);
+    });
     // Layout (#398): the content of the Layout menu of the bar, one level
     // down (an accepted exception to the depth of two, `docs/menus.md`). The
     // reference is the layer under the click.
@@ -2945,7 +2949,11 @@ pub(super) mod tests {
                 ] {
                     assert!(painted(&present), "{present} on a curve");
                 }
-                for absent in [tr!("action-add-text"), tr!("menu-export")] {
+                for absent in [
+                    tr!("action-add-text"),
+                    tr!("menu-export"),
+                    tr!("action-copy-theme"),
+                ] {
                     assert!(!painted(&absent), "{absent} makes no sense on a curve");
                 }
                 let at = find_text_center(&output.shapes, &tr!("action-show-graph-data"));
@@ -2967,6 +2975,26 @@ pub(super) mod tests {
                 assert!(
                     !painted(&tr!("action-show-graph-data")),
                     "Show Data only on a curve"
+                );
+                // #541: exactly Copy Theme, Paste Theme and Apply Theme… in
+                // one section, between Insert Object ▸ and Layout ▸.
+                let heights: Vec<f32> = [
+                    tr!("menu-insert-object"),
+                    tr!("action-copy-theme"),
+                    tr!("action-paste-theme"),
+                    tr!("action-apply-theme"),
+                    tr!("menu-layout"),
+                ]
+                .iter()
+                .map(|label| find_text_center(&output.shapes, label).y)
+                .collect();
+                assert!(
+                    heights.windows(2).all(|pair| pair[0] < pair[1]),
+                    "the theme section: {heights:?}"
+                );
+                assert!(
+                    !painted(&tr!("action-save-theme-as")),
+                    "Save Theme As… is in the Graph menu only"
                 );
                 let at = find_text_center(&output.shapes, &tr!("menu-insert-object"));
                 click_at(&context, at, egui::Modifiers::NONE, |_, events| {

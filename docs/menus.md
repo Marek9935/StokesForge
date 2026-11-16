@@ -88,8 +88,8 @@ An empty section disappears with its separators.
 
 | Target | Menu |
 |---|---|
-| Background, plot area | Add Text · Insert Object ▸ (Rectangle, Ellipse, Line, Arrow, placed at the clicked point at the default size) ─ Export ▸ (Export Graph…, Copy Graph) ─ Properties… |
-| Layer (#398), blank of the figure or plot area | `Layout ▸` (below), after Add Text / Insert Object ▸ and before Export ▸ |
+| Background, plot area | Add Text · Insert Object ▸ (Rectangle, Ellipse, Line, Arrow, placed at the clicked point at the default size) ─ **Copy Theme · Paste Theme · Apply Theme…** (#541, one section; Paste greyed « Copy a theme first » while nothing is copied) ─ Export ▸ (Export Graph…, Copy Graph) ─ Properties… |
+| Layer (#398), blank of the figure or plot area | `Layout ▸` (below), after the theme section and before Export ▸ |
 | Layer node of the Object Manager (#398) | its own Bring to Front · Send to Back (Free only, grayed out with a reason when already in front / at the back) and Delete |
 | Curve | Show Data (the workbook of **this** curve) ─ Rename · Move Up · Move Down · Hide ─ Delete ─ Properties… |
 | Title, axis title | Edit Text · Reset Position ─ Hide ─ Properties… |
@@ -118,7 +118,7 @@ The check boxes keep the menu open (#114).
 
 | Target | Menu |
 |---|---|
-| Window(s) | Open · Close ─ Cut · Copy · Paste ─ Rename · Duplicate ─ Delete |
+| Window(s) | Open · Close ─ **Copy Theme · Paste Theme · Apply Theme…** (#541, only when the selection holds a graph; they act on the graphs of the selection, never on the contents of a folder; Copy Theme greyed « Select a single graph » for several) ─ Cut · Copy · Paste ─ Rename · Duplicate ─ Delete |
 | Folder | Add Folder (in this folder) ─ Cut · Copy · Paste (in this folder) ─ Rename (in place) · Duplicate · Sort (this folder back to automatic order, greyed with its reason when it already is, #425) ─ Delete |
 | Empty area under the last row | Add Folder · Paste (in the root) ─ Sort (the root, #425) |
 
@@ -194,6 +194,16 @@ with the menu), where on a regular grid they are **disabled with a reason** inst
 absent, to keep the strip's height stable. They act on the cells
 selected with Shift + click (`docs/gestures.md`), on all of them when fewer than
 two are selected.
+
+**Graph themes (#541)** sit in the Graph menu, in one section between the mirror
+axes and Reset Zoom: **Copy Theme · Paste Theme · Apply Theme… · Save Theme As…**
+(`theme_menu_entries`, one paint for this menu and for the two right-clicks, the
+bar adds Save Theme As…). Greyed with their reason, never absent: no graph
+(« Select a graph first »), several graphs for Copy Theme and Save Theme As…
+(« Select a single graph »), Paste Theme with nothing copied (« Copy a theme
+first »). The reasons are decided by `theme_window::theme_menu`; a menu painted away
+from the state reads « is something copied? » from egui memory, published once
+per frame (`theme_menu::publish`).
 
 **Switch on hover (#343).** When a menu of the bar is already open, moving the
 pointer over the title of another menu opens that one and closes the first,

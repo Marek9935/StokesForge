@@ -51,10 +51,17 @@ const SIDES: [AxisSide; 4] = [
 ];
 
 impl PlotSpec {
-    /// Global text color as the « Thème » tab shows it: that
-    /// of the graph title.
+    /// Global text color as the General tab shows it: that of the bottom axis
+    /// title of the first panel, like [`PlotSpec::theme_axes_color`] reads the
+    /// bottom scale. Not the graph title: the General tab has its own « Title
+    /// color » row, and reading the title made the two rows move together
+    /// (#542 trial). Writing it still sets every text, title included.
     pub fn theme_text_color(&self) -> &str {
-        &self.title_color
+        self.panels
+            .first()
+            .map_or(self.title_color.as_str(), |panel| {
+                panel.bottom.title_color.as_str()
+            })
     }
 
     /// Global axes color as the « Thème » tab shows it: that
@@ -106,6 +113,14 @@ mod tests {
         let mut spec = PlotSpec::empty("Figure").with_panels(PanelSpec::at(0, 0));
         spec.panels.push(PanelSpec::at(0, 1));
         spec
+    }
+
+    #[test]
+    fn the_title_color_alone_does_not_move_the_global_text_color() {
+        let mut spec = two_panel_spec();
+        spec.set_text_color("#123456");
+        spec.title_color = "#ff0000".to_string();
+        assert_eq!(spec.theme_text_color(), "#123456");
     }
 
     #[test]

@@ -1968,6 +1968,50 @@ pub mod io {
     }
 }
 
+/// Why the library of themes refused a change (#541).
+pub mod theme {
+    use crate::tr;
+    use crate::user_themes::UserThemeError;
+
+    /// The sentence of a refused theme change.
+    pub fn error_message(error: &UserThemeError) -> String {
+        match error {
+            UserThemeError::ReadOnly => tr!("error-theme-read-only"),
+            UserThemeError::EmptyName => tr!("error-theme-empty-name"),
+            UserThemeError::DuplicateName => tr!("error-theme-duplicate-name"),
+            UserThemeError::Full => tr!("error-theme-full"),
+            UserThemeError::Unknown => tr!("error-theme-unknown"),
+            UserThemeError::Io(err) => tr!(
+                "error-theme-not-saved",
+                cause = crate::errors::io::error_message(err)
+            ),
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::errors::tests_support::check;
+
+        #[test]
+        fn every_variant_has_its_sentence() {
+            let errors = [
+                UserThemeError::ReadOnly,
+                UserThemeError::EmptyName,
+                UserThemeError::DuplicateName,
+                UserThemeError::Full,
+                UserThemeError::Unknown,
+                UserThemeError::Io(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+            ];
+            for error in errors {
+                let sentence = error_message(&error);
+                check(&error, &sentence);
+                assert!(!sentence.contains("error-theme"), "unresolved: {sentence}");
+            }
+        }
+    }
+}
+
 /// The check common to the tests of each family.
 #[cfg(any(test, feature = "test-support"))]
 pub mod tests_support {

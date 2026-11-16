@@ -100,6 +100,8 @@ mod import_plans;
 mod import_template;
 mod import_tocheck;
 mod server;
+mod theme_gestures;
+mod theme_manager;
 pub use import_advanced::{
     apply_advanced, AdvancedChange, AdvancedRow, AdvancedSetting, ADVANCED_SETTINGS,
 };
@@ -1279,6 +1281,96 @@ pub enum Action {
         /// A graph with fewer layers than the theme gets empty layers up to
         /// the theme's count; off, only its existing layers are styled.
         add_missing_layers: bool,
+    },
+    /// Copy Theme (#541): the style of `graph` goes to the app's own theme
+    /// clipboard (Ctrl+C still copies the graph itself).
+    CopyTheme {
+        /// The graph whose style is copied.
+        graph: NodeId,
+    },
+    /// Paste Theme (#541): the Style and Size families of the copied theme go
+    /// to the graphs among `graphs`, one undo step, no window. Nothing happens
+    /// when no theme was copied.
+    PasteTheme {
+        /// The target graphs (anything else is skipped).
+        graphs: Vec<NodeId>,
+    },
+    /// Opens the Apply Theme window on the graphs among `graphs` (#541).
+    OpenApplyTheme {
+        /// The target graphs (anything else is skipped; none: nothing opens).
+        graphs: Vec<NodeId>,
+    },
+    /// Closes the Apply Theme window without applying (Cancel, Esc).
+    CloseApplyTheme,
+    /// Apply in the Apply Theme window (#541): one undo step, the use of the
+    /// theme counted, the window closed.
+    ConfirmApplyTheme,
+    /// Opens the Save Theme As window on `graph` (#541).
+    OpenSaveTheme {
+        /// The graph whose style will be saved.
+        graph: NodeId,
+    },
+    /// Closes the Save Theme As window without saving.
+    CloseSaveTheme,
+    /// Opens the Rename Theme window on a user or project theme (#542).
+    OpenRenameTheme {
+        /// The theme to rename (a built-in is refused).
+        theme: crate::user_themes::ThemeRef,
+    },
+    /// Closes the Rename Theme window without renaming.
+    CloseRenameTheme,
+    /// Rename in the window (#542): a user theme keeps its id, a project theme
+    /// is one undo step; the use count follows. A refused name says why.
+    RenameTheme {
+        /// The theme to rename.
+        theme: crate::user_themes::ThemeRef,
+        /// The new name.
+        name: String,
+    },
+    /// Update From This Graph (#542): the style of `graph` (the open Graph
+    /// Properties draft included) replaces that of the theme. On a built-in
+    /// it is an edit, which Reset takes back.
+    UpdateTheme {
+        /// The theme to replace.
+        theme: crate::user_themes::ThemeRef,
+        /// The graph whose style is captured.
+        graph: NodeId,
+    },
+    /// Reset (#542): an edited built-in gets its original style back.
+    ResetTheme {
+        /// The built-in theme.
+        theme: crate::user_themes::ThemeRef,
+    },
+    /// Delete (#542): a project theme at once (undoable), a user theme after
+    /// its confirmation (the library has no history).
+    DeleteTheme {
+        /// The theme to delete.
+        theme: crate::user_themes::ThemeRef,
+    },
+    /// The user answers « Delete » to the confirmation of a user theme.
+    ConfirmDeleteTheme,
+    /// The user answers « Cancel » to the confirmation of a user theme.
+    CancelDeleteTheme,
+    /// Chooses the default theme of new graphs (#542; `None`: no theme): the
+    /// « Use for new graphs » box and the Preferences row.
+    SetNewGraphTheme(Option<crate::user_themes::ThemeRef>),
+    /// Apply Theme… of the Theme tab (#542): opens the window **into the draft**
+    /// of Graph Properties on `graph`.
+    OpenApplyThemeIntoDraft {
+        /// The graph whose draft receives the theme.
+        graph: NodeId,
+    },
+    /// Save Theme As (#541): the style of `graph` under `name`, in the user's
+    /// library on this machine (`Mine`, not undoable) or in the project
+    /// (`Project`, one undo step). A refused name says why and nothing is
+    /// saved.
+    SaveThemeAs {
+        /// The graph whose style is captured.
+        graph: NodeId,
+        /// Name of the theme.
+        name: String,
+        /// Where it is saved.
+        target: crate::theme_window::ThemeTarget,
     },
     /// Saves the style of `graph` as a new theme of the project (#540): one
     /// undo step ([`Command::SetProjectThemes`]). The data is stripped
@@ -3607,6 +3699,19 @@ pub struct AppState {
     /// The user's graph themes, kept on this machine (#539, see
     /// [`crate::user_themes`]).
     user_themes: UserThemes,
+    /// The theme Copy Theme put aside (#541): the app's own clipboard, never the
+    /// system one. Session memory, outside the history.
+    theme_clipboard: Option<stokesforge_plot::GraphTheme>,
+    /// The Apply Theme window (#541), while it is open.
+    apply_theme_window: Option<crate::theme_window::ApplyThemeWindow>,
+    /// The Save Theme As window (#541), while it is open.
+    save_theme_window: Option<crate::theme_window::SaveThemeWindow>,
+    /// The Rename Theme window (#542), while it is open.
+    rename_theme_window: Option<crate::theme_window::RenameThemeWindow>,
+    /// The user theme whose deletion waits for its confirmation (#542).
+    pending_theme_delete: Option<crate::user_themes::ThemeRef>,
+    /// The theme selected in the picker of the Theme tab (#542).
+    theme_selection: crate::theme_window::ThemeSource,
     /// Current grid selection of each displayed sheet — pure UI
     /// state, never in the history (see the head doc of
     /// [`crate::selection`]). Missing key = no selection in this
@@ -3870,6 +3975,14 @@ impl AppState {
             // preferences file never reads the real library of the machine.
             user_themes: UserThemes::load_from(
                 preferences_folder.map(|folder| folder.join(crate::user_themes::FILE_NAME)),
+            ),
+            theme_clipboard: None,
+            apply_theme_window: None,
+            save_theme_window: None,
+            rename_theme_window: None,
+            pending_theme_delete: None,
+            theme_selection: crate::theme_window::ThemeSource::Theme(
+                crate::user_themes::ThemeRef::Builtin(0),
             ),
             selection: std::collections::HashMap::new(),
             header_editing: None,
@@ -4235,6 +4348,10 @@ impl AppState {
             || self.origin_import_open()
             || self.plot_settings.is_some()
             || self.analysis.is_some()
+            || self.apply_theme_window.is_some()
+            || self.save_theme_window.is_some()
+            || self.rename_theme_window.is_some()
+            || self.pending_theme_delete.is_some()
     }
 
     /// The remembered size and position of each kind of dialog (S-F8).
@@ -6957,7 +7074,7 @@ impl AppState {
                 self.execute(Command::SetPlotSpec { graph, spec })
             }
             Action::AddProjectTheme { graph, name } => {
-                if let Some(spec) = self.plot_spec(graph) {
+                if let Some(spec) = self.spec_for_theme(graph) {
                     let mut themes = self.snapshot.tree.project_themes().to_vec();
                     themes.push(stokesforge_plot::GraphTheme::capture(name, &spec));
                     self.execute(Command::SetProjectThemes { themes });
@@ -6982,7 +7099,7 @@ impl AppState {
                 }
             }
             Action::OverwriteProjectTheme { name, graph } => {
-                let Some(spec) = self.plot_spec(graph) else {
+                let Some(spec) = self.spec_for_theme(graph) else {
                     return;
                 };
                 let mut themes = self.snapshot.tree.project_themes().to_vec();
@@ -7000,6 +7117,28 @@ impl AppState {
                 graphs,
                 add_missing_layers,
             } => self.apply_theme(&theme, families, &graphs, add_missing_layers),
+            Action::CopyTheme { graph } => self.copy_theme(graph),
+            Action::PasteTheme { graphs } => self.paste_theme(&graphs),
+            Action::OpenApplyTheme { graphs } => self.open_apply_theme(&graphs),
+            Action::CloseApplyTheme => self.apply_theme_window = None,
+            Action::ConfirmApplyTheme => self.confirm_apply_theme(),
+            Action::OpenSaveTheme { graph } => self.open_save_theme(graph),
+            Action::CloseSaveTheme => self.save_theme_window = None,
+            Action::OpenRenameTheme { theme } => self.open_rename_theme(theme),
+            Action::CloseRenameTheme => self.rename_theme_window = None,
+            Action::RenameTheme { theme, name } => self.rename_theme(theme, name),
+            Action::UpdateTheme { theme, graph } => self.update_theme(theme, graph),
+            Action::ResetTheme { theme } => self.reset_theme(theme),
+            Action::DeleteTheme { theme } => self.delete_theme(theme),
+            Action::ConfirmDeleteTheme => self.confirm_delete_theme(),
+            Action::CancelDeleteTheme => self.pending_theme_delete = None,
+            Action::SetNewGraphTheme(theme) => self.set_default_theme(theme),
+            Action::OpenApplyThemeIntoDraft { graph } => self.open_apply_theme_into_draft(graph),
+            Action::SaveThemeAs {
+                graph,
+                name,
+                target,
+            } => self.save_theme_as(graph, name, target),
             Action::OpenPlotSettings { graph, tab, axis } => {
                 self.open_plot_settings(graph, tab, axis);
             }
