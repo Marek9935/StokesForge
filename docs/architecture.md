@@ -62,7 +62,7 @@ guards.
 |---|---|---|
 | `stokesforge-id` | `NodeId`, and nothing else | [model](data-model.md) |
 | `stokesforge-analysis` | pure mathematical processing (#181): baselines, correction by reference, integrals, fits, peaks, deconvolution; `f64` where `NaN` means "empty", results with stable keys; transcendental functions through `libm`, same bits on all platforms (#332); no UI, no Python, no other workspace crate | [model](data-model.md) |
-| `stokesforge-plot` | `PlotSpec`: the description of a graph, neutral toward the renderer | [model](data-model.md) |
+| `stokesforge-plot` | `PlotSpec`: the description of a graph, neutral toward the renderer, and the built-in graph theme catalogue (`builtin_themes`, shared with scripts, #546) | [model](data-model.md) |
 | `stokesforge-core` | `Project` / `Tree` / `Node` / `Column`, plus `resolve` (spec → data) and `compose` (columns → series of a graph, #257: X/Y pairing, palette by rank, layers; reading of the `PlotSpec`; no sentence, no mutation) | [model](data-model.md) |
 | `stokesforge-commands` | the commands, the hybrid undo stack, the macros | [commands](commands-and-history.md) |
 | `stokesforge-persistence` | `save`/`load`, transport schema, `.stf` format | [persistence](persistence.md) |
@@ -70,7 +70,7 @@ guards.
 | `stokesforge-import` | reading of instrument files (CSV/TXT/ASC, JCAMP-DX), the detector (`sniff`, `instrument`, `jcamp`, `thousands`, `props`), recipes, templates with conditions (`templates`, `recipe_for_file`), preview; independent of core/UI | [application](application/project-and-import.md) |
 | `stokesforge-render` | text measurement, Plotters pipeline, **all the rendering** | [rendering](rendering.md) |
 | `stokesforge-render-egui` | screen backend (`DrawingBackend` → `egui::Shape`), shape cache, reading of egui inputs (wheel, drag), feathering; the computation of zoom/pan and of the nearest point is in `stokesforge-render` (#262) | [rendering](rendering.md) |
-| `stokesforge-render-svg` | SVG export, and PDF and PNG on top of it | [rendering](rendering.md) |
+| `stokesforge-render-svg` | SVG export, and PDF and PNG on top of it; the application of a graph theme to a spec (`themed_spec`, placement switch and missing layers, #546) | [rendering](rendering.md) |
 | `stokesforge-python` | embedded CPython interpreter, numpy round trip | [python](python-and-scripting.md) |
 | `stokesforge-script` | the script thread, the `pyst` surface, the interruption | [python](python-and-scripting.md) |
 | `stokesforge-app-state` | the application state **without egui** (#263): `AppState` and its `Action`s, selection, preferences, analysis forms, Object Manager, interface text (`tr!`, Fluent catalogs `en`/`fr`) and errors turned into sentences; testable without a window (`tests/shell.rs`). No `egui`, no `eframe`, no `winit`, no `wgpu`: the compiler holds the boundary | [application](application/state-and-console.md) |

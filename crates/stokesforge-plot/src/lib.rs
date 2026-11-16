@@ -84,6 +84,7 @@
 
 pub mod annotation;
 pub mod axis;
+pub mod builtin_themes;
 pub mod color_bar;
 pub mod gradient;
 pub mod legend;
