@@ -1202,6 +1202,23 @@ pub enum Action {
         /// New description of the graph.
         spec: PlotSpec,
     },
+    /// Applies the checked `families` of `theme` to every graph of `graphs`
+    /// as **one** undo step: one [`Command::SetPlotSpec`] per graph that
+    /// changes, inside one `ApplyTheme` macro (#538). A node that is not a
+    /// graph is skipped, a graph the theme would not change adds nothing, and
+    /// no history entry is made when no graph changes.
+    ApplyTheme {
+        /// The theme to apply (a snapshot: editing a theme later changes no
+        /// graph).
+        theme: stokesforge_plot::GraphTheme,
+        /// Families to copy.
+        families: stokesforge_plot::ThemeFamilies,
+        /// Target graphs.
+        graphs: Vec<NodeId>,
+        /// A graph with fewer layers than the theme gets empty layers up to
+        /// the theme's count; off, only its existing layers are styled.
+        add_missing_layers: bool,
+    },
     /// Opens (or brings to the wanted tab) the properties window of the
     /// graph `graph` — right-click on a graph component, or the
     /// "Graph" menu. `axis` chooses the axis shown by the "Axes" tab
@@ -6752,6 +6769,12 @@ impl AppState {
             Action::SetPlotSpec { graph, spec } => {
                 self.execute(Command::SetPlotSpec { graph, spec })
             }
+            Action::ApplyTheme {
+                theme,
+                families,
+                graphs,
+                add_missing_layers,
+            } => self.apply_theme(&theme, families, &graphs, add_missing_layers),
             Action::OpenPlotSettings { graph, tab, axis } => {
                 self.open_plot_settings(graph, tab, axis);
             }
@@ -8859,6 +8882,48 @@ impl AppState {
     /// Is the "Low R²" box allowed by the application (#288)?
     pub fn analysis_low_r2_dialog(&self) -> bool {
         self.object_manager_preferences.analysis_low_r2_dialog()
+    }
+
+    /// Applies `families` of `theme` to `graphs` (#538): one history step. A
+    /// node that is not a graph, and a graph the application would not change,
+    /// add nothing; with no change at all nothing is pushed.
+    fn apply_theme(
+        &mut self,
+        theme: &stokesforge_plot::GraphTheme,
+        families: stokesforge_plot::ThemeFamilies,
+        graphs: &[NodeId],
+        add_missing_layers: bool,
+    ) {
+        let mut seen = std::collections::HashSet::new();
+        let changes: Vec<(NodeId, PlotSpec)> = graphs
+            .iter()
+            .filter(|graph| seen.insert(**graph))
+            .filter_map(|graph| {
+                let current = self.plot_spec(*graph)?;
+                let next = crate::theme_apply::themed_spec(
+                    &self.snapshot.tree,
+                    &current,
+                    theme,
+                    families,
+                    add_missing_layers,
+                );
+                (next != current).then_some((*graph, next))
+            })
+            .collect();
+        if changes.is_empty() {
+            return;
+        }
+        if let Err(err) = self.handle.begin_macro(MacroKind::ApplyTheme) {
+            self.fail(tr!(
+                "error-theme-undo-group",
+                cause = errors::session::error_message(&err)
+            ));
+            return;
+        }
+        for (graph, spec) in changes {
+            self.execute(Command::SetPlotSpec { graph, spec });
+        }
+        self.end_grouped_macro();
     }
 
     /// Do **new** graphs write their numbers with a decimal comma (R9, #148)?

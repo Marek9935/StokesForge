@@ -99,6 +99,7 @@ pub mod style;
 pub mod text_anchor;
 pub mod text_font;
 pub mod theme;
+pub mod theme_family;
 
 pub use annotation::{AnnotationRef, AnnotationSpec, TextAlign};
 pub use axis::{AxisScale, AxisSide, AxisSpec, TickDirection, AXIS_TITLE_TEMPLATE};
@@ -130,3 +131,4 @@ pub use style::{
 pub use text_anchor::{TextAnchor, TextTarget};
 pub use text_font::TextFont;
 pub use theme::{Theme, THEMES};
+pub use theme_family::{GraphTheme, ThemeFamilies, ThemeFamily, SURPLUS_GAP};

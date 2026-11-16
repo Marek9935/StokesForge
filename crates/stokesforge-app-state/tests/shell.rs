@@ -20302,3 +20302,33 @@ fn dropping_rows_beyond_the_ranges_widens_them_in_a_second_step() {
     assert_eq!(kept.panels[0].series.len(), 2, "the rows stay");
     assert_eq!(kept.panels[0].left.range_max, Some(top));
 }
+
+/// #538: a theme applied to two graphs is one undo step, one undo restores both.
+#[test]
+fn applying_a_theme_to_two_graphs_is_one_undo_step() {
+    use stokesforge_plot::{GraphTheme, ThemeFamilies, THEMES};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, _sheet, _columns) = kinetics(dir.path());
+    state.dispatch(Action::AddGraph);
+    state.dispatch(Action::AddGraph);
+    let graphs: Vec<_> = state.graphs().into_iter().map(|(id, _)| id).collect();
+    assert_eq!(graphs.len(), 2);
+    let specs = |state: &AppState| -> Vec<_> {
+        graphs
+            .iter()
+            .map(|g| state.plot_spec(*g).expect("a graph"))
+            .collect()
+    };
+    let before = specs(&state);
+    state.dispatch(Action::ApplyTheme {
+        theme: GraphTheme::from_colors("Dark", &THEMES[1]),
+        families: ThemeFamilies::all(),
+        graphs: graphs.clone(),
+        add_missing_layers: false,
+    });
+    assert!(specs(&state)
+        .iter()
+        .all(|spec| spec.background == "#1e1e1e"));
+    state.dispatch(Action::Undo);
+    assert_eq!(specs(&state), before);
+}

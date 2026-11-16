@@ -459,6 +459,35 @@ setting overwrites what had been set one by one, and nothing more is remembered
 window: a single history step on confirmation. The themes leave the
 text and the axes on automatic, so they follow the background.
 
+**Themes engine (#538, engine only: no screen yet)**. A graph theme is a style
+snapshot of a whole graph, applied to other graphs **by families** (#514, forms
+514-1 to 514-4). `stokesforge_plot::GraphTheme::capture` copies a `PlotSpec` and
+strips every data reference (series columns and names, free texts, shapes,
+dragged positions, legend and colour bar row columns, colour bar segments,
+group names, stale warning); two graphs that differ only by data give equal
+themes. `ThemeFamily` names the nine families (Background, Texts, Title fonts,
+Axes, Axis ranges, Size and page, Legend, Curves, Colour bar; stable `key()`),
+`ThemeFamilies` is the checked set, and `PlotSpec::apply_theme_families` copies
+only the checked ones. Each style field is in exactly one family or in « never »:
+the table is the destructuring guard `every_field_has_a_family` at the end of
+`theme_family.rs`, which stops compiling when a field is added to `PlotSpec`,
+`PanelSpec`, `AxisSpec`, `SeriesSpec`, `LegendSpec` or `ColorBarSpec` without a
+class. Shape mismatch: layer `i` of the target takes theme layer `min(i, last)`;
+curves cycle inside a layer; grid widths and heights go by index, the surplus
+takes the last; free frames go by index with a surplus layer **offset** to the
+right of the last frame (`SURPLUS_GAP`), never on the same frame. Axis ranges
+carry From and To only (#529); an axis that ends on a log scale with a range
+that is impossible for log goes back to automatic. What needs the project lives
+in `stokesforge-app-state::theme_apply`: switching grid and free placement
+through `frame_sizes::set_placement_in_draft` when the Size and page family is
+applied, and the « Add missing layers » option (off by default: only the
+existing layers are styled; on: empty layers are added beside or below, like
+the theme's own layout). Light and Dark stay **colour-only** themes
+(`GraphTheme::from_colors`, `colors_only`): applying one writes background, text
+colour and axes colour, each behind its family, and nothing else. Applying to
+N graphs is `Action::ApplyTheme`, one `MacroKind::ApplyTheme` step
+(`docs/commands-and-history.md`).
+
 **Color picker** (`crate::color_picker`): every color of the
 window is chosen with a swatch button (`color_field`/`color_button`)
 that opens a pop-up window, **collapsed**: palette, "Auto"

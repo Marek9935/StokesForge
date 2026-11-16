@@ -95,11 +95,14 @@ pub enum MacroKind {
     /// Analyze rows: the linked transposed sheet (created or completed)
     /// and the calculation on its column, undone as one block (#253).
     AnalyzeRows,
+    /// Apply a graph theme (some style families) to one or several graphs
+    /// (#538): one `SetPlotSpec` per changed graph, undone as one block.
+    ApplyTheme,
 }
 
 impl MacroKind {
     /// All the group kinds, for exhaustive tests.
-    pub const ALL: [MacroKind; 20] = [
+    pub const ALL: [MacroKind; 21] = [
         MacroKind::PasteCells,
         MacroKind::PasteObjects,
         MacroKind::DuplicateObjects,
@@ -120,6 +123,7 @@ impl MacroKind {
         MacroKind::DeleteColumns,
         MacroKind::MoveColumns,
         MacroKind::AnalyzeRows,
+        MacroKind::ApplyTheme,
     ];
 }
 
@@ -430,6 +434,7 @@ impl fmt::Display for MacroKind {
             MacroKind::DeleteColumns => "Delete Columns",
             MacroKind::MoveColumns => "Move Columns",
             MacroKind::AnalyzeRows => "Analyze Rows",
+            MacroKind::ApplyTheme => "Apply Theme",
         })
     }
 }
