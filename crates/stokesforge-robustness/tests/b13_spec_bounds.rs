@@ -763,13 +763,26 @@ fn b13_a_hostile_graph_text_setting_is_clamped_and_the_figure_stays_bounded() {
     let bound = (MAX_FIGURE_EXTENT + 2.0 * MAX_FRAME_SIZE + 1000.0) as u32 * 4;
     let mut graphs = Vec::new();
     for (index, &scale) in scales.iter().enumerate() {
-        let spec = PlotSpec {
+        let mut spec = PlotSpec {
             frame_widths: vec![300.0],
             frame_heights: vec![200.0],
             text_scale: scale,
             text_font: families[index % families.len()].to_string(),
             ..PlotSpec::empty("T")
         };
+        // #545: a hostile tick label size on every axis (NaN counts as Auto,
+        // the others are clamped to 4..=200 when read).
+        let mut panel = PanelSpec::at(0, 0);
+        let hostile_size = scales[(index + 3) % scales.len()];
+        for side in [
+            &mut panel.bottom,
+            &mut panel.left,
+            &mut panel.right,
+            &mut panel.top,
+        ] {
+            side.tick_label_size = hostile_size;
+        }
+        spec = spec.with_panels(Panels::new(vec![panel]));
         let graph = project
             .add_graph(root, Some(&format!("G{index}")), spec)
             .expect("graph");
@@ -788,6 +801,10 @@ fn b13_a_hostile_graph_text_setting_is_clamped_and_the_figure_stays_bounded() {
         assert!((GraphText::SCALE_RANGE.0..=GraphText::SCALE_RANGE.1).contains(&text.scale));
         let size = text.size(None, 24.0);
         assert!((4.0..=200.0).contains(&size), "size {size} at {index}");
+        for axis in [&spec.panels[0].bottom, &spec.panels[0].left] {
+            let size = text.size(axis.tick_label_size, 14.0);
+            assert!((4.0..=200.0).contains(&size), "tick size {size} at {index}");
+        }
         let layout =
             stokesforge_render_svg::figure_layout(spec, &measurer, &choice).expect("a layout");
         assert!(

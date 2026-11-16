@@ -835,6 +835,14 @@ plot-general-title =
     Titre
     .hint = Affiché au-dessus du graphique
 plot-title-color = Couleur du titre
+plot-title-size = Taille du titre
+    .hint = Taille du titre, en points. Auto suit l'échelle du texte
+plot-layer-title-size = Taille du titre du calque
+    .hint = Taille du titre du calque, en points. Auto suit l'échelle du texte
+plot-axes-title-size = Taille du titre de l'axe
+    .hint = Taille du titre de l'axe, en points. Auto suit l'échelle du texte
+plot-axes-tick-label-size = Taille des étiquettes de graduation
+    .hint = Taille des nombres de cet axe, en points. Auto suit l'échelle du texte
 plot-general-background = Fond
 plot-general-text-color = Couleur du texte
 plot-general-axes-color = Couleur des axes

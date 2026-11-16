@@ -898,13 +898,18 @@ fn edge_reserves<DB: DrawingBackend>(
     probe: &DrawingArea<DB, Shift>,
 ) -> Vec<(u32, u32)> {
     let mut reserves = vec![(0_u32, 0_u32); layout.columns];
-    let style = tick_style(spec.graph_text(), (0, 0, 0, 255));
-    let width_of = |text: &str| -> f64 {
-        probe
-            .estimate_text_size(text, &style)
-            .map_or(0.0, |size| f64::from(size.0))
-    };
     for (index, panel) in spec.panels.iter().enumerate() {
+        // The numbers of this layer's X axis, at the size of that axis (#545).
+        let style = tick_style(
+            spec.graph_text(),
+            panel.bottom.tick_label_size,
+            (0, 0, 0, 255),
+        );
+        let width_of = |text: &str| -> f64 {
+            probe
+                .estimate_text_size(text, &style)
+                .map_or(0.0, |size| f64::from(size.0))
+        };
         let Some(cell) = layout.cells.get(index).copied() else {
             continue;
         };
@@ -2813,7 +2818,7 @@ impl Grow {
         Self {
             ticks: grown_room(
                 shrink.band(ticks_depth),
-                graph.size(None, LABEL_SIZE),
+                graph.size(axis.tick_label_size, LABEL_SIZE),
                 shrink.text(LABEL_SIZE),
             ),
             title: grown_room(
@@ -3258,45 +3263,52 @@ fn draw_panel<DB: DrawingBackend>(
         .build_cartesian_2d(0.0..1.0, 0.0..1.0)?
         .plotting_area()
         .dim_in_pixel();
-    let label_style = tick_style(graph, opaque(ink));
-    let label_width = |text: &str| -> f64 {
-        area.estimate_text_size(text, &label_style)
-            .map_or(0.0, |size| f64::from(size.0))
-    };
-    let label_height = |text: &str| -> f64 {
-        area.estimate_text_size(text, &label_style)
-            .map_or(0.0, |size| f64::from(size.1))
-    };
-    let count_of = |scale: AxisScale, range: (f64, f64), horizontal: bool| -> usize {
+    // Each axis counts its ticks with the numbers at its own size (#545).
+    let style_of = |axis: &AxisSpec| tick_style(graph, axis.tick_label_size, opaque(ink));
+    let count_of = |scale: AxisScale,
+                    range: (f64, f64),
+                    horizontal: bool,
+                    style: &TextStyle<'static>|
+     -> usize {
         if horizontal {
+            let width = |text: &str| -> f64 {
+                area.estimate_text_size(text, style)
+                    .map_or(0.0, |size| f64::from(size.0))
+            };
             scale::tick_count(
                 scale,
                 range,
                 f64::from(axis_width),
                 scale::AxisDirection::Horizontal,
                 decimal_comma,
-                &label_width,
+                &width,
             )
         } else {
+            let height = |text: &str| -> f64 {
+                area.estimate_text_size(text, style)
+                    .map_or(0.0, |size| f64::from(size.1))
+            };
             scale::tick_count(
                 scale,
                 range,
                 f64::from(axis_height),
                 scale::AxisDirection::Vertical,
                 decimal_comma,
-                &label_height,
+                &height,
             )
         }
     };
     let x_count = match base {
         Some(base) if !x_own => base.x_count,
-        _ => count_of(x_scale, x_range, true),
+        _ => count_of(x_scale, x_range, true, &style_of(&spec.bottom)),
     };
     let y_count = match base {
         Some(base) if !y_own => base.y_count,
-        _ => count_of(y_scale, y_range, false),
+        _ => count_of(y_scale, y_range, false, &style_of(&spec.left)),
     };
-    let y2_count = y2_range.map_or(y_count, |range| count_of(y2_scale, range, false));
+    let y2_count = y2_range.map_or(y_count, |range| {
+        count_of(y2_scale, range, false, &style_of(&spec.right))
+    });
     let chart = builder.build_cartesian_2d(x_range.0..x_range.1, y_range.0..y_range.1)?;
 
     // The secondary axis is **always** attached, even unused: it takes from
@@ -4774,14 +4786,19 @@ pub(crate) fn text_style(size: f64, color: (u8, u8, u8, u8)) -> TextStyle<'stati
     (FONT_FAMILY, size).into_font().color(&rgba(color))
 }
 
-/// The style of the **ticks** under the graph settings (#545): the Auto size
-/// of the tick numbers times the graph scale, in the graph font. Without a
+/// The style of the **ticks** under the graph settings (#545): `size` when set
+/// by hand on the axis (absolute), else the Auto size of the tick numbers times
+/// the graph scale, in the graph font. Without a
 /// graph font this is [`text_style`] (laid out by `epaint`, never by Typst, so
 /// an untouched graph keeps its pixels); with one, the numbers are laid out
 /// like a colour-bar tick, as literal text in that family
 /// ([`crate::formula::literal_style_font`]).
-pub(crate) fn tick_style(graph: GraphText<'_>, color: (u8, u8, u8, u8)) -> TextStyle<'static> {
-    let size = graph.size(None, LABEL_SIZE);
+pub(crate) fn tick_style(
+    graph: GraphText<'_>,
+    size: Option<f64>,
+    color: (u8, u8, u8, u8),
+) -> TextStyle<'static> {
+    let size = graph.size(size, LABEL_SIZE);
     match graph.family {
         None => text_style(size, color),
         family => crate::formula::literal_style_font(size, color, family),
@@ -5082,7 +5099,7 @@ impl AxisColors {
         let ticks = rgba_or(&axis.tick_color, opaque(ink));
         Self {
             ticks,
-            tick_style: tick_style(graph, ticks),
+            tick_style: tick_style(graph, axis.tick_label_size, ticks),
             title_style: font_style(&axis.title_font, AXIS_DESC_SIZE, graph, title, figure_width),
         }
     }

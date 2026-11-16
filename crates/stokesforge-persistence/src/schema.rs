@@ -1188,6 +1188,9 @@ pub(crate) struct AxisSpecRecord {
     /// Color of the ticks; empty = that of the scale.
     #[serde(default)]
     pub(crate) tick_mark_color: String,
+    /// Size of the tick numbers (#545); absent = Auto. Additive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) tick_label_size: Option<f64>,
 }
 
 impl AxisSpecRecord {
@@ -1231,6 +1234,7 @@ impl Default for AxisSpecRecord {
             minor_tick_length: None,
             tick_width: None,
             tick_mark_color: String::new(),
+            tick_label_size: None,
         }
     }
 }
@@ -1716,6 +1720,8 @@ mod tests {
         assert_eq!(reloaded.minor_tick_length, None);
         assert_eq!(reloaded.tick_width, None);
         assert_eq!(reloaded.tick_mark_color, "");
+        // #545: the tick numbers of an old axis are Auto.
+        assert_eq!(reloaded.tick_label_size, None);
 
         let spec = OldSpec {
             title: "Old".to_string(),

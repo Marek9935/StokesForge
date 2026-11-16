@@ -242,6 +242,8 @@ pub fn non_trivial_spec(
             minor_tick_length: Some(3.5),
             tick_width: Some(2.0),
             tick_mark_color: "#cc3300".to_string(),
+            // #545: tick numbers set by hand.
+            tick_label_size: Some(9.5),
         },
         title_visible: true,
         title_anchor: Some(stokesforge_plot::TextAnchor {

@@ -416,6 +416,7 @@ impl From<&AxisSpec> for AxisSpecRecord {
             minor_tick_length: value.minor_tick_length,
             tick_width: value.tick_width,
             tick_mark_color: value.tick_mark_color.clone(),
+            tick_label_size: value.tick_label_size,
             tick_direction: match value.tick_direction {
                 TickDirection::Out => TickDirectionRecord::Out,
                 TickDirection::In => TickDirectionRecord::In,
@@ -467,6 +468,7 @@ impl From<AxisSpecRecord> for AxisSpec {
             minor_tick_length: value.minor_tick_length,
             tick_width: value.tick_width,
             tick_mark_color: value.tick_mark_color,
+            tick_label_size: value.tick_label_size,
             tick_direction: match value.tick_direction {
                 TickDirectionRecord::Out => TickDirection::Out,
                 TickDirectionRecord::In => TickDirection::In,

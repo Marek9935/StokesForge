@@ -360,6 +360,14 @@ them (a non-finite scale is 100 %, others are clamped to 25 to 400 %). An older
 version that re-saves the file drops them without a message. The hostile case is
 in `b13_spec_bounds`.
 
+`AxisSpecRecord` also gained `tick_label_size` (`Option<f64>`, the size of the
+tick numbers of that axis, `#[serde(default, skip_serializing_if = "Option::is_none")]`;
+absent = Auto). An axis without it writes the same bytes as before, so
+**`FORMAT_VERSION` did not move**; `tests/witnesses/v1` was regenerated with a
+non-default value (`v1-before-text-settings` keeps the previous one, which reads
+back with Auto tick numbers). An older version that re-saves the file drops it
+without a message.
+
 ## Regular Grid: the empty space around the grid (#505)
 
 `PlotSpecRecord` gained `grid_slack` (`Option<GridSlackRecord>`: `left`, `top`,

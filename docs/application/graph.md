@@ -456,11 +456,25 @@ the local fields. **Font** is the same list as the format toolbar (« Graph font
 = the embedded default); **Text scale (%)** takes 25 to 400, Auto = 100 %. Every
 text left on Auto follows them (graph and layer titles, axis titles, tick
 numbers, legend, colour bar, free texts created since #545); a text whose family
-or size was set by hand keeps it (`GraphText`, `stokesforge-plot`: the one place
+or size was set by hand keeps it, the size absolute (`GraphText`, `stokesforge-plot`: the one place
 that decides, see `docs/rendering.md` § Graph font and text scale). The format
 toolbar's size shows « Auto (N) » with the size drawn, scale included. The window
 is one history step (`GraphProperties`); Cancel writes nothing. The Title fonts
 theme family carries both. `pyst.set_graph(text_font=…, text_scale=…)`.
+
+**Every text size is a field of Graph Properties (#545, after the trial)**, an
+Auto-capable number field like the Legend tab's (`text_size_row`,
+`quantities::TEXT_FORMAT_SIZE`): General › **Title size** under Title color,
+Plot Area › **Layer title size** under Layer title, Axes › **Axis title size**
+under the axis title color and **Tick label size** under Show tick labels
+(Display; none on a mirror axis, which follows the opposite one), Legend ›
+**Font size (pt)**. Auto reads « Auto (N) », N = built-in size times the graph
+scale, in full (the size field is `wide`); a typed size is **absolute** (the
+scale does not multiply it, and the field shows what was typed). The tick label
+size is `AxisSpec::tick_label_size` (`Option<f64>`, per axis), classed in the
+Axes theme family, read through `GraphText::size` for measuring, tick count,
+edge reserves and drawing. Both views (toolbar, Graph Properties) edit the same
+fields; the window stays one history step.
 
 **Global colors (General tab, #542)**: Text color and Axes color
 (`plot-general-text-color`, `plot-general-axes-color`; the background is the row

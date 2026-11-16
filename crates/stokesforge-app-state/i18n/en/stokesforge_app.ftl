@@ -836,6 +836,14 @@ plot-general-title =
     Title
     .hint = Shown above the graph
 plot-title-color = Title color
+plot-title-size = Title size
+    .hint = Size of the title, in points. Auto follows the Text scale
+plot-layer-title-size = Layer title size
+    .hint = Size of the layer title, in points. Auto follows the Text scale
+plot-axes-title-size = Axis title size
+    .hint = Size of the axis title, in points. Auto follows the Text scale
+plot-axes-tick-label-size = Tick label size
+    .hint = Size of the numbers of this axis, in points. Auto follows the Text scale
 plot-general-background = Background
 plot-general-text-color = Text color
 plot-general-axes-color = Axes color

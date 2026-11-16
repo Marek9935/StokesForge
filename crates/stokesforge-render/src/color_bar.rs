@@ -337,7 +337,7 @@ pub fn label_styles(
         None,
     );
     let tick = if font.is_default() {
-        crate::pipeline::tick_style(graph, ink)
+        crate::pipeline::tick_style(graph, None, ink)
     } else {
         crate::formula::literal_style_font(
             font.resolved_size(graph, crate::pipeline::LABEL_SIZE),

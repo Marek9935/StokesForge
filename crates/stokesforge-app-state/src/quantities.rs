@@ -237,7 +237,9 @@ pub const TEXT_FORMAT_SIZE: Quantity = TEXT_SIZE
     .with_presets(&[
         6.0, 8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 28.0, 36.0, 48.0,
     ])
-    .with_auto(AutoKind::Field);
+    .with_auto(AutoKind::Field)
+    // « Auto (200) » must read in full, also in a longer language (#545).
+    .wide();
 
 /// Text scale of a graph, in percent (#545): 100 is today's size. Bounds of
 /// `GraphText::SCALE_RANGE`; an emptied field is Auto (100 %).

@@ -920,6 +920,60 @@ mod tests {
         }
     }
 
+    /// #545: the Auto hint of a text size, « Auto (200) » at its widest, fits
+    /// the field in full, beside the list arrow. Witness: the short field
+    /// (the hint is cut).
+    #[test]
+    fn the_auto_hint_of_a_text_size_fits_its_field() {
+        // The widest English hint, and the pseudo-language one (en-XA).
+        for hint in ["Auto (200)", "[[Àûtö (200)]]"] {
+            assert_auto_hint_fits(hint);
+        }
+    }
+
+    fn assert_auto_hint_fits(hint: &str) {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut rect = egui::Rect::NOTHING;
+        let mut value: Option<f64> = None;
+        let mut output = None;
+        for frame in 0..2 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(400.0, 300.0),
+                )),
+                time: Some(f64::from(frame) * 0.1),
+                ..Default::default()
+            };
+            let mut full = ctx.run_ui(input, |ui| {
+                let response =
+                    auto_number_field(ui, "size", &mut value, &quantities::TEXT_FORMAT_SIZE, hint);
+                rect = response.response.rect;
+            });
+            full.textures_delta.clear();
+            output = Some(full);
+        }
+        let text_width = output
+            .unwrap()
+            .shapes
+            .iter()
+            .find_map(|painted| match &painted.shape {
+                egui::Shape::Text(shape) if shape.galley.job.text == hint => {
+                    Some(shape.galley.size().x)
+                }
+                _ => None,
+            })
+            .expect("the hint is painted");
+        // Margins (4 + 4) and the arrow room.
+        let needed = text_width + 8.0 + list_frame::ARROW_ROOM;
+        assert!(
+            rect.width() >= needed,
+            "field {} < hint {needed} ({hint})",
+            rect.width()
+        );
+    }
+
     /// #426: a value validated with Enter leaves the field.
     #[test]
     fn enter_on_a_typed_value_gives_the_focus_back() {

@@ -282,6 +282,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Pan† | Panoramique | Move the framing | Déplacement | G |
 | Global colors | Couleurs globales | Text color and Axes color, on the General tab of Graph Properties (#542): each is written into every local color, the last one set wins | Theme colors | — |
 | Text scale (%) | Échelle du texte (%) | Row of Graph Properties › General under Text color and Axes color (#545, key `plot-general-text-scale`): multiplier of the size of every text left on Auto, 25 to 400, Auto = 100 %. The row above it is **Font** (the format toolbar's word, key `format-font`) whose first entry is « Graph font » / « Police du graphe » | Zoom, Text size, Font scale | G |
+| Title size / Layer title size / Axis title size / Tick label size | Taille du titre / Taille du titre du calque / Taille du titre de l'axe / Taille des étiquettes de graduation | Auto-capable size rows of Graph Properties (#545, keys `plot-title-size`, `plot-layer-title-size`, `plot-axes-title-size`, `plot-axes-tick-label-size`): General under Title color, Plot Area under Layer title, Axes under Axis title color and next to Show tick labels. Auto shows « Auto (N) », N the size drawn; a typed size is absolute. The Legend tab keeps « Font size (pt) » | Font size, Text size | G |
 | Palette | Palette | Set of colors offered | — | G |
 | Swatch | Nuance | One color of a palette | Échantillon | G |
 | Saved colors | Couleurs enregistrées | Colors kept in the project or for the user | Favoris | — |

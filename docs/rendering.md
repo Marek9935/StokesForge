@@ -505,7 +505,10 @@ does not multiply it (decided after the trial of #545: what is typed is what is 
 constants are `TITLE_SIZE`, `PANEL_TITLE_SIZE`, `AXIS_DESC_SIZE` (axis titles and
 free texts that follow the graph, `AnnotationSpec::follows_graph_size`) and
 `LABEL_SIZE` (ticks, legend, colour bar). Rich texts go through `font_style`;
-**tick numbers** go through `tick_style`: with no graph font they are the
+**tick numbers** go through `tick_style(graph, axis.tick_label_size, …)`, per
+axis (#545: a size set by hand on the axis is absolute, else the built-in size
+times the scale; the tick count, the edge reserves and `Grow` read the same
+per-axis size): with no graph font they are the
 `epaint` text of before (so an untouched graph keeps its pixels), with one they
 are literal Typst text in that family like the colour-bar numbers.
 

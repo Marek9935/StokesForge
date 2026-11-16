@@ -421,8 +421,9 @@ fn the_graph_font_reaches_every_text_and_a_local_family_wins() {
     assert!(family_of(&svg, "0.3").unwrap().contains("Noto Sans"));
 }
 
-/// Scale 150 % grows an Auto text and leaves a hand-set size alone; 100 %
-/// is the export of a graph with no setting, byte for byte.
+/// Scale 150 % grows an Auto text and leaves a hand-set size alone: what is
+/// typed is what is drawn (#545, after the trial); 100 % is the export of a
+/// graph with no setting, byte for byte.
 #[test]
 fn the_text_scale_resizes_auto_texts_only() {
     use stokesforge_render_svg::SvgTextMode::Text;
@@ -438,12 +439,12 @@ fn the_text_scale_resizes_auto_texts_only() {
     assert!((ratio - 1.5).abs() < 0.02, "tick ratio {ratio}");
     let ratio = size_of(&scaled, "Spectrumalpha") / size_of(&plain, "Spectrumalpha");
     assert!(ratio > 1.3, "title ratio {ratio}");
-    spec.title_font.size = Some(24.0);
+    spec.title_font.size = Some(10.0);
     let by_hand = svg_mode(&spec, Text);
     let hand = size_of(&by_hand, "Spectrumalpha");
     let alone = {
         let mut spec = rich_spec();
-        spec.title_font.size = Some(24.0);
+        spec.title_font.size = Some(10.0);
         size_of(&svg_mode(&spec, Text), "Spectrumalpha")
     };
     assert!(
@@ -453,6 +454,68 @@ fn the_text_scale_resizes_auto_texts_only() {
     spec.text_scale = Some(1.0);
     spec.title_font.size = None;
     assert_eq!(svg_mode(&spec, Text), plain);
+}
+
+/// A tick label size is per axis (#545): only the left axis numbers change,
+/// at exactly the typed size even under a 150 % scale; the bottom ones keep
+/// the Auto size times the scale. Witness: the size read from the graph
+/// instead of the axis (the bottom numbers change too), or multiplied by the
+/// scale (the left ones read 30).
+#[test]
+fn a_tick_label_size_is_set_per_axis_and_is_absolute() {
+    use stokesforge_render_svg::SvgTextMode::Text;
+    let sizes_of = |svg: &str| -> Vec<(String, f64)> {
+        let mut out = Vec::new();
+        for (start, _) in svg.match_indices("<text") {
+            let end = svg[start..]
+                .find("</text>")
+                .map_or(svg.len(), |i| start + i);
+            let tag = &svg[start..end];
+            let content = tag[tag.find('>').unwrap() + 1..].trim().to_owned();
+            if let Some(size) = attribute(tag, "font-size").and_then(|s| s.parse().ok()) {
+                out.push((content, size));
+            }
+        }
+        out
+    };
+    let build = |left: Option<f64>| {
+        let mut spec = rich_spec();
+        spec.text_scale = Some(1.5);
+        spec.panels = Panels::new(vec![{
+            let mut panel = spec.panels[0].clone();
+            panel.left.auto_range = false;
+            panel.left.range_min = Some(0.0);
+            panel.left.range_max = Some(1000.0);
+            panel.left.tick_label_size = left;
+            panel
+        }]);
+        sizes_of(&svg_mode(&spec, Text))
+    };
+    let (auto, by_hand) = (build(None), build(Some(20.0)));
+    let is_left = |content: &str| content.parse::<f64>().is_ok_and(|v| v >= 100.0);
+    let is_bottom = |content: &str| content.parse::<f64>().is_ok_and(|v| v < 1.0 && v > 0.0);
+    let left_auto: Vec<_> = auto.iter().filter(|(c, _)| is_left(c)).collect();
+    assert!(!left_auto.is_empty(), "{auto:?}");
+    // The export scales points to its own unit: k = drawn / typed.
+    let k = left_auto[0].1 / 21.0;
+    assert!(
+        left_auto.iter().all(|(_, s)| (s / k - 21.0).abs() < 0.5),
+        "{left_auto:?}"
+    );
+    let left_hand: Vec<_> = by_hand.iter().filter(|(c, _)| is_left(c)).collect();
+    assert!(!left_hand.is_empty());
+    assert!(
+        left_hand.iter().all(|(_, s)| (s / k - 20.0).abs() < 0.5),
+        "{left_hand:?}"
+    );
+    let bottom = |all: &[(String, f64)]| -> Vec<f64> {
+        all.iter()
+            .filter(|(c, _)| is_bottom(c))
+            .map(|(_, s)| *s)
+            .collect()
+    };
+    assert!(!bottom(&auto).is_empty());
+    assert_eq!(bottom(&auto), bottom(&by_hand));
 }
 
 /// The tick count is chosen from the room the numbers take, measured at the

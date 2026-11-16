@@ -1864,3 +1864,27 @@ fn the_edge_reserve_is_measured_at_the_resolved_tick_size() {
     let (plain, scaled) = (edge(None), edge(Some(4.0)));
     assert!(scaled > plain, "{scaled} vs {plain}");
 }
+
+/// A tick label size is per axis (#545): doubling the left numbers widens the
+/// left band only (the tick depth zone, 46 pixels at 14), doubling the bottom
+/// ones heightens the bottom band only (30). Witness: the size read from the
+/// other axis, or ignored by the band.
+#[test]
+fn a_tick_label_size_grows_the_band_of_its_own_axis() {
+    let plain = layout_of(&scaled_frame(None));
+    let with = |edit: &dyn Fn(&mut stokesforge_plot::PanelSpec)| {
+        let spec = scaled_frame(None);
+        let mut panel = spec.panels[0].clone();
+        edit(&mut panel);
+        layout_of(&spec.with_panels(Panels::new(vec![panel])))
+    };
+    let left = with(&|panel| panel.left.tick_label_size = Some(28.0));
+    assert_eq!(left.column_gutters[0].0 - plain.column_gutters[0].0, 46);
+    assert_eq!(left.row_gutters, plain.row_gutters);
+    let bottom = with(&|panel| panel.bottom.tick_label_size = Some(28.0));
+    assert_eq!(bottom.row_gutters[0].1 - plain.row_gutters[0].1, 30);
+    assert_eq!(bottom.column_gutters[0].0, plain.column_gutters[0].0);
+    // A smaller hand-set size never shrinks today's band.
+    let small = with(&|panel| panel.left.tick_label_size = Some(6.0));
+    assert_eq!(small, plain);
+}

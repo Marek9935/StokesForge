@@ -126,6 +126,10 @@ pub struct AxisSpec {
     /// Color of the tick marks (`#RRGGBB`), distinct from [`AxisSpec::tick_color`]
     /// (line and numbers). Empty = the color of the scale.
     pub tick_mark_color: String,
+    /// Size of the tick numbers of this axis, set by hand (#545): absolute,
+    /// the graph text scale does not multiply it. `None` = Auto, the built-in
+    /// size times the scale. Resolved through [`crate::GraphText::size`].
+    pub tick_label_size: Option<f64>,
 }
 
 impl AxisSpec {
@@ -213,6 +217,7 @@ impl Default for AxisSpec {
             minor_tick_length: None,
             tick_width: None,
             tick_mark_color: String::new(),
+            tick_label_size: None,
         }
     }
 }

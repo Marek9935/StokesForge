@@ -119,9 +119,9 @@ While the window is open, your changes show on the graph at once. Click **OK** t
 
 | Tab | What you set |
 |---|---|
-| **General** | **Title**, **Title color**, **Background**, **Text color**, **Axes color**, **Font**, **Text scale (%)**, **Warn about out-of-date data**, **Size**, and the closed **Advanced** block (**When axes are added**) |
-| **Plot Area** | **Layer title**, vertical and horizontal **Gridlines** |
-| **Axes** | One axis at a time: title, scale, range, ticks, color |
+| **General** | **Title**, **Title color**, **Title size**, **Background**, **Text color**, **Axes color**, **Font**, **Text scale (%)**, **Warn about out-of-date data**, **Size**, and the closed **Advanced** block (**When axes are added**) |
+| **Plot Area** | **Layer title**, **Layer title size**, vertical and horizontal **Gridlines** |
+| **Axes** | One axis at a time: title, **Axis title size**, scale, range, **Tick label size**, ticks, color |
 | **Legend** | **Show legend**, **Position**, **Text from**, the **Text**, **Frame** and **Layout** settings, and the folded **Color bar** section at the bottom |
 | **Theme** | The themes as tiles, and what to do with the selected one: **Save Theme As…**, **Rename…**, **Update From This Graph**, **Reset**, **Delete**, **Use for new graphs** and **Apply Theme…** |
 
@@ -277,6 +277,8 @@ The **Axis title** field is one free text. Write the name and the units together
 
 A new graph fills the field for you with a formula that reads the column: its **Long Name**, or its **Short Name** when it has no long name, then ` / ` and its **Units** only when it has some. With the long name "Absorbance" and the units "a.u." you get `Absorbance / a.u.`. Type over it to write your own title. An axis with no title stays without one, and the title of a file made with an older version is kept as it was drawn, for example `Absorbance (a.u.)`.
 
+**Axis title size** sits under the title color. It reads **Auto (24)**, for example: the size the title is drawn at, the **Text scale (%)** of the graph included. Type a size to set it by hand: that size is kept as typed, whatever the scale. Empty the field or type `auto` to go back to Auto. The same rows exist for the graph title (**General**, **Title size**) and the layer title (**Plot Area**, **Layer title size**).
+
 You can also double-click an axis title on the figure to edit it in place.
 
 ### Scale and range
@@ -299,7 +301,7 @@ The **Display** section has these options:
 
 - **Show axis**
 - **Show gridlines**
-- **Show tick labels**
+- **Show tick labels**, with **Tick label size** under it: **Auto (N)** is the size drawn, scale included, and a size you type is kept as typed. Each axis has its own, and the room around the axis follows it
 - **Show ticks**
 - **Show minor ticks**, with **Minor ticks per interval**
 - **Decimal comma on tick labels**, which writes 1,5 instead of 1.5 on every axis of the graph. New graphs start with the choice set in **File ▸ Preferences… ▸ Display ▸ New**

@@ -80,7 +80,8 @@ pub enum ThemeFamily {
     Texts,
     /// Font, size, colour, alignment and visibility of the titles.
     TitleFonts,
-    /// Scale, ticks, grid, mirror, tick colours, decimal separator.
+    /// Scale, ticks, tick colours and tick number size, grid, mirror, decimal
+    /// separator.
     Axes,
     /// Axis bounds (automatic or not, From and To, inversion).
     AxisRanges,
@@ -391,6 +392,7 @@ fn apply_axis(target: &mut AxisSpec, theme: &AxisSpec, families: ThemeFamilies) 
         target.tick_width = theme.tick_width;
         target.tick_color = theme.tick_color.clone();
         target.tick_mark_color = theme.tick_mark_color.clone();
+        target.tick_label_size = theme.tick_label_size;
         target.grid = theme.grid;
     }
     if families.contains(ThemeFamily::AxisRanges) {
@@ -701,6 +703,7 @@ fn every_field_has_a_family(
         minor_tick_length: _, // Axes
         tick_width: _,        // Axes
         tick_mark_color: _,   // Axes
+        tick_label_size: _,   // Axes (#545: a tick property, like its colour)
     } = axis;
     let SeriesSpec {
         y: _,              // never: data
@@ -869,6 +872,26 @@ mod tests {
             ThemeFamilies::only(ThemeFamily::TitleFonts),
         );
         assert_eq!(other.text_scale, None);
+    }
+
+    /// #545: the tick label size of an axis is a tick property: the Axes
+    /// family copies it, no other family does, and a theme on Auto clears the
+    /// target's own. Witness: the field left out of `apply_axis`, or copied by
+    /// the Title fonts family.
+    #[test]
+    fn the_axes_family_carries_the_tick_label_size() {
+        let mut source = styled();
+        source.panels.get_mut(0).unwrap().left.tick_label_size = Some(20.0);
+        let theme = theme_of(&source);
+        let mut target = graph(&[&["#aaaaaa"]]);
+        target.apply_theme_families(&theme, ThemeFamilies::only(ThemeFamily::TitleFonts));
+        assert_eq!(panel(&target, 0).left.tick_label_size, None);
+        target.apply_theme_families(&theme, ThemeFamilies::only(ThemeFamily::Axes));
+        assert_eq!(panel(&target, 0).left.tick_label_size, Some(20.0));
+        assert_eq!(panel(&target, 0).bottom.tick_label_size, None);
+        let plain = theme_of(&styled());
+        target.apply_theme_families(&plain, ThemeFamilies::only(ThemeFamily::Axes));
+        assert_eq!(panel(&target, 0).left.tick_label_size, None);
     }
 
     #[test]

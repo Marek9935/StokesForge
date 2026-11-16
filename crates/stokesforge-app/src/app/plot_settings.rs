@@ -443,10 +443,11 @@ fn plot_settings_contents(
                         );
                     }
                     PlotSettingsTab::PlotArea => {
+                        let scale = spec.graph_text().scale;
                         let Some(panel) = spec.panels.get_mut(edit.selected_panel) else {
                             return;
                         };
-                        commit |= plot_area_settings_page(ui, panel);
+                        commit |= plot_area_settings_page(ui, panel, scale);
                     }
                     // The axes have their own fixed strip: see above.
                     PlotSettingsTab::Axes => {}
@@ -455,10 +456,12 @@ fn plot_settings_contents(
                     // The theme manager has its own layout: see above.
                     PlotSettingsTab::Theme => {}
                     PlotSettingsTab::Legend => {
+                        let scale = spec.graph_text().scale;
                         let Some(panel) = spec.panels.get_mut(edit.selected_panel) else {
                             return;
                         };
-                        commit |= legend_editor(ui, &mut panel.legend, &row_columns, &mut env);
+                        commit |=
+                            legend_editor(ui, &mut panel.legend, &row_columns, scale, &mut env);
                         commit |= super::color_bar_settings::color_bar_section(
                             ui,
                             panel,
@@ -704,6 +707,39 @@ fn global_text_rows(form: &mut Form<'_>, spec: &mut PlotSpec) -> bool {
     commit
 }
 
+/// A row of the size of a text, Auto-capable like the format toolbar's: Auto
+/// reads « Auto (N) » with the size drawn (`built_in` times the graph text
+/// scale), a typed size is absolute (#545).
+fn text_size_row(
+    form: &mut Form<'_>,
+    (label, hint): (String, String),
+    id: &'static str,
+    size: &mut Option<f64>,
+    built_in: f64,
+    scale: f64,
+    enabled: bool,
+) -> bool {
+    let auto = tr!(
+        "common-auto-value",
+        value = crate::number_field::format_value(
+            stokesforge_plot::GraphText {
+                family: None,
+                scale,
+            }
+            .size(None, built_in),
+            quantities::TEXT_FORMAT_SIZE.decimals
+        )
+    );
+    form.row(label, |ui| {
+        ui.add_enabled_ui(enabled, |ui| {
+            let field = auto_number_field(ui, id, size, &quantities::TEXT_FORMAT_SIZE, &auto);
+            field.response.clone().on_hover_text(hint);
+            field.changed
+        })
+        .inner
+    })
+}
+
 /// Graph page: title, colors and size, as a two-column form (#227).
 fn graph_settings_page(
     ui: &mut egui::Ui,
@@ -728,6 +764,16 @@ fn graph_settings_page(
             ColorUsage::Text,
             Some(&tr!("plot-color-auto-contrast")),
             env,
+        );
+        let scale = spec.graph_text().scale;
+        commit |= text_size_row(
+            form,
+            (tr!("plot-title-size"), tr!("plot-title-size", "hint")),
+            "plot_title_size",
+            &mut spec.title_font.size,
+            stokesforge_render_egui::TITLE_SIZE,
+            scale,
+            true,
         );
         commit |= form.color(
             &tr!("plot-general-background"),
@@ -1298,7 +1344,7 @@ fn offset_rows(
 }
 
 /// Layer page: title and gridlines.
-fn plot_area_settings_page(ui: &mut egui::Ui, panel: &mut PanelSpec) -> bool {
+fn plot_area_settings_page(ui: &mut egui::Ui, panel: &mut PanelSpec, scale: f64) -> bool {
     form(ui, "plot_area_page", |form| {
         let mut commit = false;
         commit |= formula_field(
@@ -1306,6 +1352,18 @@ fn plot_area_settings_page(ui: &mut egui::Ui, panel: &mut PanelSpec) -> bool {
             &tr!("plot-area-layer-title"),
             &tr!("plot-area-layer-title", "hint"),
             &mut panel.title,
+        );
+        commit |= text_size_row(
+            form,
+            (
+                tr!("plot-layer-title-size"),
+                tr!("plot-layer-title-size", "hint"),
+            ),
+            "plot_layer_title_size",
+            &mut panel.title_font.size,
+            stokesforge_render_egui::PANEL_TITLE_SIZE,
+            scale,
+            true,
         );
         form.section(tr!("plot-area-gridlines"));
         commit |= form.checkbox(
@@ -1388,6 +1446,7 @@ pub(super) fn axes_settings_page(
                     AxisSide::Left => bounds.left,
                     _ => bounds.right,
                 });
+                let scale = spec.graph_text().scale;
                 let Some(panel) = spec.panels.get_mut(panel_index) else {
                     return false;
                 };
@@ -1414,9 +1473,16 @@ pub(super) fn axes_settings_page(
                                     } else {
                                         &mut panel.left
                                     };
-                                    axis_editor(form, axis, computed, own, env)
+                                    axis_editor(form, axis, computed, own, scale, env)
                                 } else {
-                                    axis_editor(form, panel.axis_mut(field), computed, None, env)
+                                    axis_editor(
+                                        form,
+                                        panel.axis_mut(field),
+                                        computed,
+                                        None,
+                                        scale,
+                                        env,
+                                    )
                                 };
                                 // Setting of the whole graph (#223), put under the
                                 // axes display.
@@ -1781,6 +1847,7 @@ fn axis_editor(
     axis: &mut AxisSpec,
     computed: Option<(f64, f64)>,
     own_scale: Option<&mut bool>,
+    scale: f64,
     env: &mut PickerEnv,
 ) -> bool {
     let mut commit = false;
@@ -1798,6 +1865,18 @@ fn axis_editor(
         ColorUsage::Text,
         Some(&tr!("plot-color-auto-contrast")),
         env,
+    );
+    commit |= text_size_row(
+        form,
+        (
+            tr!("plot-axes-title-size"),
+            tr!("plot-axes-title-size", "hint"),
+        ),
+        "plot_axis_title_size",
+        &mut axis.title_font.size,
+        stokesforge_render_egui::AXIS_DESC_SIZE,
+        scale,
+        true,
     );
 
     form.section(tr!("plot-axes-scale-section"));
@@ -1908,6 +1987,18 @@ fn axis_editor(
         &mut axis.tick_labels,
         tr!("plot-axes-show-tick-labels"),
         None,
+    );
+    commit |= text_size_row(
+        form,
+        (
+            tr!("plot-axes-tick-label-size"),
+            tr!("plot-axes-tick-label-size", "hint"),
+        ),
+        "plot_axis_tick_label_size",
+        &mut axis.tick_label_size,
+        stokesforge_render_egui::LABEL_SIZE,
+        scale,
+        axis.tick_labels,
     );
     commit |= label_every_row(form, axis, true);
     commit |= form.checkbox(&mut axis.grid, tr!("plot-axes-show-gridlines"), None);
@@ -2303,13 +2394,14 @@ fn legend_editor(
     ui: &mut egui::Ui,
     legend: &mut stokesforge_plot::LegendSpec,
     row_columns: &[(NodeId, String)],
+    scale: f64,
     env: &mut PickerEnv,
 ) -> bool {
     form(ui, "plot_legend_page", |form| {
         let mut commit = form.checkbox(&mut legend.visible, tr!("plot-legend-show"), None);
         commit |= legend_position_row(form, legend);
         commit |= legend_text_editor(form, &mut legend.text, row_columns);
-        commit |= legend_font_section(form, legend, env);
+        commit |= legend_font_section(form, legend, scale, env);
         commit |= legend_frame_section(form, legend, env);
         commit |= legend_layout_section(form, legend);
         commit
@@ -2350,6 +2442,7 @@ fn legend_position_row(form: &mut Form<'_>, legend: &mut stokesforge_plot::Legen
 fn legend_font_section(
     form: &mut Form<'_>,
     legend: &mut stokesforge_plot::LegendSpec,
+    scale: f64,
     env: &mut PickerEnv,
 ) -> bool {
     form.section(tr!("plot-legend-text-section"));
@@ -2363,7 +2456,17 @@ fn legend_font_section(
             "plot_legend_font_size",
             &mut legend.font.size,
             &quantities::TEXT_FORMAT_SIZE,
-            &tr!("common-auto"),
+            &tr!(
+                "common-auto-value",
+                value = format_value(
+                    stokesforge_plot::GraphText {
+                        family: None,
+                        scale
+                    }
+                    .size(None, stokesforge_render_egui::LABEL_SIZE),
+                    quantities::TEXT_FORMAT_SIZE.decimals
+                )
+            ),
         )
         .changed
     });
@@ -3241,6 +3344,85 @@ mod tests {
         assert!(grid > scale + 80.0, "several rows are laid out");
     }
 
+    /// #545: every text size of a graph is set in Graph Properties, in the tab
+    /// where its text is: the graph title size on General, the layer title size
+    /// on Plot Area, the axis title and tick label sizes on each Axes side
+    /// (none for a mirror, which follows the opposite axis). Each reads
+    /// « Auto (N) » with the size drawn, scale included. Witness: a row
+    /// missing from its tab, or the hint ignoring the scale.
+    #[test]
+    fn every_text_size_has_its_row_in_its_tab_and_auto_shows_the_drawn_size() {
+        let mut harness = harness(|spec| spec.text_scale = Some(1.5));
+        let context = test_support::context();
+        let rows = [
+            (
+                PlotSettingsTab::Graph,
+                None,
+                tr!("plot-title-size"),
+                "Auto (36)",
+            ),
+            (
+                PlotSettingsTab::PlotArea,
+                None,
+                tr!("plot-layer-title-size"),
+                "Auto (24)",
+            ),
+            (
+                PlotSettingsTab::Axes,
+                Some(PlotAxis::Left),
+                tr!("plot-axes-title-size"),
+                "Auto (24)",
+            ),
+            (
+                PlotSettingsTab::Axes,
+                Some(PlotAxis::Left),
+                tr!("plot-axes-tick-label-size"),
+                "Auto (21)",
+            ),
+            (
+                PlotSettingsTab::Legend,
+                None,
+                tr!("plot-text-size"),
+                "Auto (21)",
+            ),
+        ];
+        for (tab, axis, label, hint) in rows {
+            harness.open(tab, axis);
+            let painted = paint_window(&context, &mut harness.state, Vec::new());
+            assert!(is_painted(&painted, &label), "{tab:?}: row {label:?}");
+            let field = in_the_row(&painted, &label, hint);
+            assert!(!field.text.is_empty());
+        }
+        harness.open(PlotSettingsTab::Axes, Some(PlotAxis::Top));
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(!is_painted(&painted, &tr!("plot-axes-tick-label-size")));
+    }
+
+    /// #545: a size typed in a field is drawn at exactly that size, even under
+    /// a 150 % scale, and the field then shows what was typed.
+    #[test]
+    fn a_typed_axis_title_size_is_kept_under_a_scale_and_shown_as_typed() {
+        let mut harness = harness(|spec| spec.text_scale = Some(1.5));
+        harness.open(PlotSettingsTab::Axes, Some(PlotAxis::Left));
+        let context = test_support::context();
+        type_into(&context, &mut harness, "Auto (24)", "10");
+        let model = harness.model();
+        let axis = &model.panels[0].left;
+        assert_eq!(axis.title_font.size, Some(10.0));
+        // Drawn at 10, not 15.
+        assert_eq!(
+            axis.title_font
+                .resolved_size(model.graph_text(), stokesforge_render_egui::AXIS_DESC_SIZE),
+            10.0
+        );
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        let label = tr!("plot-axes-title-size");
+        let field = in_the_row(&painted, &label, "10");
+        assert_eq!(field.text, "10");
+        assert!(!is_painted(&painted, "Auto (24)"));
+        assert!(!is_painted(&painted, "15"));
+    }
+
     /// #176: the tab of a mirror axis offers neither title nor color, only
     /// to show it and to keep or not the tick labels.
     #[test]
@@ -4000,7 +4182,7 @@ mod tests {
             stokesforge_app_state::frame_sizes::figure_layout(&harness.model()).expect("layout");
         // The General page opens with the colors rows (#542): the Size section
         // starts below the first screen.
-        scroll_page(&context, &mut harness, -80.0);
+        scroll_page(&context, &mut harness, -110.0);
         let painted = paint_window(&context, &mut harness.state, Vec::new());
         for label in [
             tr!("plot-size-placement"),
@@ -4045,7 +4227,7 @@ mod tests {
         );
 
         scroll_to_top(&context, &mut harness);
-        scroll_page(&context, &mut harness, -80.0);
+        scroll_page(&context, &mut harness, -110.0);
         click_label(
             &context,
             &mut harness.state,
@@ -6479,7 +6661,7 @@ mod tests {
         let mut commit = true;
         let painted = texts(&image(context, Vec::new(), |ui| {
             commit = form(ui, "trial", |form| {
-                super::axis_editor(form, axis, computed, None, &mut env)
+                super::axis_editor(form, axis, computed, None, 1.0, &mut env)
             });
         }));
         (commit, painted)
