@@ -99,6 +99,7 @@ mod convert;
 mod error;
 mod recipe_record;
 mod schema;
+mod themes;
 mod transposes;
 mod unknown;
 mod version;
@@ -114,6 +115,7 @@ use convert::ConvertError;
 use schema::{FileBody, NodeRecord, FORMAT_VERSION, MAGIC};
 
 pub use error::{PersistenceError, PersistenceResult};
+pub use themes::{decode_theme, decode_themes, encode_theme, encode_themes, MAX_THEME_BYTES};
 
 /// Maximum size of a `.stf` at open when the caller sets none
 /// (A2, #316): 512 MB. The file not being compressed, this is also the

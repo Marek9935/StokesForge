@@ -200,6 +200,20 @@ impl ThemeFamilies {
     }
 }
 
+/// Most themes one store (a project, the user's machine) keeps. A file that
+/// carries more is cut at this count when read (invariant 10).
+pub const MAX_THEMES: usize = 200;
+
+/// Longest theme name, in characters. A longer name read from a file is cut.
+pub const MAX_THEME_NAME_CHARS: usize = 80;
+
+/// True when two theme names are the same name: spaces around them and letter
+/// case are ignored. The rule of "a duplicate name inside one store is
+/// refused" (#540); the same name in two stores is allowed.
+pub fn same_theme_name(a: &str, b: &str) -> bool {
+    a.trim().to_lowercase() == b.trim().to_lowercase()
+}
+
 /// A named theme: the style of a whole graph, kept as a [`PlotSpec`] with no
 /// data in it.
 #[derive(Debug, Clone, PartialEq)]
