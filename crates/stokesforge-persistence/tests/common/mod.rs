@@ -277,8 +277,10 @@ pub fn non_trivial_spec(
         title_color: "#aa8811".to_string(),
         // Issue #35: free texts, all fields non-default.
         annotations: vec![
+            // #545: this one follows the graph size, the next one has its own.
             stokesforge_plot::AnnotationSpec::new("Pic $lambda_\"max\"$", 1.5, 2.5),
             stokesforge_plot::AnnotationSpec {
+                follows_graph_size: false,
                 axis: SeriesAxis::Right,
                 color: "#11223344".to_string(),
                 size: 22.0,
@@ -423,6 +425,9 @@ pub fn non_trivial_spec(
             width: 612.0,
             height: 391.5,
         }),
+        // #545: the graph font and text scale, neither a default.
+        text_font: "Fira Sans".to_string(),
+        text_scale: Some(1.25),
         ..PlotSpec::empty("Mesure du 11/09").with_panels(vec![panel_a, panel_b])
     }
 }

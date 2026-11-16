@@ -131,7 +131,7 @@ pub use style::{
     DEFAULT_PALETTE,
 };
 pub use text_anchor::{TextAnchor, TextTarget};
-pub use text_font::TextFont;
+pub use text_font::{GraphText, TextFont};
 pub use theme::{Theme, THEMES};
 pub use theme_family::{
     bounded_themes, default_theme_families, same_theme_name, GraphTheme, ThemeFamilies,

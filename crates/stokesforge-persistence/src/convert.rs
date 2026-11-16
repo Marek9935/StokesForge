@@ -708,6 +708,7 @@ fn panel_spec_to_record(panel: &PanelSpec) -> PanelSpecRecord {
                 font: annotation.font.clone(),
                 width: annotation.width,
                 align: annotation.align.into(),
+                follows_graph_size: annotation.follows_graph_size,
             })
             .collect(),
         shapes: panel.shapes.iter().map(shape_to_record).collect(),
@@ -830,6 +831,7 @@ fn record_to_panel_spec(record: PanelSpecRecord) -> Result<PanelSpec, ConvertErr
                 font: annotation.font,
                 width: annotation.width,
                 align: annotation.align.into(),
+                follows_graph_size: annotation.follows_graph_size,
             })
             .collect(),
         shapes: record.shapes.into_iter().map(record_to_shape).collect(),
@@ -931,6 +933,8 @@ pub(crate) fn plot_spec_to_record(spec: &PlotSpec) -> PlotSpecRecord {
             right: slack.right,
             bottom: slack.bottom,
         }),
+        text_font: spec.text_font.clone(),
+        text_scale: spec.text_scale,
     }
 }
 
@@ -975,6 +979,8 @@ pub(crate) fn record_to_plot_spec(record: PlotSpecRecord) -> Result<PlotSpec, Co
             right: slack.right,
             bottom: slack.bottom,
         }),
+        text_font: record.text_font,
+        text_scale: record.text_scale,
     })
 }
 
@@ -1506,6 +1512,38 @@ mod tests {
         let none = PlotSpec::empty("none");
         let back = record_to_plot_spec(plot_spec_to_record(&none)).unwrap();
         assert_eq!(back.free_page, None);
+    }
+
+    /// #545: the graph font and text scale round-trip, a graph without them
+    /// stays without (and writes no key), and a free text keeps its marker.
+    /// Witness: the field dropped by one direction of the conversion.
+    #[test]
+    fn the_graph_text_settings_and_the_size_marker_round_trip() {
+        let mut hand_set = stokesforge_plot::AnnotationSpec::new("a", 0.0, 0.0);
+        hand_set.follows_graph_size = false;
+        let spec = PlotSpec {
+            text_font: "Fira Sans".to_string(),
+            text_scale: Some(1.5),
+            ..PlotSpec::empty("text").with_panels(vec![stokesforge_plot::PanelSpec {
+                annotations: vec![
+                    stokesforge_plot::AnnotationSpec::new("b", 0.0, 0.0),
+                    hand_set,
+                ],
+                ..stokesforge_plot::PanelSpec::at(0, 0)
+            }])
+        };
+        let back = record_to_plot_spec(plot_spec_to_record(&spec)).unwrap();
+        assert_eq!(back.text_font, "Fira Sans");
+        assert_eq!(back.text_scale, Some(1.5));
+        assert!(back.panels[0].annotations[0].follows_graph_size);
+        assert!(!back.panels[0].annotations[1].follows_graph_size);
+        let none = PlotSpec::empty("none");
+        let back = record_to_plot_spec(plot_spec_to_record(&none)).unwrap();
+        assert!(back.text_font.is_empty());
+        assert_eq!(back.text_scale, None);
+        let bytes = rmp_serde::to_vec_named(&plot_spec_to_record(&none)).unwrap();
+        assert!(!bytes.windows(9).any(|w| w == b"text_font"));
+        assert!(!bytes.windows(10).any(|w| w == b"text_scale"));
     }
 
     /// #505: the empty space around a grid round-trips as written, and a graph

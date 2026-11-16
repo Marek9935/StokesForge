@@ -807,6 +807,13 @@ pub(crate) struct PlotSpecRecord {
     /// without it stays byte for byte what it was.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) grid_slack: Option<GridSlackRecord>,
+    /// Graph font family (#545): absent = the embedded default. Written only
+    /// when set, so a file without it stays byte for byte what it was.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub(crate) text_font: String,
+    /// Graph text scale (#545), a multiplier: absent = 100 %.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) text_scale: Option<f64>,
 }
 
 /// [`stokesforge_plot::GridSlack`], flat, in points. Written as held.
@@ -891,6 +898,8 @@ impl Default for PlotSpecRecord {
             layer_placement: LayerPlacementRecord::Grid,
             free_page: None,
             grid_slack: None,
+            text_font: String::new(),
+            text_scale: None,
         }
     }
 }
@@ -1073,6 +1082,11 @@ pub(crate) struct AnnotationSpecRecord {
     /// Alignment in the box (#244); absent = centered.
     #[serde(default)]
     pub(crate) align: TextAlignRecord,
+    /// The size follows the graph text scale (#545): absent = `false`, the
+    /// stored `size` is absolute, as for every text written before this
+    /// marker. Written only when set.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) follows_graph_size: bool,
 }
 
 /// [`stokesforge_plot::TextAlign`], flat.

@@ -531,6 +531,8 @@ impl PlotSpec {
             self.title_font = style.title_font.clone();
             self.title_color = style.title_color.clone();
             self.title_visible = style.title_visible;
+            self.text_font = style.text_font.clone();
+            self.text_scale = style.text_scale;
         }
         if families.contains(ThemeFamily::Axes) {
             self.decimal_comma = style.decimal_comma;
@@ -647,6 +649,8 @@ fn every_field_has_a_family(
         layer_placement: _, // SizeAndPage (the application switches it)
         free_page: _,       // SizeAndPage (free)
         grid_slack: _,      // SizeAndPage (grid)
+        text_font: _,       // TitleFonts (#545)
+        text_scale: _,      // TitleFonts (#545)
     } = plot;
     let PanelSpec {
         title: _,         // Texts
