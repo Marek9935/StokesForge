@@ -233,11 +233,23 @@ fn specimen_panel(theme: &PanelSpec, bare: bool) -> PanelSpec {
         }
     }
     panel.series = series;
+    // A theme captured from a graph has no segments (they hold data values):
+    // its bar shows the groups that are drawn.
+    let bar_without_segments = panel
+        .color_bar
+        .as_ref()
+        .is_some_and(|bar| bar.segments.is_empty());
     panel.group_names.retain(|id, _| kept_groups.contains(id));
     panel
         .group_gradients
         .retain(|id, _| kept_groups.contains(id));
     if let Some(bar) = panel.color_bar.as_mut() {
+        if bar_without_segments {
+            bar.segments = kept_groups
+                .iter()
+                .map(|group| stokesforge_plot::ColorBarSegment::new(*group))
+                .collect();
+        }
         bar.segments.retain(|s| kept_groups.contains(&s.group));
         for segment in &mut bar.segments {
             segment.from = None;
@@ -448,5 +460,51 @@ mod tests {
         let resolved = stokesforge_core::resolve::resolve_spec(reference_tree().unwrap(), &out);
         assert!(resolved.panels[0].series.iter().all(|s| !s.stale));
         assert_eq!(resolved.panels[0].series.len(), 5);
+    }
+
+    #[test]
+    fn every_built_in_has_a_specimen_that_resolves_and_keeps_its_layers() {
+        use crate::builtin_themes;
+        for index in 0..builtin_themes::COUNT {
+            let theme = builtin_themes::original(index).expect("built-in");
+            let out = specimen(&theme);
+            assert_eq!(
+                out.panels.len(),
+                theme.style.panels.len(),
+                "{}",
+                builtin_themes::NAMES[index]
+            );
+            let resolved = stokesforge_core::resolve::resolve_spec(reference_tree().unwrap(), &out);
+            assert!(
+                resolved
+                    .panels
+                    .iter()
+                    .all(|p| !p.series.is_empty() && p.series.iter().all(|s| !s.stale)),
+                "{} resolves",
+                builtin_themes::NAMES[index]
+            );
+        }
+    }
+
+    #[test]
+    fn the_gradient_built_ins_show_their_group_and_their_colour_bar() {
+        use crate::builtin_themes;
+        for index in [6, 8] {
+            let out = specimen(&builtin_themes::original(index).expect("built-in"));
+            let panel = &out.panels[0];
+            assert_eq!(panel.group_ids().len(), 1);
+            assert_eq!(panel.series.len(), MAX_PER_GROUP);
+            let bar = panel.color_bar.as_ref().expect("the bar");
+            assert_eq!(bar.segments.len(), 1);
+            assert!(panel.group_gradient(panel.group_ids()[0]).is_some());
+        }
+    }
+
+    #[test]
+    fn fit_residuals_shows_two_layers_with_the_theme_series_styles() {
+        let out = specimen(&crate::builtin_themes::original(5).expect("built-in"));
+        assert_eq!(out.panels.len(), 2);
+        assert_eq!(out.panels[0].series.len(), 2);
+        assert_eq!(out.panels[1].series.len(), 1);
     }
 }

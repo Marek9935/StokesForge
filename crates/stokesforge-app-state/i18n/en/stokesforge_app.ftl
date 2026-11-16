@@ -959,6 +959,9 @@ plot-series-symbol-color = Symbol color
 curve-window-title = Series Properties — { $name }
 curve-group-name = Group { $number }
 curve-group-section = Group
+curve-section = Curve
+curve-group-curves-section = All curves
+curve-colors-section = Colors
 curve-group-field = Group
 curve-group-none = None
 curve-group-new = New group
@@ -976,19 +979,6 @@ curve-group-ungroup =
 curve-group-delete =
     Delete Group
     .hint = Deletes the group and all its series from the graph
-curve-group-move-up =
-    Move Group Up
-    .hint = Moves the whole group up in the drawing order
-curve-group-move-down =
-    Move Group Down
-    .hint = Moves the whole group down in the drawing order
-curve-scope-field = Edit
-curve-scope-series = This series only
-curve-scope-group = Whole group ({ $count } series)
-curve-scope-group-note = Line style, line width, symbol shape and size apply to every series of the group. Name, type, visibility and colors stay per series; spread colors with the gradient below.
-curve-scope-series-note = Changes apply to this series only. It stays in its group; use Leave Group to detach it.
-curve-scope-locked = Per-series setting: switch to "This series only" to change it
-curve-gradient-locked = Switch to "Whole group" to apply a gradient
 curve-gradient-saved = { $name } ({ $target })
 curve-gradient-delete =
     Delete
@@ -1001,7 +991,6 @@ curve-gradient-save =
     Save
     .hint = Saves the custom gradient in the project or for the user
     .disabled = Give the gradient a name first
-curve-gradient-section = Color gradient
 curve-gradient-field = Gradient
 curve-gradient-custom = Custom
 curve-gradient-stop = Color { $number }
@@ -1078,18 +1067,20 @@ plot-legend-row-gap = Row gap (pt)
 plot-legend-column-gap = Column gap (pt)
 plot-legend-swatch-length = Line sample length (pt)
 
-# Color Bar tab (#499)
+# Color bar section of the Legend tab (#499, #510)
 
 plot-color-bar-section = Color bar
 plot-color-bar-show =
     Show color bar
     .hint = Colors the curves of the groups on the bar by their value, and replaces their entries in the legend. Hidden, the curves get their own colors and legend entries back.
-plot-color-bar-groups-section = Series groups
+plot-color-bar-groups-section = Groups
+plot-color-bar-breaks-section = Breaks
+plot-color-bar-break-between = { $left } | { $right }
+plot-color-bar-group-on =
+    On the color bar
+    .hint = Colors the curves of this group by their value on the layer's color bar, and takes their entries out of the legend. A group with no gradient gets the first preset.
 plot-color-bar-group-break = Break label
     .hint = Typst text written under the bar, right of the value of the break between this group and the next one on the bar. Leave empty for none. Kept with this group.
-plot-color-bar-group-on = On the bar
-    .hint = Colors the curves of this group by their value on the bar, and takes their entries out of the legend. Unticked, the group keeps its own colors and legend entries.
-plot-color-bar-range = Range
 plot-color-bar-no-series-groups = This layer has no series group. Group its curves first, in the Series window.
 plot-color-bar-chain =
     Chain the segments
@@ -1107,7 +1098,7 @@ plot-color-bar-no-value =
         [one] { $count } curve has no value
        *[other] { $count } curves have no value
     }
-plot-color-bar-layout-section = Placement
+plot-color-bar-look-section = Look
 plot-color-bar-position = Position
 plot-color-bar-position-dragged = Dragged
 plot-color-bar-position-below = Below the frame
@@ -1123,16 +1114,22 @@ plot-color-bar-title = Title
     .hint = Typst text written under the bar. Leave empty for none.
 plot-color-bar-unknown = Default (setting of a newer version)
 disabled-color-bar-off = Turn on « Show color bar » first
-curve-on-color-bar =
-    On the color bar
-    .hint = Colors the curves of this group by their value on the layer's color bar, and takes their entries out of the legend.
-curve-color-by-bar = The color comes from the color bar of this layer. Take the group off the bar to set it here.
+disabled-color-bar-group-off = Tick the group first: only a group on the bar has a range
+curve-color-overrides-gradient = Overrides the group's gradient
+curve-color-by-bar = The color comes from the color bar of this layer. Take the group off the bar to set it here (Graph Properties, Legend, Color bar).
 
 # Theme tab
 
 plot-theme-themes = Themes
 plot-theme-light = Light
 plot-theme-dark = Dark
+plot-theme-publication = Publication
+plot-theme-publication-wide = Publication Wide
+plot-theme-presentation = Presentation
+plot-theme-fit-residuals = Fit + Residuals
+plot-theme-kinetics = Kinetics
+plot-theme-side-by-side = Side by Side
+plot-theme-color-map = Color Map
 plot-theme-global-colors = Global colors
 plot-theme-background = Background
 plot-theme-text = Text

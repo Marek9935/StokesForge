@@ -488,6 +488,31 @@ colour and axes colour, each behind its family, and nothing else. Applying to
 N graphs is `Action::ApplyTheme`, one `MacroKind::ApplyTheme` step
 (`docs/commands-and-history.md`).
 
+**Built-in themes (#544, S7 of #514; data part, the picker tiles come with #541)**.
+`stokesforge_app_state::builtin_themes` is the catalogue, in this fixed order
+(the index is `ThemeRef::Builtin`, the key is the stable identity in
+`user_themes.json`, the displayed name is the catalog key `plot-theme-<key>`):
+Light (`light`) and Dark (`dark`), colour-only as before; then seven full-style
+themes, each built with the ordinary constructors and passed through
+`GraphTheme::capture` (so it holds no data): **Publication** (`publication`: one
+layer, plot area 8.5 cm wide, closed frame, ticks inside, black and greys,
+8-9 pt texts), **Publication Wide** (`publication-wide`: 17 cm), **Presentation**
+(`presentation`: large texts, 3 pt lines), **Fit + Residuals** (`fit-residuals`:
+two stacked layers, plot area heights 3:1, X numbers and title only under the
+bottom layer, data as red points and the fit as a line, residuals as points),
+**Kinetics** (`kinetics`: a group on the Viridis gradient, colour bar on the
+right), **Side by Side** (`side-by-side`: two equal layers in one row) and
+**Color Map** (`color-map`: a group on the Plasma gradient, colour bar, no
+legend). **No built-in has a grid.** What a theme cannot express: the dashed
+zero line of the residuals (a line at `y = 0` is a data object; a theme holds
+none), so the bottom layer carries the points only. Every built-in is editable
+(an override, `UserThemes::set_builtin_from_graph`) and comes back with Reset.
+Names of user and project themes are never translated; a user theme cannot take
+the English name of a built-in. Order in the picker (`UserThemes::ranked`):
+Light and Dark **always first**, then every other theme by use count, ties in
+catalogue order, then creation order. The manual reference comes with the picker
+(#541).
+
 **Theme specimens (#543, S6 of #514; the tiles come with the picker)**. A tile
 shows what a theme looks like by drawing its **structure and style on reference
 data shipped with the application**: `stokesforge_app_state::theme_specimen`.
@@ -654,26 +679,31 @@ in `stokesforge-plot` (read before writing, as requested):
   Series…). A list on the left arranged like the Object Manager (#197, `PanelSpec::slots`):
   a single series is a `list_row` row, a group is a **collapsible node**
   (collapsing hides no curve) whose members are in a `tree_lines` branch;
-  Move Up / Move Down change the rank in the group (or jump over a whole
-  group). Settings on the right: the series' **group**
-  (dropdown list None / group name / New group, and "Leave Group" which
-  detaches it; group created on simultaneous add, #177; entering a group places
-  the series after its members), then the group gestures (`group_editor`):
-  its **name** (field confirmed on loss of focus, empty = "Group n"), Move Group
-  Up / Down, **Ungroup** (the series stay, as single series, with their style) and
-  **Delete Group** (the group and its series); and, for a grouped
-  series, the **scope** (`EditScope`) in plain words: "This series only" or
-  "Whole group (n series)" (default), with a sentence that says what
-  applies. Group scope: line style and thickness, symbol shape and size
-  are copied into each member (`propagate_style`); the settings
-  specific to one series (name, visibility, legend) are **disabled**
-  with the tooltip `curve-scope-locked`, its **colors are hidden** (the
-  gradient gives them, #213) and the **plot type** stays settable, for the
-  chosen series only; the sentence that says what the scope applies is under a
-  "?" next to the choice, no longer in a note; the **gradient** (#178) is active.
-  Series scope: only the series moves (this is the exception), its colors
-  come back, the gradient is disabled (tooltip). Series without a group: everything is
-  active, its colors are there and the **gradient is not shown**. Gradients:
+  Move Up / Move Down under it move **what is selected** (#510): the whole
+  group on a group page (`PanelSpec::move_group`, the page stays on it), one
+  series on a curve page (`move_series`: its rank in the group, or a jump over
+  a whole group). **The selection chooses the page** (#510,
+  `PlotEdit::selected_group`, UI state): a group header opens the **group
+  page** (`group_page`), a curve the **curve page** (`curve_page`); there is
+  no "Edit: This series only / Whole group" choice, and one single highlight
+  in the list (the header only on a group page, a row only on a curve page).
+  The **group page** has: `group_editor` (the group's **name**, field
+  confirmed on loss of focus, empty = "Group n"; **Ungroup**, the series stay
+  as single series with their style; **Delete Group**, the group and its
+  series; both give the page back to a curve), then **Colors**: the
+  **gradient** (#178, always active; the colour bar is not here, it is the
+  Legend tab of Graph Properties, #510), then the line and symbol of the
+  whole group: the first member is edited and what changes is copied into each
+  member (`propagate_style`); the colors are not offered (the gradient gives
+  them, #213). The **curve page** has the fields of one series
+  (`series_curve_editor`: name, plot type, Bins or Width, Y axis, error
+  columns, Show in legend), its **group** (dropdown None / group name / New
+  group, and "Leave Group" which detaches it; group created on simultaneous
+  add, #177; entering a group places the series after its members), then its
+  own line and symbol (`series_style_editor`), colors editable (they override the gradient, hover `curve-color-overrides-gradient`, #510 D4), greyed with their
+  reason only while the bar gives them. The fields of a page carry a
+  `field_state::for_target` key that tells a group page from a curve page.
+  Gradients:
   provided (`GRADIENT_PRESETS`), saved (project or user, suffix
   "(Project)" / "(User)", Delete button disabled outside a saved gradient) or
   custom with N colors (name + target + Save). Each entry of the list
@@ -694,8 +724,9 @@ in `stokesforge-plot` (read before writing, as requested):
   = series window opened on its first series, right-click
   (`object_node_menu`: Select Members, Rename, Move Up / Down, Ungroup, Hide,
   Delete, Properties…). In the series window, the group header follows the
-  same rule (#208): highlighted when the group is being set (scope "whole
-  group"), a click chooses it (first series, group scope). Del deletes the group **and its series** (the
+  same rule (#208): highlighted when its group page is shown, a click
+  chooses that page (#510); the double-click of a group in the Object Manager
+  opens it. Del deletes the group **and its series** (the
   gesture distinct from dissolving it); Ctrl+↑/↓ moves it as a block. Actions:
   `RenameSeriesGroup`, `UngroupSeries`, `MoveSeriesGroup`, `MoveSeries`,
   `RemovePlotObject`.
@@ -714,14 +745,15 @@ in `stokesforge-plot` (read before writing, as requested):
   (X units)** (`bar_width`) for a Bar series only (#359). Width follows S-C4:
   an emptied field or the word `auto` gives `None`, shown in gray as
   "Auto (<width>)" with the value of `stokesforge_core::resolve::bar_width`;
-  a finite value above 0.000001 fixes it. In "whole group" scope both are
-  copied to the members of the matching type (`propagate_style`); the plot
+  a finite value above 0.000001 fixes it. They are on the curve page (this curve) and on the group page when EVERY
+  member has that type (hidden on a mixed group, #510 D2: `series_group_editor`,
+  copied by `propagate_style`); the plot
   type stays per series. Both go through the draft and `commit_plot_edit`
   (one history entry per validated entry); then **Y axis: Left / Right**
   (`SeriesSpec::axis`, #358), applied through `PanelSpec::set_series_axis`
   (Right makes the right axis visible, same rule as `pyst` `axis`; going back
-  to Left hides nothing). In "whole group" scope the axis is copied to every
-  member. Grayed out, with its reason, on an overlaid layer (the rendering
+  to Left hides nothing). On the curve page it is this curve's; on the group page (`series_group_editor`)
+  it is copied to every member through `set_series_axis` (#510 D1). Grayed out, with its reason, on an overlaid layer (the rendering
   ignores Right there, `pipeline.rs`). Known limit: the data cursor skips
   series on the right axis (`render/src/interact.rs`); then **Y error** and
   **X error** (#360, `SeriesSpec::y_error` / `x_error`): "None" first, then the
@@ -729,8 +761,7 @@ in `stokesforge-plot` (read before writing, as requested):
   (`stokesforge_app_state::analysis::error_candidates`, plus the column
   already in use if it sits elsewhere). Choosing one, or None, goes through the
   draft like any field (one history entry). **Per series, never copied to the
-  group**: an error column is data, not style, so "whole group" scope does not
-  apply. Not shown for a "row" series (#166) nor for a Histogram. Deleting a
+  group**: an error column is data, not style, so it is not on the group page. Not shown for a "row" series (#166) nor for a Histogram. Deleting a
   column that serves as error breaks the whole series (`MissingRole::YError`),
   exactly like deleting its X column does (invariant 10: the series degrades,
   it does not crash);

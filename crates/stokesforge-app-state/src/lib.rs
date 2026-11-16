@@ -32,6 +32,7 @@
 
 pub mod analysis;
 pub mod analysis_recent;
+pub mod builtin_themes;
 pub mod cell_sides;
 pub mod column_move;
 pub mod creation_folder;
