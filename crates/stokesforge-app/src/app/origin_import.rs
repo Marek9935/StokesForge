@@ -537,4 +537,110 @@ mod tests {
             );
         }
     }
+
+    /// The real application in a kittest harness, with the actions of the next
+    /// frame (#536 timing).
+    struct TimedApp {
+        app: super::super::StokesForgeApp,
+        frame: eframe::Frame,
+        pending: Vec<Action>,
+        in_frame: std::time::Duration,
+        _session: stokesforge_session::Session,
+    }
+
+    /// Timing (#536), measurement only: with the largest private `.opju`, the
+    /// frame in which `Action::ImportOrigin` runs (the import is synchronous in
+    /// the paint pass) and the frames after it (tabs opening, grids painting).
+    /// The harness lays out and tessellates but does not rasterize on a GPU.
+    /// Prints counts and durations only; a missing folder skips the test.
+    #[test]
+    #[ignore = "needs the private Origin files; measurement only"]
+    fn private_origin_import_frame_timing() {
+        use eframe::App as _;
+        let folder = std::env::var_os("STOKESFORGE_PRIVATE_OPJ_DIR").map_or_else(
+            || PathBuf::from("/home/aliocha/dev_project/StokesForge/test/private_file/"),
+            PathBuf::from,
+        );
+        let Ok(entries) = std::fs::read_dir(&folder) else {
+            eprintln!("no private Origin folder: nothing measured");
+            return;
+        };
+        let Some(path) = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("opju"))
+            .max_by_key(|p| std::fs::metadata(p).map_or(0, |m| m.len()))
+        else {
+            eprintln!("no .opju file: nothing measured");
+            return;
+        };
+        let session = stokesforge_session::Session::spawn(
+            stokesforge_core::Project::new("Origin").unwrap(),
+            None,
+        )
+        .unwrap();
+        let mut state = AppState::new_with_preferences(
+            session.handle(),
+            String::new(),
+            stokesforge_app_state::preferences::Preferences::load_from(None),
+        )
+        .unwrap();
+        state.dispatch(Action::DropFiles {
+            paths: vec![path],
+            target_book: None,
+        });
+        wait(&mut state);
+        let books: usize = state
+            .origin_import_files()
+            .iter()
+            .map(|f| f.books.len())
+            .sum();
+        let timed = TimedApp {
+            app: super::super::StokesForgeApp::new(state),
+            frame: eframe::Frame::_new_kittest(),
+            pending: Vec::new(),
+            in_frame: std::time::Duration::ZERO,
+            _session: session,
+        };
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1400.0, 900.0))
+            .build_ui_state(
+                |ui, timed: &mut TimedApp| {
+                    let started = std::time::Instant::now();
+                    let ctx = ui.ctx().clone();
+                    let actions = std::mem::take(&mut timed.pending);
+                    if !actions.is_empty() {
+                        timed.app.dispatch_actions(&ctx, actions);
+                    }
+                    timed.app.logic(&ctx, &mut timed.frame);
+                    timed.app.ui(ui, &mut timed.frame);
+                    timed.in_frame = started.elapsed();
+                },
+                timed,
+            );
+        harness
+            .ctx
+            .set_fonts(stokesforge_render_egui::font_definitions());
+        egui_extras::install_image_loaders(&harness.ctx);
+        crate::theme::install(&harness.ctx);
+        let frame_line = |harness: &mut egui_kittest::Harness<'static, TimedApp>, label: &str| {
+            let started = std::time::Instant::now();
+            harness.step();
+            let wall = started.elapsed();
+            let state = harness.state();
+            eprintln!(
+                "timing {label}: app closure {:.2?}, whole step {wall:.2?}, {} tabs open",
+                state.in_frame,
+                state.app.open_tabs().len()
+            );
+        };
+        frame_line(&mut harness, "frame before (chooser open)");
+        frame_line(&mut harness, "frame before again");
+        harness.state_mut().pending = vec![Action::ImportOrigin];
+        frame_line(&mut harness, "frame where the import runs");
+        for n in 1..=3 {
+            frame_line(&mut harness, &format!("frame {n} after the import"));
+        }
+        eprintln!("timing chooser held {books} books");
+    }
 }
