@@ -12,6 +12,10 @@
 //! - **user** themes: kept on one machine, so only the application knows them;
 //! - **project** themes: read from the snapshot, they travel with the `.stf`.
 //!
+//! The families of `families=[...]` answer to their key, their English
+//! window label and `style` (the six style parts) everywhere; the host adds the
+//! labels of every catalogue language ([`ThemeLibrary::with_family_names`]).
+//!
 //! The library is plain data, never a callback (invariant 9). Applying is one
 //! `SetPlotSpec` in the script's group, written like `set_graph`; a theme that
 //! changes nothing writes nothing. Scripts never take a default theme, the
@@ -21,7 +25,8 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList, PyString};
 use stokesforge_core::{NodeId, Tree};
 use stokesforge_plot::{
-    builtin_themes, default_theme_families, same_theme_name, GraphTheme, ThemeFamilies, ThemeFamily,
+    builtin_themes, default_theme_families, same_theme_name, GraphTheme, ThemeFamilies,
+    ThemeFamily, STYLE_PARTS,
 };
 use stokesforge_render_svg::FigureTexts;
 use stokesforge_session::Snapshot;
@@ -112,13 +117,37 @@ impl ThemeLibraryEntry {
 #[derive(Debug, Clone, Default)]
 pub struct ThemeLibrary {
     entries: Vec<ThemeLibraryEntry>,
+    /// Names of the families in the catalogue languages (#551); empty by
+    /// default.
+    family_names: Vec<(ThemeFamily, String)>,
+    /// Names of the Style box (the six style parts) in the same languages.
+    style_names: Vec<String>,
 }
 
 impl ThemeLibrary {
     /// A library of `entries` (built-ins first, then user themes, is the order
     /// `pyst.themes()` shows).
     pub fn new(entries: Vec<ThemeLibraryEntry>) -> Self {
-        Self { entries }
+        Self {
+            entries,
+            family_names: Vec::new(),
+            style_names: Vec::new(),
+        }
+    }
+
+    /// The library plus the names the Apply Theme window gives the families
+    /// in the catalogue languages, and those of its Style box. A script may
+    /// then pass `families=['Courbes']` (#551). Case and spaces are ignored;
+    /// the keys, the English labels and `style` always work.
+    #[must_use]
+    pub fn with_family_names(
+        mut self,
+        family_names: Vec<(ThemeFamily, String)>,
+        style_names: Vec<String>,
+    ) -> Self {
+        self.family_names = family_names;
+        self.style_names = style_names;
+        self
     }
 
     /// What a host without a library gets: the original built-ins, answering
@@ -138,7 +167,7 @@ impl ThemeLibrary {
                 ))
             })
             .collect();
-        Self { entries }
+        Self::new(entries)
     }
 }
 
@@ -286,22 +315,57 @@ fn shorten(text: &str) -> String {
     text.chars().take(MAX_QUERY_CHARS).collect()
 }
 
-/// The family `text` names: its key (`title-fonts`), the same with underscores
-/// (`title_fonts`) or its displayed English name (`Title fonts`), case and
-/// spaces ignored.
-fn parse_family(text: &str) -> Option<ThemeFamily> {
-    let normal = text
-        .split_whitespace()
+/// A family name as compared: words joined by `-`, `_` taken as `-`, case
+/// ignored (accents are kept).
+fn normalise(text: &str) -> String {
+    text.split_whitespace()
         .collect::<Vec<_>>()
         .join("-")
         .to_lowercase()
-        .replace('_', "-");
-    ThemeFamily::from_key(&normal)
+        .replace('_', "-")
+}
+
+/// The families `text` names: one family by its key (`title-fonts`), the same
+/// with underscores, its English label (`Size`) or a name the host injected
+/// (`Courbes`); `style` (or its injected names) is the six style parts.
+fn parse_family(text: &str, library: Option<&ThemeLibrary>) -> Option<ThemeFamilies> {
+    let normal = normalise(text);
+    if normal == "style" {
+        return Some(style_set());
+    }
+    if let Some(family) = ThemeFamily::ALL
+        .into_iter()
+        .find(|family| family.key() == normal || normalise(family.english_name()) == normal)
+    {
+        return Some(ThemeFamilies::only(family));
+    }
+    let library = library?;
+    if library
+        .style_names
+        .iter()
+        .any(|name| normalise(name) == normal)
+    {
+        return Some(style_set());
+    }
+    library
+        .family_names
+        .iter()
+        .find(|(_, name)| normalise(name) == normal)
+        .map(|(family, _)| ThemeFamilies::only(*family))
+}
+
+fn style_set() -> ThemeFamilies {
+    STYLE_PARTS
+        .iter()
+        .fold(ThemeFamilies::none(), |set, part| set.with(*part))
 }
 
 /// The families a call asks for: `None` is the default theme's, an empty list
 /// is refused, an unknown name lists the keys.
-fn parse_families(names: Option<&[String]>) -> Result<ThemeFamilies, HostError> {
+fn parse_families(
+    names: Option<&[String]>,
+    library: Option<&ThemeLibrary>,
+) -> Result<ThemeFamilies, HostError> {
     let Some(names) = names else {
         return Ok(default_theme_families());
     };
@@ -314,15 +378,16 @@ fn parse_families(names: Option<&[String]>) -> Result<ThemeFamilies, HostError> 
     }
     let mut set = ThemeFamilies::none();
     for name in names {
-        let family = parse_family(name).ok_or_else(|| {
-            let keys: Vec<&str> = ThemeFamily::ALL.iter().map(|f| f.key()).collect();
+        let named = parse_family(name, library).ok_or_else(|| {
+            let mut keys: Vec<&str> = ThemeFamily::ALL.iter().map(|f| f.key()).collect();
+            keys.push("style");
             HostError::InvalidValue(format!(
                 "unknown theme family \"{}\": use {}",
                 shorten(name),
                 keys.join(", ")
             ))
         })?;
-        set = set.with(family);
+        set = named.iter().fold(set, |set, family| set.with(family));
     }
     Ok(set)
 }
@@ -405,8 +470,10 @@ fn list_native(context: &engine::ScriptContext) -> Result<Vec<ThemeInfo>, HostEr
 ///
 /// `families` names the families to copy (`'background'`, `'texts'`,
 /// `'title-fonts'`, `'axes'`, `'axis-ranges'`, `'size-and-page'`, `'legend'`,
-/// `'curves'`, `'color-bar'`; `'title_fonts'` and the displayed names work
-/// too). Left out, it is every family but the texts and the axis ranges, as for
+/// `'curves'`, `'color-bar'`; `'title_fonts'` works too, and so do the names
+/// the Apply Theme window shows, in English or French whatever the interface
+/// language: `'Curves'`, `'Courbes'`, `'Size'`). `'style'` is the six style
+/// parts, like the Style box. Left out, it is every family but the texts and the axis ranges, as for
 /// the default theme of new graphs; an empty list is refused.
 /// `add_missing_layers=True` adds empty layers up to the theme's count.
 ///
@@ -433,7 +500,8 @@ pub(crate) fn apply_theme(
     let context = engine::current_context()?;
     context.check_interrupt()?;
     let names = families.map(family_names).transpose()?;
-    let families = parse_families(names.as_deref()).map_err(to_py_error)?;
+    let library = context.theme_library();
+    let families = parse_families(names.as_deref(), library.as_deref()).map_err(to_py_error)?;
     let (id, epoch) = (graph.id, graph.epoch);
     let warning = py
         .detach(|| apply_native(&context, id, epoch, theme, families, add_missing_layers))

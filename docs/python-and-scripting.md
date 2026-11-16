@@ -550,13 +550,22 @@ applied only by this call.
   **before every run** (the engine is reused, the user's themes change between
   runs; `AppState::script_theme_library`). Without it (the command line, the
   script tests) the built-ins are the originals, known by key and English name
-  only, and there are no user themes. The themes of the project are always read
+  only, and there are no user themes; the families answer to their key, their
+  English label and `style` only (see Families). The themes of the project are always read
   from the snapshot: they travel with the `.stf`.
 - **Families.** Left out, `families` is that of the default theme of new graphs
   (every family but the texts and the axis ranges). A family is named by its key
-  (`title-fonts`), the same with underscores (`title_fonts`) or its English
-  displayed name (`Title fonts`); an empty list or an unknown name raises
-  `InvalidValueError` (the message lists the keys). `add_missing_layers` adds
+  (`title-fonts`), the same with underscores (`title_fonts`) or the name the
+  Apply Theme window shows (#551): its English label (`Title fonts`, `Size`),
+  everywhere, headless too; the label of every catalogue language (`Courbes`,
+  `Polices des titres`) when the application injected them
+  (`ThemeLibrary::with_family_names`, plain data, whatever the interface
+  language; never the pseudo-locale). `style` (the Style box: Background, Title
+  fonts, Axes, Legend, Curves, Color bar) names the six parts, everywhere. Case
+  and spaces are ignored, `_` counts as `-`, accents are **not** folded
+  (`Legende` is refused); naming a family twice is fine. An empty list or an
+  unknown name raises `InvalidValueError` (the message lists the keys and
+  `style`). `add_missing_layers` adds
   empty layers up to the theme's count; off by default.
 - **Same name in several places (#546 T7).** Never an error. The order is
   project theme, then user theme, then built-in: the first is applied and a

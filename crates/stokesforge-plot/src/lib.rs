@@ -135,5 +135,5 @@ pub use text_font::TextFont;
 pub use theme::{Theme, THEMES};
 pub use theme_family::{
     bounded_themes, default_theme_families, same_theme_name, GraphTheme, ThemeFamilies,
-    ThemeFamily, MAX_THEMES, MAX_THEME_NAME_CHARS, SURPLUS_GAP,
+    ThemeFamily, MAX_THEMES, MAX_THEME_NAME_CHARS, STYLE_PARTS, SURPLUS_GAP,
 };
