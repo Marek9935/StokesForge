@@ -2056,6 +2056,10 @@ origin-import-summary = À créer : { $sheets ->
    *[other] { $books } classeurs
     }
 origin-import-partial = Une partie de ce fichier n'a pas pu être lue : certains classeurs gardent leurs données mais perdent noms longs, unités et rôles X/Y
+origin-import-own-x = Ces feuilles gardent un X propre, ses valeurs diffèrent du premier X : { $names }
+status-import-own-x = Ces fichiers gardent un X propre, ses valeurs diffèrent du premier X : { $names }
+status-import-folder-gone = Le dossier choisi pour l'import n'existe plus : les classeurs ont été créés à la racine du projet
+import-folder-root = Projet
 origin-import-accept =
     Importer
     .hint = Crée un classeur pour chaque classeur coché de la liste (Entrée)
@@ -2111,8 +2115,10 @@ disabled-copy-last-format = Au moins un format doit être offert
 disabled-nothing-to-redo = Rien à rétablir
 disabled-new-project-busy = Terminez ou annulez d'abord le script, l'import ou la modification en cours
 disabled-no-source-file = Aucune colonne de cette feuille ne peut être relue depuis son fichier
-disabled-origin-import-nothing-ticked = Cochez d'abord au moins une feuille
+disabled-origin-import-nothing-ticked = Cochez d'abord au moins une colonne
 disabled-origin-sheet-empty = Cette feuille n'a aucune colonne à importer
+disabled-import-folder-name-empty = Saisissez d'abord un nom pour le nouveau dossier
+disabled-import-folder-name-taken = Le dossier choisi contient déjà un élément portant ce nom
 disabled-no-last-import = Aucun import terminé à rouvrir
 disabled-needs-sheet = Mettez d'abord une feuille de classeur au premier plan
 disabled-no-window = Aucune fenêtre à agrandir

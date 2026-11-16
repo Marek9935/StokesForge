@@ -356,7 +356,7 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
 #[cfg(test)]
 mod tests {
     use eframe::egui;
-    use stokesforge_app_state::state::{Action, ImportDestination};
+    use stokesforge_app_state::state::{Action, ImportDestination, ImportFolder};
     use stokesforge_app_state::tr;
 
     use super::test_bench::{
@@ -430,6 +430,7 @@ mod tests {
             actions,
             vec![Action::StartImportEach {
                 destination: ImportDestination::NewBookForAll,
+                folder: ImportFolder::Existing(complete.state.creation_folder()),
                 each,
                 skipped,
             }]

@@ -974,10 +974,12 @@ impl AppState {
     /// is not open.
     pub fn import_finish(&mut self) -> Option<super::Action> {
         let destination = self.import_state.as_ref()?.destination;
+        let folder = self.import_state.as_ref()?.folder.clone();
         let (each, skipped) = self.import_each_recipe();
         self.cancel_import();
         Some(super::Action::StartImportEach {
             destination,
+            folder,
             each,
             skipped,
         })

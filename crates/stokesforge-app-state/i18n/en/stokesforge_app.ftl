@@ -2057,6 +2057,10 @@ origin-import-summary = To create: { $sheets ->
    *[other] { $books } workbooks
     }
 origin-import-partial = Part of this file could not be read: some workbooks keep their data but lose long names, units and X/Y roles
+origin-import-own-x = These sheets keep an X of their own, its values differ from the first X: { $names }
+status-import-own-x = These files keep an X of their own, its values differ from the first X: { $names }
+status-import-folder-gone = The folder chosen for the import no longer exists: the workbooks were created at the root of the project
+import-folder-root = Project
 origin-import-accept =
     Import
     .hint = Creates a workbook for each checked workbook of the list (Enter)
@@ -2114,8 +2118,10 @@ disabled-new-project-busy = Finish or cancel the running script, import or edit 
 disabled-column-type-formula = This column is computed by a formula. Remove the formula to change its type
 disabled-column-type-calculated = This column is produced by a calculation. Detach it from the calculation to change its type
 disabled-no-source-file = No column of this sheet can be read again from its file
-disabled-origin-import-nothing-ticked = Check at least one sheet first
+disabled-origin-import-nothing-ticked = Check at least one column first
 disabled-origin-sheet-empty = This sheet has no column to import
+disabled-import-folder-name-empty = Type a name for the new folder first
+disabled-import-folder-name-taken = The chosen folder already holds an item with this name
 disabled-no-last-import = No finished import to reopen
 disabled-needs-sheet = Bring a workbook sheet to the front first
 disabled-no-window = No window to maximize

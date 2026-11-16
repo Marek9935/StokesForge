@@ -30,7 +30,7 @@ use stokesforge_core::NodeId;
 use stokesforge_importer::ImportItem;
 use stokesforge_session::{SessionHandle, Snapshot};
 
-use super::{origin_import, AppState, ImportDestination, StatusLevel};
+use super::{origin_import, AppState, ImportDestination, ImportFolder, StatusLevel};
 use crate::errors;
 use crate::preferences::Preferences;
 use crate::tr;
@@ -44,6 +44,7 @@ pub struct ImportRun {
     seen_bound: u64,
     applied_revision: u64,
     destination: ImportDestination,
+    folder: ImportFolder,
     dropped: Option<Option<NodeId>>,
     skipped: usize,
     items: Vec<ImportItem>,
@@ -87,8 +88,11 @@ impl ImportRun {
         let items = std::mem::take(&mut self.items);
         let (destination, dropped, skipped) =
             (self.destination, self.dropped.is_some(), self.skipped);
+        let folder = self.folder.clone();
         let models = std::mem::take(&mut self.models);
-        scratch.gesture(|state| state.import_batch(destination, dropped, skipped, items, &models));
+        scratch.gesture(|state| {
+            state.import_batch(destination, folder, dropped, skipped, items, &models)
+        });
         self.done = Some(Box::new(scratch));
     }
 }
@@ -131,6 +135,7 @@ impl AppState {
             seen_bound: self.seen_bound,
             applied_revision: self.applied_revision,
             destination: job.destination,
+            folder: job.folder,
             dropped: job.dropped,
             skipped: job.skipped,
             items: reply.items,

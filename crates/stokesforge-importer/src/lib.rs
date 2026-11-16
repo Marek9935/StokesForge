@@ -18,12 +18,14 @@ pub mod origin;
 pub mod planner;
 pub use origin::{
     default_origin_selection, is_origin_bytes, is_origin_file, is_origin_path, make_origin_column,
-    origin_book_name, plan_origin_import, read_origin_file, OriginBookPlan, OriginSelection,
-    OriginSheetPlan,
+    make_origin_column_in, origin_book_name, origin_column_key, plan_origin_import,
+    plan_origin_layout, read_origin_file, OriginBookPlan, OriginColumnRef, OriginLayoutPlan,
+    OriginSelection, OriginSheetPlan, OriginSheetRef, OriginSource, OriginWhere,
 };
 
 use std::path::{Path, PathBuf};
 
+pub use planner::same_x_values;
 use planner::{plan_tables, PlanColumn, PlanTable};
 
 use stokesforge_core::{
@@ -137,6 +139,9 @@ pub struct ImportPlan {
     pub name: String,
     pub columns: Vec<PlannedColumn>,
     pub items: Vec<usize>,
+    /// Shared X only: the items (tables) that keep an X of their own because
+    /// its values differ from the first X.
+    pub own_x: Vec<usize>,
 }
 
 /// Distributes the columns of the readable items into worksheets according to `layout`: one
@@ -181,7 +186,17 @@ pub fn plan_import(items: &[ImportItem], layout: FilesLayout) -> Vec<ImportPlan>
             }
         })
         .collect();
-    plan_tables(&tables, layout)
+    plan_tables(&tables, layout, &|a, b| {
+        let values = |planned: PlannedColumn| {
+            items[planned.item]
+                .table
+                .as_ref()
+                .ok()
+                .and_then(|table| table.columns.get(planned.column))
+                .map(|column| column.values.as_slice())
+        };
+        matches!((values(a), values(b)), (Some(x), Some(y)) if same_x_values(x, y))
+    })
 }
 
 /// The values of a planned column, as a block ready to write: numbers, or
