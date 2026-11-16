@@ -335,7 +335,7 @@ mod tests {
 
     #[test]
     fn no_built_in_has_a_grid_on_any_axis() {
-        for index in 0..COUNT {
+        for (index, name) in NAMES.iter().enumerate() {
             let theme = original(index).expect("theme");
             for panel in theme.style.panels.iter() {
                 for side in [
@@ -344,11 +344,7 @@ mod tests {
                     AxisSide::Right,
                     AxisSide::Top,
                 ] {
-                    assert!(
-                        !panel.axis(side).grid,
-                        "{} has a grid on {side:?}",
-                        NAMES[index]
-                    );
+                    assert!(!panel.axis(side).grid, "{name} has a grid on {side:?}");
                 }
             }
         }
@@ -356,14 +352,13 @@ mod tests {
 
     #[test]
     fn a_built_in_holds_no_data_and_no_free_placement() {
-        for index in 2..COUNT {
+        for (index, name) in NAMES.iter().enumerate().skip(2) {
             let theme = original(index).expect("theme");
             assert_eq!(theme.style.layer_placement, LayerPlacement::Grid);
             assert_eq!(
                 theme,
-                GraphTheme::capture(NAMES[index], &theme.style),
-                "{} is its own capture",
-                NAMES[index]
+                GraphTheme::capture(*name, &theme.style),
+                "{name} is its own capture"
             );
         }
     }
@@ -434,22 +429,17 @@ mod tests {
         use crate::i18n::{test_language, Language};
         for language in [Language::English, Language::French] {
             let _guard = test_language(language);
-            for index in 0..COUNT {
+            for (index, key) in KEYS.iter().enumerate() {
                 let shown = display_name(index);
                 assert!(
                     !shown.is_empty() && !shown.contains("plot-theme"),
-                    "{language:?} {}: {shown:?}",
-                    KEYS[index]
+                    "{language:?} {key}: {shown:?}"
                 );
             }
         }
         let _guard = test_language(Language::English);
-        for index in 0..COUNT {
-            assert_eq!(
-                display_name(index),
-                NAMES[index],
-                "English shows the stored name"
-            );
+        for (index, name) in NAMES.iter().enumerate() {
+            assert_eq!(display_name(index), *name, "English shows the stored name");
         }
     }
 }
