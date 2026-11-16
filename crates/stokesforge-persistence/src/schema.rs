@@ -177,6 +177,10 @@ pub(crate) struct NodeRecord {
 /// 2, `guide-de-correction-robustesse.md` §F3 — see `unknown.rs` for the
 /// mechanism): a variant that this reader does not know becomes
 /// [`KindRecord::Unknown`] instead of making the whole file fail.
+// The `Graph` record carries a whole `PlotSpecRecord`, much bigger than the other
+// kinds; a record lives only while a file is read or written, so boxing it would
+// add an indirection for nothing (#545, #550).
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum KindRecord {
     /// Folder.
@@ -299,6 +303,10 @@ pub(crate) enum KindRecord {
 /// schema that a file written by this reader can produce. `unknown.rs`
 /// uses it to *try* the strict decoding before falling back on
 /// [`KindRecord::Unknown`] — see the head doc of this module.
+// The `Graph` record carries a whole `PlotSpecRecord`, much bigger than the other
+// kinds; a record lives only while a file is read or written, so boxing it would
+// add an indirection for nothing (#545, #550).
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 enum KindRecordKnown {
     Folder {
