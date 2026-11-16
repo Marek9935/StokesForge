@@ -166,3 +166,41 @@ fn private_opju_projects_read_completely_and_match_their_opj() {
         eprintln!("no .opju file: nothing checked");
     }
 }
+
+/// Timing (#536): `fs::read` then `read_project` of every private `.opj` and
+/// `.opju`. Prints only sizes, counts and durations, never file contents.
+/// Run with `--release` as well as in debug.
+#[test]
+#[ignore = "needs the private Origin files; measurement only"]
+fn private_projects_read_timing() {
+    let dir = dir();
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        eprintln!("no private Origin folder: nothing measured");
+        return;
+    };
+    let mut paths: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| matches!(p.extension().and_then(|e| e.to_str()), Some("opj" | "opju")))
+        .collect();
+    paths.sort();
+    if paths.is_empty() {
+        eprintln!("no Origin file: nothing measured");
+        return;
+    }
+    for (index, path) in paths.iter().enumerate() {
+        let started = std::time::Instant::now();
+        let bytes = std::fs::read(path).expect("readable file");
+        let read = started.elapsed();
+        let started = std::time::Instant::now();
+        let project = read_project(&bytes).expect("the private file reads");
+        let parsed = started.elapsed();
+        let (books, sheets, columns) = counts(&project);
+        eprintln!(
+            "timing file #{index} (.{}): {} bytes, {books} books, {sheets} sheets, \
+             {columns} columns; fs::read {read:.2?}, read_project {parsed:.2?}",
+            path.extension().and_then(|e| e.to_str()).unwrap_or(""),
+            bytes.len(),
+        );
+    }
+}
