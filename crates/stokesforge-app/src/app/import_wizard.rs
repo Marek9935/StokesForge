@@ -377,6 +377,46 @@ mod tests {
         settle(ctx, state, actions)
     }
 
+    /// The Folder: button of the footer lists the project folders (root
+    /// first) and a pick is applied; with Active Workbook the folder is not
+    /// used and the button does nothing. Witness: with the pick not applied,
+    /// the folder stays the root.
+    #[test]
+    fn the_folder_button_lists_the_folders_and_is_greyed_for_the_active_workbook() {
+        let _language = stokesforge_app_state::i18n::test_language(
+            stokesforge_app_state::i18n::Language::English,
+        );
+        let mut bench = bench(SURE);
+        let root = bench.state.tree().root();
+        bench.state.dispatch(Action::AddFolder { parent: root });
+        let ctx = crate::app::test_support::context();
+        let mut actions = Vec::new();
+        without_guide(&ctx, &mut bench.state, &mut actions);
+        let button = |folder: &str| {
+            format!(
+                "{}\u{2003}\u{2002}",
+                tr!("import-footer-folder", value = folder)
+            )
+        };
+        // Active Workbook: the button is greyed, a click opens nothing.
+        let before = bench.state.import_state().unwrap().destination;
+        bench.state.import_state_mut().unwrap().destination = ImportDestination::ActiveBook(root);
+        click_text(&ctx, &mut bench.state, &mut actions, &button("Project"));
+        let painted = paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        assert!(!painted.iter().any(|t| t.text == "Folder1"), "greyed");
+        bench.state.import_state_mut().unwrap().destination = before;
+        // Otherwise the menu lists the folders and a pick is applied.
+        click_text(&ctx, &mut bench.state, &mut actions, &button("Project"));
+        let painted = paint(&ctx, &mut bench.state, &mut actions, Vec::new());
+        assert!(painted.iter().any(|t| t.text == "Folder1"), "listed");
+        click_text(&ctx, &mut bench.state, &mut actions, "Folder1");
+        let folder = bench.state.import_state().unwrap().folder.clone();
+        assert!(
+            matches!(folder, ImportFolder::Existing(id) if id != root),
+            "{folder:?}"
+        );
+    }
+
     /// One screen: the format sentence, the groups of what was found, the
     /// footer with the two menus, Cancel and Import (S-F6).
     #[test]

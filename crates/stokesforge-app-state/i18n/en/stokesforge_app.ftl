@@ -2063,14 +2063,14 @@ status-import-folder-gone = The folder chosen for the import no longer exists: t
 import-folder-root = Project
 origin-import-accept =
     Import
-    .hint = Creates a workbook for each checked workbook of the list (Enter)
+    .hint = Creates the workbooks and sheets that the checked columns call for (Enter)
 origin-import-check-all =
     Check All
-    .hint = Checks every sheet that has columns
+    .hint = Checks every column of every sheet
 origin-import-check-none =
     Check None
-    .hint = Unchecks every sheet
-origin-import-book-hint = Checks or unchecks all the sheets of this workbook
+    .hint = Unchecks every column of every sheet
+origin-import-book-hint = Checks or unchecks all the columns of this workbook
 origin-import-sheet-size = { $columns ->
     [one] { $columns } column
    *[other] { $columns } columns
@@ -2671,6 +2671,19 @@ import-format-short-decimal = Decimal
 import-format-short-thousands = Thousands
 import-format-short-encoding = Encoding
 import-footer-to = To: { $value }
+import-footer-folder = Folder: { $value }
+import-folder-new = New Folder…
+import-folder-name-hint = Folder name
+origin-import-where-per-book = One Workbook per Origin Workbook
+origin-import-sheets = Origin sheets
+origin-import-layout-per-sheet = One sheet per Origin sheet
+origin-import-layout-side-by-side = One sheet, side by side (X Y X Y…)
+origin-import-layout-shared-x = One sheet, X of first Origin sheet shared
+origin-import-column-hint = Click to check or uncheck, Shift+click to check or uncheck a range, right-click for all sheets
+origin-import-column-check-in-all = Check “{ $name }” in All Sheets
+origin-import-column-uncheck-in-all = Uncheck “{ $name }” in All Sheets
+origin-import-sheet-hint = Checks or unchecks all the columns of this sheet
+disabled-import-folder-active-book = The folder is not used when importing into the active workbook
 import-footer-template = Template: { $value }
 import-footer-template-auto = Auto · { $name }
 import-footer-template-yours = { $name }

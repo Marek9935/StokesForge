@@ -152,8 +152,8 @@ before Import, and the text import says it after (`status-import-own-x`) because
 its previews read only part of the files. The folder (`ImportFolder`, both
 windows, `Action::SetImportFolder`, default `creation_folder`): an existing
 folder, or a new one made inside the same Import entry when Import runs; a folder
-gone by then means the root and `status-import-folder-gone` says so. Menu and drop
-imports go to the root. `Action::ImportOrigin` creates the planned workbooks and
+gone by then means the root and `status-import-folder-gone` says so. Imports with no window (menu, drop, recent files)
+go to the Project Manager folder (the same default as the window). `Action::ImportOrigin` creates the planned workbooks and
 sheets in one `MacroKind::Import` group (one
 history entry, one undo); a name the model would refuse (invalid, or already a
 sibling's, case aside) is not sent: the object keeps its automatic name and
@@ -162,6 +162,16 @@ stays greyed for them. `OriginFileView::partial` (from `OriginProject::partial`,
 still on top) and reopens the chooser on the same parsed files, ticks, layouts and
 folder (the Import window gets its folder back the same way); the
 most recent import, text or Origin, decides between wizard and chooser.
+
+Interface (#537): the two windows paint their `To:` and `Folder:` menus with one
+module, `stokesforge-app/src/app/import_to.rs`
+(destinations, the three sheet layouts, the folder list with "New Folder…" and
+its name field); each window applies the pick to its own state (the Import
+window writes its import state and dispatches `SetImportFolder`, the chooser
+pushes `SetOriginWhere`, `SetOriginLayout`, `SetImportFolder`). The chooser lists
+the columns of an open sheet (`OriginSheetView::column_list`), paints only the
+rows on screen (a file can hold a thousand columns, no cap), and keeps the last
+clicked column of each sheet in egui memory for the Shift+click range.
 
 The same gesture is wired in the detached windows: on a workbook, the
 destination stays that workbook; on a graph, a note, a matrix or the

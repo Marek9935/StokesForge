@@ -6490,7 +6490,7 @@ impl AppState {
                 recipe,
                 paths,
             } => {
-                let folder = self.import_root_folder();
+                let folder = self.import_default_folder();
                 self.start_import(
                     destination,
                     folder,
@@ -7545,7 +7545,7 @@ impl AppState {
         if plan.data.is_empty() {
             return;
         }
-        let folder = self.import_root_folder();
+        let folder = self.import_default_folder();
         self.start_import(
             plan.destination,
             folder,
@@ -11903,7 +11903,7 @@ impl AppState {
             .iter()
             .flat_map(|path| import_items(path, &recipe))
             .collect();
-        let folder = self.import_root_folder();
+        let folder = self.import_default_folder();
         self.apply_import(destination, &folder, items);
     }
 

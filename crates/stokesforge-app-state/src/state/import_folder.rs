@@ -29,9 +29,11 @@ pub(super) fn import_item_label(item: &ImportItem) -> String {
 }
 
 impl AppState {
-    /// The root, for the imports that have no window (menu, drop).
-    pub(super) fn import_root_folder(&self) -> ImportFolder {
-        ImportFolder::Existing(self.snapshot.tree.root())
+    /// The folder of the imports that have no window to choose it (menu, drop,
+    /// recent files): the one a new window would go into, the folder selected
+    /// in the Project Manager (the root when none is).
+    pub(super) fn import_default_folder(&self) -> ImportFolder {
+        ImportFolder::Existing(self.creation_folder())
     }
 
     /// The folder the visible import window targets: the Import window's, else

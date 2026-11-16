@@ -2062,14 +2062,14 @@ status-import-folder-gone = Le dossier choisi pour l'import n'existe plus : les
 import-folder-root = Projet
 origin-import-accept =
     Importer
-    .hint = Crée un classeur pour chaque classeur coché de la liste (Entrée)
+    .hint = Crée les classeurs et les feuilles que demandent les colonnes cochées (Entrée)
 origin-import-check-all =
     Tout cocher
-    .hint = Coche toutes les feuilles qui ont des colonnes
+    .hint = Coche toutes les colonnes de toutes les feuilles
 origin-import-check-none =
     Ne rien cocher
-    .hint = Décoche toutes les feuilles
-origin-import-book-hint = Coche ou décoche toutes les feuilles de ce classeur
+    .hint = Décoche toutes les colonnes de toutes les feuilles
+origin-import-book-hint = Coche ou décoche toutes les colonnes de ce classeur
 origin-import-sheet-size = { $columns ->
     [one] { $columns } colonne
    *[other] { $columns } colonnes
@@ -2670,6 +2670,19 @@ import-format-short-decimal = Décimale
 import-format-short-thousands = Milliers
 import-format-short-encoding = Encodage
 import-footer-to = Vers : { $value }
+import-footer-folder = Dossier : { $value }
+import-folder-new = Nouveau dossier…
+import-folder-name-hint = Nom du dossier
+origin-import-where-per-book = Un classeur par classeur Origin
+origin-import-sheets = Feuilles Origin
+origin-import-layout-per-sheet = Une feuille par feuille Origin
+origin-import-layout-side-by-side = Une feuille, côte à côte (X Y X Y…)
+origin-import-layout-shared-x = Une feuille, X de la première feuille Origin partagé
+origin-import-column-hint = Clic pour cocher ou décocher, Maj+clic pour une plage, clic droit pour toutes les feuilles
+origin-import-column-check-in-all = Cocher « { $name } » dans toutes les feuilles
+origin-import-column-uncheck-in-all = Décocher « { $name } » dans toutes les feuilles
+origin-import-sheet-hint = Coche ou décoche toutes les colonnes de cette feuille
+disabled-import-folder-active-book = Le dossier n'est pas utilisé quand on importe dans le classeur actif
 import-footer-template = Modèle : { $value }
 import-footer-template-auto = Auto · { $name }
 import-footer-template-yours = { $name }

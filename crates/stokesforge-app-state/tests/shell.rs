@@ -21041,6 +21041,38 @@ mod classic_folder {
         assert!(state.status_history().any(|m| m.text == gone));
     }
 
+    /// An import with no window to choose goes where a new window would: into
+    /// the Project Manager folder, the root when none is selected (#537 R6).
+    #[test]
+    fn an_import_without_a_window_goes_into_the_project_manager_folder() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let root = state.tree().root();
+        state.dispatch(Action::AddFolder { parent: root });
+        let folder = folder_id(&state, "Folder1");
+        let files = two_files(dir.path());
+        let import = |state: &mut AppState| {
+            state.dispatch(Action::ImportFiles {
+                destination: ImportDestination::NewBookPerFile,
+                recipe: stokesforge_import::ImportRecipe::new("Untitled"),
+                paths: files.clone(),
+            });
+        };
+        state.set_project_manager_selection(vec![folder]);
+        import(&mut state);
+        assert_eq!(
+            state.tree().node(folder).unwrap().children().len(),
+            2,
+            "both workbooks are in the selected folder"
+        );
+        state.set_project_manager_selection(Vec::new());
+        let before = root_children(&state).len();
+        import(&mut state);
+        assert_eq!(root_children(&state).len(), before + 2, "root otherwise");
+        assert_eq!(state.tree().node(folder).unwrap().children().len(), 2);
+    }
+
     #[test]
     fn reopening_the_last_import_restores_its_folder() {
         let _recipes = isolate_recipe_store();

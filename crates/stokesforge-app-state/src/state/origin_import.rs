@@ -514,7 +514,7 @@ impl AppState {
             return;
         }
         let recipe = stokesforge_import::ImportRecipe::new(tr!("import-template-untitled"));
-        let folder = self.import_root_folder();
+        let folder = self.import_default_folder();
         self.start_import(
             ImportDestination::NewBookForAll,
             folder,
