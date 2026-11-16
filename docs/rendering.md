@@ -1292,6 +1292,31 @@ shift stays under one pixel; the layout is not touched
 (`paint` with logical rectangle = displayed rectangle) the snapping is not
 applied.
 
+### Small drawings of whole figures (#543)
+
+`stokesforge_render_egui::drawings::ScaledDrawings<K>` keeps, per key, a figure
+drawn **once at its natural size** (`pipeline::figure_layout` for the size, the
+ordinary pipeline for the shapes) and paints it scaled whole into a rectangle
+(`paint`, centred, at most `max_scale`; `draw_scaled` is draw then paint). It is
+what the theme tiles and their hover zoom use (`docs/application/graph.md`,
+« Theme specimens »). Pitfalls:
+
+- **One measurer, the application's fonts.** The set owns the `TextMeasurer`,
+  the `FormulaCache` and the resolved Typst fonts, built from the same
+  definitions as a `GraphView`; the application holds one set and every key
+  shares it. No private static measurer, and never the Typst-less path: titles
+  would be measured and drawn differently from the graph.
+- **Textures are held, not memoized.** Each entry's `ShapeCache` holds the
+  formula textures of its shapes (`TypstScreen::holding`) and its `ScaledShapes`
+  those of its scaled meshes; the memo is only trimmed with `evict_unshared`
+  after the new entry exists (invariant of #508 above), so a title never
+  vanishes from a tile. Locked by
+  `a_title_survives_the_eviction_of_unshared_formulas`.
+- **Invalidation.** An entry is valid while its `PlotSpec` (by value) and the
+  pixel density are the ones it was drawn with; the tree under a key must not
+  change (the specimens' reference tree never does). A new theme style or a new
+  density draws again; `retain` lets go of deleted keys.
+
 ## Out-of-date series (#198)
 
 The rendering knows nothing about the model: the core sets `ResolvedSeries.stale`

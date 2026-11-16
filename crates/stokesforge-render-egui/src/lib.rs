@@ -80,6 +80,7 @@ mod bar_resize;
 pub mod cache;
 mod corner_follow;
 mod corner_lock;
+pub mod drawings;
 pub mod edge_band;
 pub mod feathering;
 mod layout_mode;
