@@ -456,7 +456,7 @@ the local fields. **Font** is the same list as the format toolbar (« Graph font
 = the embedded default); **Text scale (%)** takes 25 to 400, Auto = 100 %. Every
 text left on Auto follows them (graph and layer titles, axis titles, tick
 numbers, legend, colour bar, free texts created since #545); a text whose family
-or size was set by hand keeps it (`GraphText`, `stokesforge-plot`: the one place
+was set by hand keeps it, and a text whose size was set by hand is that size times the scale (the field shows the typed size; `GraphText`, `stokesforge-plot`: the one place
 that decides, see `docs/rendering.md` § Graph font and text scale). The format
 toolbar's size shows « Auto (N) » with the size drawn, scale included. The window
 is one history step (`GraphProperties`); Cancel writes nothing. The Title fonts

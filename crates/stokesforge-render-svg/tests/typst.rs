@@ -421,10 +421,10 @@ fn the_graph_font_reaches_every_text_and_a_local_family_wins() {
     assert!(family_of(&svg, "0.3").unwrap().contains("Noto Sans"));
 }
 
-/// Scale 150 % grows an Auto text and leaves a hand-set size alone; 100 %
+/// Scale 150 % grows an Auto text and a hand-set size alike (#545, 545-2); 100 %
 /// is the export of a graph with no setting, byte for byte.
 #[test]
-fn the_text_scale_resizes_auto_texts_only() {
+fn the_text_scale_resizes_auto_and_hand_set_texts() {
     use stokesforge_render_svg::SvgTextMode::Text;
     let size_of = |svg: &str, content: &str| -> f64 {
         let tag = text_tag(svg, content).expect(content);
@@ -447,8 +447,8 @@ fn the_text_scale_resizes_auto_texts_only() {
         size_of(&svg_mode(&spec, Text), "Spectrumalpha")
     };
     assert!(
-        (hand - alone).abs() < 1e-6,
-        "hand-set size scaled: {hand} vs {alone}"
+        (hand / alone - 1.5).abs() < 0.02,
+        "hand-set size scaled by 1.5: {hand} vs {alone}"
     );
     spec.text_scale = Some(1.0);
     spec.title_font.size = None;

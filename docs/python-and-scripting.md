@@ -439,7 +439,7 @@ test will read. The Y keys target the `axis` axis (`left` by default, `right`).
 |---|---|
 | `title`, `panel_title`, `x_title`, `y_title` | strings (Typst markup for the titles) |
 | `title_visible`, `stale_warning`, `decimal_comma` | booleans (graph) |
-| `text_font`, `text_scale` | the graph font (a family name, `""` = the embedded default) and the text scale (percent, 25 to 400, refused outside; `None` = 100 %) of Graph Properties › General (#545): the default of every text left on Auto (titles, tick numbers, legend, colour bar, new free texts). A text with its own font or size keeps it: the scale does not multiply a size set by hand. Added to `PYST_API_VERSION` 0.10 |
+| `text_font`, `text_scale` | the graph font (a family name, `""` = the embedded default) and the text scale (percent, 25 to 400, refused outside; `None` = 100 %) of Graph Properties › General (#545): the default of every text left on Auto (titles, tick numbers, legend, colour bar, new free texts). A text with its own font keeps it; a size set by hand is multiplied by the scale too. Added to `PYST_API_VERSION` 0.10 |
 | `title_color`, `background` | `#RRGGBB` or `#RRGGBBAA`; `""` = automatic (title) or white (background) |
 | `x_scale`, `y_scale` | `linear` or `log` |
 | `x_from`/`x_to`, `y_from`/`y_to` | both together, finite and different, positive on a log axis; `from > to` draws the axis reversed (and marks the axis as inverted, #344); switch the framing to manual |

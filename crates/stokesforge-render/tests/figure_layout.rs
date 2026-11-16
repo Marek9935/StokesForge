@@ -1826,7 +1826,8 @@ fn a_smaller_text_scale_shrinks_the_default_bands() {
     // A title larger than the scaled default still grows its zone.
     let mut spec = scaled_frame(Some(0.5));
     let mut panel = spec.panels[0].clone();
-    panel.bottom.title_font.size = Some(16.0);
+    // 32 typed, 16 drawn at 50 %: above the scaled built-in 8.
+    panel.bottom.title_font.size = Some(32.0);
     spec = spec.with_panels(Panels::new(vec![panel]));
     assert!(layout_of(&spec).row_gutters[0].1 > half.row_gutters[0].1);
 }

@@ -31,8 +31,9 @@ pub struct AnnotationSpec {
     pub size: f64,
     /// The size follows the graph (#545): the text is drawn at the size of an
     /// axis title times the graph text scale, and [`Self::size`] is not read.
-    /// `false` = [`Self::size`] is absolute (a size set by hand, and every text
-    /// written before this marker). Setting a size by hand clears it.
+    /// `false` = [`Self::size`] is the typed size (a size set by hand, and
+    /// every text written before this marker), still multiplied by the graph
+    /// scale. Setting a size by hand clears it.
     pub follows_graph_size: bool,
     /// Rotation in degrees, counter-clockwise (trigonometric), around the
     /// center of the text.
@@ -242,10 +243,11 @@ mod tests {
     }
 
     /// #545: a text created now follows the axis-title size times the scale; a
-    /// text with the marker off (loaded from an old file, or set by hand) keeps
-    /// its stored size. Witness: the marker ignored (either side).
+    /// text with the marker off (loaded from an old file, or set by hand) is
+    /// drawn at its stored size times the scale too (decision of form 545-2).
+    /// Witness: the marker ignored (either side), or the scale not applied.
     #[test]
-    fn a_new_text_follows_the_graph_and_a_hand_set_one_keeps_its_size() {
+    fn a_new_text_follows_the_graph_and_a_hand_set_one_is_scaled() {
         let graph = GraphText {
             family: None,
             scale: 1.5,
@@ -257,7 +259,7 @@ mod tests {
             size: 20.0,
             ..fresh.clone()
         };
-        assert_eq!(old.resolved_size(graph), 20.0);
+        assert_eq!(old.resolved_size(graph), 30.0);
         assert_eq!(fresh.resolved_size(GraphText::NEUTRAL), 16.0);
     }
 }
