@@ -123,6 +123,24 @@ impl ThemeFamily {
         }
     }
 
+    /// The label of the family in the English window (the `en` catalogue, ids
+    /// `theme-part-*` and `theme-what-*`), which scripts accept everywhere,
+    /// including without a host library (#551). A test of the application
+    /// compares it with the catalogue.
+    pub const fn english_name(self) -> &'static str {
+        match self {
+            ThemeFamily::Background => "Background",
+            ThemeFamily::Texts => "Texts",
+            ThemeFamily::TitleFonts => "Title fonts",
+            ThemeFamily::Axes => "Axes",
+            ThemeFamily::AxisRanges => "Axis ranges",
+            ThemeFamily::SizeAndPage => "Size",
+            ThemeFamily::Legend => "Legend",
+            ThemeFamily::Curves => "Curves",
+            ThemeFamily::ColorBar => "Color bar",
+        }
+    }
+
     /// The family named by `key` ([`ThemeFamily::key`]), if any.
     pub fn from_key(key: &str) -> Option<ThemeFamily> {
         ThemeFamily::ALL
@@ -134,6 +152,17 @@ impl ThemeFamily {
         1 << self as u16
     }
 }
+
+/// The six parts of the **Style** box of the Apply Theme window, in the order
+/// the window lists them. A script naming `style` means all six (#551).
+pub const STYLE_PARTS: [ThemeFamily; 6] = [
+    ThemeFamily::Background,
+    ThemeFamily::TitleFonts,
+    ThemeFamily::Axes,
+    ThemeFamily::Legend,
+    ThemeFamily::Curves,
+    ThemeFamily::ColorBar,
+];
 
 /// A set of [`ThemeFamily`]. The default is **all** families.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

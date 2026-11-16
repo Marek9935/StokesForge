@@ -624,3 +624,142 @@ fn conflict_policy_two_themes_of_one_source_take_the_first_and_warn() {
     );
     assert!(stderr.contains("ignored"), "{stderr}");
 }
+
+// --- Family names in every language (#551) -------------------------------------------
+
+/// A library that also names two families in French, like the application's.
+fn french_family_library() -> ThemeLibrary {
+    library(&[], Vec::new()).with_family_names(
+        vec![
+            (ThemeFamily::Curves, "Courbes".to_owned()),
+            (ThemeFamily::SizeAndPage, "Taille".to_owned()),
+            (ThemeFamily::TitleFonts, "Polices des titres".to_owned()),
+            (ThemeFamily::Legend, "Légende".to_owned()),
+        ],
+        vec!["Style".to_owned()],
+    )
+}
+
+#[test]
+fn an_injected_family_name_is_found_and_normalised() {
+    for (families, only) in [
+        ("['courbes']", ThemeFamily::Curves),
+        ("['  POLICES  des titres ']", ThemeFamily::TitleFonts),
+        ("['Taille']", ThemeFamily::SizeAndPage),
+    ] {
+        let b = bench();
+        b.engine.set_theme_library(Some(french_family_library()));
+        let before = plot_graph(&b);
+        run(
+            &b,
+            &format!("pyst.apply_theme(g, 'publication', families={families})"),
+        );
+        let want = expected(
+            &b,
+            &before,
+            &builtin("publication"),
+            ThemeFamilies::only(only),
+            false,
+        );
+        assert_eq!(graph_spec(&b), want, "{families}");
+    }
+}
+
+#[test]
+fn an_injected_library_still_accepts_keys_and_english_names() {
+    let b = bench();
+    b.engine.set_theme_library(Some(french_family_library()));
+    let before = plot_graph(&b);
+    for families in ["['size_and_page']", "['Size and page']", "['Size']"] {
+        run(
+            &b,
+            &format!("pyst.apply_theme(g, 'publication', families={families})"),
+        );
+        let want = expected(
+            &b,
+            &before,
+            &builtin("publication"),
+            ThemeFamilies::only(ThemeFamily::SizeAndPage),
+            false,
+        );
+        assert_eq!(graph_spec(&b), want, "{families}");
+        undo(&b);
+    }
+    run(&b, "pyst.apply_theme(g, 'publication', families=['axes'])");
+}
+
+#[test]
+fn accents_are_not_folded() {
+    let b = bench();
+    b.engine.set_theme_library(Some(french_family_library()));
+    plot_graph(&b);
+    let message = refused(
+        &b,
+        "InvalidValueError",
+        "pyst.apply_theme(g, 'publication', families=['Legende'])",
+    );
+    assert!(message.contains("Legende"), "{message}");
+    run(
+        &b,
+        "pyst.apply_theme(g, 'publication', families=['légende'])",
+    );
+}
+
+#[test]
+fn headless_french_names_are_refused_and_the_error_lists_style() {
+    let b = bench();
+    plot_graph(&b);
+    let message = refused(
+        &b,
+        "InvalidValueError",
+        "pyst.apply_theme(g, 'publication', families=['Courbes'])",
+    );
+    assert!(
+        message.contains("Courbes") && message.contains("title-fonts") && message.contains("style"),
+        "{message}"
+    );
+}
+
+#[test]
+fn headless_english_labels_and_style_work() {
+    let size = ThemeFamilies::only(ThemeFamily::SizeAndPage);
+    let style_parts = stokesforge_plot::STYLE_PARTS
+        .iter()
+        .fold(ThemeFamilies::none(), |set, part| set.with(*part));
+    for (families, want_set) in [
+        ("['Size']", size),
+        ("['style']", style_parts),
+        (
+            "['Style', 'size']",
+            style_parts.with(ThemeFamily::SizeAndPage),
+        ),
+        (
+            "['Title fonts']",
+            ThemeFamilies::only(ThemeFamily::TitleFonts),
+        ),
+        ("['style', 'Curves']", style_parts),
+    ] {
+        let b = bench();
+        let before = plot_graph(&b);
+        run(
+            &b,
+            &format!("pyst.apply_theme(g, 'publication', families={families})"),
+        );
+        let want = expected(&b, &before, &builtin("publication"), want_set, false);
+        assert_eq!(graph_spec(&b), want, "{families}");
+    }
+}
+
+#[test]
+fn an_injected_style_name_means_the_six_parts() {
+    let b = bench();
+    let library = library(&[], Vec::new()).with_family_names(Vec::new(), vec!["Stil".to_owned()]);
+    b.engine.set_theme_library(Some(library));
+    let before = plot_graph(&b);
+    run(&b, "pyst.apply_theme(g, 'publication', families=['stil'])");
+    let parts = stokesforge_plot::STYLE_PARTS
+        .iter()
+        .fold(ThemeFamilies::none(), |set, part| set.with(*part));
+    let want = expected(&b, &before, &builtin("publication"), parts, false);
+    assert_eq!(graph_spec(&b), want);
+}

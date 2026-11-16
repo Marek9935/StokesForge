@@ -35,14 +35,41 @@ pub enum ThemeSource {
 }
 
 /// The six parts of the **Style** box, in the order the window lists them.
-pub const STYLE_PARTS: [ThemeFamily; 6] = [
-    ThemeFamily::Background,
-    ThemeFamily::TitleFonts,
-    ThemeFamily::Axes,
-    ThemeFamily::Legend,
-    ThemeFamily::Curves,
-    ThemeFamily::ColorBar,
-];
+pub use stokesforge_plot::STYLE_PARTS;
+
+/// The label of `family` in the language of `loader`: what the Apply Theme
+/// window shows, and what a script may name (#551).
+pub fn family_name_in(
+    loader: &i18n_embed::fluent::FluentLanguageLoader,
+    family: ThemeFamily,
+) -> String {
+    match family {
+        ThemeFamily::Background => tr!(in loader; "theme-part-background"),
+        ThemeFamily::TitleFonts => tr!(in loader; "theme-part-title-fonts"),
+        ThemeFamily::Axes => tr!(in loader; "theme-part-axes"),
+        ThemeFamily::Legend => tr!(in loader; "theme-part-legend"),
+        ThemeFamily::Curves => tr!(in loader; "theme-part-curves"),
+        ThemeFamily::ColorBar => tr!(in loader; "theme-part-color-bar"),
+        ThemeFamily::Texts => tr!(in loader; "theme-what-texts"),
+        ThemeFamily::SizeAndPage => tr!(in loader; "theme-what-size"),
+        ThemeFamily::AxisRanges => tr!(in loader; "theme-what-axis-ranges"),
+    }
+}
+
+/// [`family_name_in`] in the current language.
+pub fn family_name(family: ThemeFamily) -> String {
+    family_name_in(crate::i18n::loader(), family)
+}
+
+/// The label of the Style box (the six parts) in the language of `loader`.
+pub fn style_name_in(loader: &i18n_embed::fluent::FluentLanguageLoader) -> String {
+    tr!(in loader; "theme-what-style")
+}
+
+/// [`style_name_in`] in the current language.
+pub fn style_name() -> String {
+    style_name_in(crate::i18n::loader())
+}
 
 /// What Paste Theme applies: Style and Size, never the texts nor the ranges.
 pub fn paste_families() -> ThemeFamilies {
@@ -342,4 +369,73 @@ pub struct ApplyPreview {
     pub before: stokesforge_plot::PlotSpec,
     /// The graph with what the window shows applied.
     pub after: stokesforge_plot::PlotSpec,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::i18n::{build_loader, Language};
+
+    fn languages() -> Vec<Language> {
+        Language::ALL
+            .into_iter()
+            .filter(|language| *language != Language::PseudoEnglish)
+            .collect()
+    }
+
+    /// The comparison a script makes: words joined by `-`, `_` as `-`, case
+    /// ignored.
+    fn normal(text: &str) -> String {
+        text.split_whitespace()
+            .collect::<Vec<_>>()
+            .join("-")
+            .to_lowercase()
+            .replace('_', "-")
+    }
+
+    #[test]
+    fn every_family_and_the_style_box_have_a_name_in_both_catalogs() {
+        for language in languages() {
+            let loader = build_loader(language);
+            let mut names: Vec<String> = ThemeFamily::ALL
+                .into_iter()
+                .map(|family| family_name_in(&loader, family))
+                .collect();
+            names.push(style_name_in(&loader));
+            for name in names {
+                assert!(
+                    !name.is_empty() && !name.contains("theme-"),
+                    "{language:?}: {name:?}"
+                );
+            }
+        }
+    }
+
+    /// A name a script gives must designate one family: in a language no two
+    /// families share a name, none is another family's key, none is `style`
+    /// (unless it is the style name).
+    #[test]
+    fn the_family_names_do_not_collide_in_any_language() {
+        for language in languages() {
+            let loader = build_loader(language);
+            for a in ThemeFamily::ALL {
+                let name = normal(&family_name_in(&loader, a));
+                assert_ne!(name, "style", "{language:?} {a:?}");
+                for b in ThemeFamily::ALL {
+                    if a != b {
+                        assert_ne!(name, normal(&family_name_in(&loader, b)), "{language:?}");
+                        assert_ne!(name, b.key(), "{language:?} {a:?} is the key of {b:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_english_names_of_the_plot_crate_are_the_english_labels() {
+        let loader = build_loader(Language::English);
+        for family in ThemeFamily::ALL {
+            assert_eq!(family_name_in(&loader, family), family.english_name());
+        }
+    }
 }
