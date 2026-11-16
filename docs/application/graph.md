@@ -488,7 +488,7 @@ colour and axes colour, each behind its family, and nothing else. Applying to
 N graphs is `Action::ApplyTheme`, one `MacroKind::ApplyTheme` step
 (`docs/commands-and-history.md`).
 
-**Built-in themes (#544, S7 of #514; data part, the picker tiles come with #541)**.
+**Built-in themes (#544, S7 of #514; the picker tiles are #541)**.
 `stokesforge_app_state::builtin_themes` is the catalogue, in this fixed order
 (the index is `ThemeRef::Builtin`, the key is the stable identity in
 `user_themes.json`, the displayed name is the catalog key `plot-theme-<key>`):
@@ -510,10 +510,9 @@ none), so the bottom layer carries the points only. Every built-in is editable
 Names of user and project themes are never translated; a user theme cannot take
 the English name of a built-in. Order in the picker (`UserThemes::ranked`):
 Light and Dark **always first**, then every other theme by use count, ties in
-catalogue order, then creation order. The manual reference comes with the picker
-(#541).
+catalogue order, then creation order.
 
-**Theme specimens (#543, S6 of #514; the tiles come with the picker)**. A tile
+**Theme specimens (#543, S6 of #514; the tiles are drawn by the picker of #541)**. A tile
 shows what a theme looks like by drawing its **structure and style on reference
 data shipped with the application**: `stokesforge_app_state::theme_specimen`.
 The reference project (`reference_tree`) is built once, lazily and
@@ -531,6 +530,43 @@ series gets one curve; axis ranges are automatic; annotations and shapes are
 dropped. A colour-only theme (Light, Dark) is a fresh new graph in its colours
 with three Gaussians. The drawing is cached per theme and scaled whole by
 `stokesforge_render_egui::drawings` (`docs/rendering.md`).
+
+**Theme gestures and the Apply Theme window (#541, S4 of #514; tiles #543)**.
+Copy Theme puts the style of one graph on the application's **own** theme
+clipboard (`AppState::theme_clipboard`, never the system clipboard; Ctrl+C
+still copies the graph); Paste Theme gives its Style and Size families to the
+graphs among the targets in one undo step with no window (never the texts nor
+the axis ranges, `theme_window::paste_families`). The targets of the three
+right-click entries are graphs only: the right-clicked graph, or the graphs
+selected in the Project Manager; folder contents are not included
+(`AppState::graphs_among`). **Apply Theme…** opens a window whose state is
+`AppState::apply_theme_window` (`theme_window::ApplyThemeWindow`): targets,
+chosen theme (`ThemeSource`: the copied one or a `ThemeRef`), ticked families
+(Style = six parts with a mixed state, Size, Texts, Axis ranges; a new window
+ticks all but the ranges), « Add missing layers » (off) and the **hovered
+override** of the preview. Hover first: `shown_theme`, `shown_families` and
+`shown_add_missing` are what the preview draws, the choice changes only on a
+click. `AppState::apply_preview` is the first target before and after
+(`theme_apply::themed_spec`). Apply (`Action::ConfirmApplyTheme`) is the S1
+`apply_theme` (one `ApplyTheme` macro, one Ctrl+Z), counts the use of the theme
+(`record_theme_use`, so the ranking learns it) and closes; it is greyed with
+its reason while no family is ticked. **Save Theme As…** (`SaveThemeWindow`,
+`Action::SaveThemeAs`) keeps the style of a graph under a name in **Mine** (the
+user library of #539: not undoable, survives a restart) or in the **Project**
+(`SetProjectThemes` of #540: one undo step); a refused name says why in the
+footer and keeps the window open, and Mine is forced to Project while the
+themes file is read-only. Errors go through `errors::theme::error_message`.
+
+The **picker** (`app/theme_picker.rs`, one component, #542 reuses it) draws the
+rows Project then Mine, two columns by three rows per row group, the last cell
+of a full group being the drop-down More themes; the copied theme comes first,
+in italics; an edited built-in carries an accent dot. Each tile draws the
+specimen through ONE `ScaledDrawings<DrawKey>` held by `StokesForgeApp` (built at
+the first use; the large view of the hovered tile, about 480 pt, and the Apply
+Theme preview have their own keys so that the tile and its large view never
+rescale each other); `retain_listed` lets go of the drawings of themes that are
+no longer listed. The preview draws the real first target through the same set,
+at natural size scaled whole.
 
 **Color picker** (`crate::color_picker`): every color of the
 window is chosen with a swatch button (`color_field`/`color_button`)

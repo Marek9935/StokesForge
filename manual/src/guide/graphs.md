@@ -356,6 +356,40 @@ The **Color bar** section has:
 
 A value outside the range of a segment takes the color of the nearer end. Double-click the bar to open the Legend tab with the section unfolded. In a script, `pyst.color_bar(…)` does the same, with `length=` and `thickness=` for the size of the strip; the order of its `groups` list does not matter, the bar follows the graph.
 
+## Graph themes
+
+A **theme** is the look of a graph kept under a name: its background, fonts, axes, legend, curves, color bar, sizes and layout, never its data. You copy a theme from one graph to others, or keep it to use again.
+
+StokesForge comes with nine themes: **Light** and **Dark**, then **Publication**, **Publication Wide**, **Presentation**, **Fit + Residuals**, **Kinetics**, **Side by Side** and **Color Map**. Your own themes sit with them, and the themes of the open project are in their own row, **Project**. Your themes are in the row **Mine**.
+
+### Copy a theme to another graph
+
+1. Right-click the graph and choose **Copy Theme**. In the **Graph** menu it is **Graph ▸ Copy Theme**.
+2. Right-click the other graph and choose **Paste Theme**. It gives the copied theme's style and sizes to the graph and keeps its texts and axis ranges. One **Ctrl+Z** takes it back.
+
+You can also select several graphs in the Project Manager and right-click one of them: **Paste Theme** and **Apply Theme…** then act on all the selected graphs. Folders are skipped, and the graphs inside a folder are not included. **Copy Theme** works on one graph at a time, so it is greyed out when several are selected. **Ctrl+C** still copies the graph itself as an image.
+
+### Choose what to apply
+
+Choose **Apply Theme…** (right-click a graph, or **Graph ▸ Apply Theme…**). The window shows the themes as small tiles, each one a sample graph drawn with the theme's own layout and style. Rest the pointer on a tile to see it larger. Click a tile to choose it.
+
+Under **What to apply**, tick what the theme gives to the graphs:
+
+| Box | What it copies |
+|---|---|
+| **Style** | Background, title fonts, axes, legend, curves and color bar. Open the arrow to choose among these parts. A box with a dash means only some parts are ticked. |
+| **Size** | The sizes of the plot areas and the layout of the layers |
+| **Texts** | The titles, axis titles, legend text and color bar title |
+| **Axis ranges** | The axis limits. Off to start with, because the limits depend on the data |
+
+**Add missing layers** is off to start with. Tick it when a graph has fewer layers than the theme: empty layers are added so that the theme's layout fits.
+
+The right side previews the first selected graph with the theme applied. Rest the pointer on a tile or on a box to see what it would do before you click. Rest the pointer on the preview itself to see the graph as it is now (**Before**). Click **Apply** to apply the theme to all the selected graphs in one step. **Apply** is greyed out while no box is ticked.
+
+### Keep a theme
+
+Choose **Graph ▸ Save Theme As…**, type a name, and choose where to keep it: **Mine** (for every project on this computer, the default) or **Project** (in this project's file, so it travels with the project; **Ctrl+Z** takes it back). A name that is already used is refused.
+
 ## Titles and formulas
 
 The title of the graph, the title of a layer, the axis titles and the series names accept formulas. You write them in Typst markup. Text between dollar signs is math. Everything else is plain text.

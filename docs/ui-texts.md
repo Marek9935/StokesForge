@@ -95,6 +95,13 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Kinetics | Cinétique | Built-in graph theme of a group of curves on a gradient with a colour bar (#544) | — | O |
 | Side by Side | Côte à côte | Built-in graph theme of two equal layers in one row (#544) | — | O |
 | Color Map | Carte de couleurs | Built-in graph theme of gradient curves with a colour bar and no legend (#544) | — | O |
+| Copy Theme / Paste Theme | Copier le thème / Coller le thème | Right-click and Graph menu entries (#541, keys `action-copy-theme`, `action-paste-theme`): put the style of one graph on the app's own theme clipboard (never the system one; Ctrl+C still copies the graph), then give its Style and Size to the selected graphs, one undo step, no window. Copy greyed « Select a single graph », Paste greyed « Copy a theme first » | Copy Style, Copy Format, Format Painter | O |
+| Apply Theme… | Appliquer un thème… | Entry (right-click, Graph menu) that opens the Apply Theme window (#541, key `action-apply-theme`, window title `theme-apply-title`, verb « Apply »): a theme chosen among tiles, then « What to apply » boxes, with a preview | Theme Manager, Format Dialog | O |
+| Save Theme As… | Enregistrer le thème sous… | Graph menu entry (#541, key `action-save-theme-as`) that asks a name and where to keep the style of the graph: **Mine** (this computer, default) or **Project** (the `.stf`, undoable) | Export Theme, Save Template | O |
+| What to apply | Quoi appliquer | Heading of the four boxes of the Apply Theme window (#541): **Style** (Background, Title fonts, Axes, Legend, Curves, Color bar), **Size**, **Texts**, **Axis ranges**; plus **Add missing layers** (off). One notion = one word: « Size » is the same box in the window and in the help | Customize, Everything, Size and Page | #541 |
+| Project / Mine (theme rows) | Projet / Mes thèmes | The two row groups of the theme picker (#541): the themes saved in the open project, then the built-ins and the user's own themes. « Mine » is also the first target of Save Theme As… | Global, User, Local | #541 |
+| More themes | Autres thèmes | Last cell of a full row group of the picker (#541): a drop-down of the other themes, most used first | Others, More… | #541 |
+| Before / After (preview) | Avant / Après | Caption of the preview of the Apply Theme window (#541): After is the first target with the theme applied, Before (pointer on the preview) is the graph as it is | Old / New, Original | #541 |
 | Shortcut | Raccourci | Keys that run a command | Raccourci clavier | G |
 
 ### 2.3 Workbook and grid

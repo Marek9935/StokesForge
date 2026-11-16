@@ -58,6 +58,7 @@ subfolders included, and look for their functions by name (#116): see
 | `app/menus.rs` | menu bar (`menu_bar` calls `file_menu`, `edit_menu`, `workbook_menu`, `graph_menu`, `view_menu`, `window_menu`) and status bar (`status_bar`, `status_line`) |
 | `app/status_history.rs` | read-only window of the last 50 status bar messages, timestamped in UTC (#230) |
 | `app/analysis_menu.rs` | Analysis menu (#181): `analysis_menu_contents` (menu bar), `analysis_open_menu` / `analysis_entry` (right-click: `Analysis ▸` submenu, one entry per category, #248), `recent_entries` (last three analyses, #249; state in `analysis_recent.rs`), `calculation_section` (Edit / Recalculate / Detach / Delete on a calculated column) |
+| `app/apply_theme_window.rs`, `app/save_theme_window.rs`, `app/theme_picker.rs`, `app/theme_menu.rs` | graph themes (#541, #543): the Apply Theme window, the Save Theme As window, the shared tile picker with its cached specimen drawings, and the theme entries of the menus |
 | `app/transpose_ui.rs` | linked transposed sheet (#253): the band at the top of the grid (origin, state, Recalculate / Relink) and the confirmation before overwriting edited values |
 | `app/stale_export.rs` | confirmation of an export or a figure copy that shows out-of-date series (#198) |
 | `app/analysis_dialog.rs` | analysis window (`modal_dialog_with`, two columns: form + preview) and confirmation of the deletion of a calculation (`calculation_delete_window`) |

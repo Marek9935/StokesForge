@@ -28,6 +28,8 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | All checked | Tout est vérifié |
 | Analysis | Analyse |
 | Answers remembered | Réponses mémorisées |
+| Apply Theme | Appliquer un thème |
+| Apply Theme… | Appliquer un thème… |
 | Axes | Axes |
 | Axes… | Axes… |
 | Axis title | Titre de l'axe |
@@ -42,6 +44,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Columns | Colonnes |
 | Copy | Copier |
 | Copy Graph | Copier le graphique |
+| Copy Theme | Copier le thème |
 | Copy with Header | Copier avec l'en-tête |
 | Cut | Couper |
 | Data Manipulation | Manipulation de données |
@@ -124,6 +127,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Page Layout Mode | Mode mise en page |
 | Paste | Coller |
 | Paste in Place | Coller à l'identique |
+| Paste Theme | Coller le thème |
 | Paste Transposed | Coller transposé |
 | Peaks and Deconvolution | Pics et déconvolution |
 | Peaks and Deconvolution… | Pics et déconvolution… |
@@ -171,6 +175,8 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Save as Template | Enregistrer comme modèle |
 | Save As… | Enregistrer sous… |
 | Save Project | Enregistrer le projet |
+| Save Theme As | Enregistrer le thème sous |
+| Save Theme As… | Enregistrer le thème sous… |
 | Select All | Tout sélectionner |
 | Select Members | Sélectionner les membres |
 | Selection | Sélection |

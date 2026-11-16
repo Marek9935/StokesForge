@@ -635,6 +635,10 @@ impl StokesForgeApp {
                     }
                 }
             });
+            // Graph themes (#541): copy, paste, apply, save.
+            sections.section(ui, true, |ui| {
+                super::theme_menu::theme_menu_entries(ui, &[graph], true, actions);
+            });
             sections.section(ui, true, |ui| {
                 if ui
                     .button(tr!("action-reset-zoom"))

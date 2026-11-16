@@ -143,6 +143,7 @@ mod analysis_forms;
 mod analysis_handles;
 mod analysis_menu;
 mod analysis_preview;
+mod apply_theme_window;
 mod busy;
 mod color_bar_settings;
 mod column_formula_help;
@@ -200,6 +201,7 @@ mod project_manager;
 mod recovery;
 mod reorder_list;
 mod results_pane;
+mod save_theme_window;
 mod script_console;
 mod server;
 mod server_stats;
@@ -211,6 +213,8 @@ mod tab;
 pub(crate) mod tab_strip;
 #[cfg(test)]
 mod test_support;
+mod theme_menu;
+mod theme_picker;
 mod transpose_ui;
 mod viewport_ghosts;
 mod window_band;
@@ -368,6 +372,10 @@ pub struct StokesForgeApp {
     /// (`stokesforge_render_egui::GraphView`); with several graphs displayable
     /// at once, a single view is no longer enough.
     graph_views: HashMap<NodeId, GraphView>,
+    /// The cached drawings of the theme tiles and of the Apply Theme preview
+    /// (#543), built at the first use and held once for the application: its
+    /// text measurer and fonts are the ones of a graph window.
+    theme_drawings: Option<theme_picker::Drawings>,
     /// Tabs (`Graph` or `Book`, B5 — `retours-2026-09-23-bugs.md`)
     /// whose content alone is collapsed. This presentation state stays local
     /// to the application: it modifies neither the node, nor its saved
@@ -566,6 +574,7 @@ impl StokesForgeApp {
             next_cascade: restored.next_cascade,
             focus_next: None,
             graph_views: HashMap::new(),
+            theme_drawings: None,
             collapsed_tabs: restored.collapsed_tabs,
             maximized_tab: restored.maximized_tab,
             layout_entries: HashMap::new(),
@@ -1180,6 +1189,7 @@ impl eframe::App for StokesForgeApp {
         let (metadata, x_prime) = self.state.workbook_header_defaults();
         grid::publish_header_row_defaults(&ctx, metadata, x_prime);
         analysis_menu::publish_last_presets(&ctx, &self.state);
+        theme_menu::publish(&ctx, &self.state);
         graph_targets::publish(&ctx, &self.floating_tabs, self.detached_tab_list().iter());
         let history = self.collect_shortcuts_deferring_history(&ctx, &mut actions);
         self.begin_layout_frame(&ctx, active_graph(active_tab_kind(active_tab)));
@@ -1522,6 +1532,13 @@ impl StokesForgeApp {
         column_use_window(ctx, &self.state, actions);
         full_copy_window(ctx, &self.state, actions);
         recovery_window(ctx, &self.state, actions);
+        apply_theme_window::apply_theme_window(
+            ctx,
+            &mut self.state,
+            &mut self.theme_drawings,
+            actions,
+        );
+        save_theme_window::save_theme_window(ctx, &mut self.state, actions);
         dialogs::sync_dialogs(ctx, &self.state, actions);
     }
 

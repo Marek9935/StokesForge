@@ -57,7 +57,7 @@ Source: `render-egui/lib.rs` (navigation, objects), `render-egui/shape_tools.rs`
 | Ctrl + drag, or middle click + drag | plot area, any tool, including over a text, a title, a shape, the legend or an analysis handle | moves the view (pan); no zoom rectangle, no shape drawn, no object moved; outside the graph frame: — |
 | Ctrl + drag, or middle click + drag | an axis | moves only the scale of this axis (same gesture as the analysis preview, #318) |
 | Ctrl + click | plot area, Text or shape tool | — (no text placed, no shape, no return to the Pointer) |
-| Right-click | any object or the area | selects the target and opens its menu |
+| Right-click | any object or the area | selects the target and opens its menu; on the background it carries Copy Theme · Paste Theme · Apply Theme… (#541) |
 | Shift + wheel | — | — |
 
 ### The graph in the Page Layout Mode (#426)
@@ -171,7 +171,8 @@ Sources: `app/object_manager_ui.rs`, `app/list_row.rs`, `app/reorder_list.rs`,
 | Drag, release below the last row | PM | drops inside the root (#425), order unchanged |
 | Right-click | empty strip under the last row (always at least two rows tall) | root menu: Add Folder · Paste ─ Sort (#425) (the selection is cleared first) |
 | File ▸ New ▸ Add Workbook / Add Graph, File bar | PM selection | creates in the selected folder, or in the folder of the selected window; the root for none or several rows; that folder expands (#425) |
-| Right-click | row | if outside the selection, replaces it; menu of the object (a single menu, `menus.md`) |
+| Right-click | row | if outside the selection, replaces it; menu of the object (a single menu, `menus.md`); a graph row adds Copy Theme · Paste Theme · Apply Theme… on the graphs of the selection (#541) |
+| Hover, click | tile or box of the Apply Theme window | resting on a tile or a box previews it; a click chooses (#541); resting on a tile also shows its specimen large; the arrows move the choice from tile to tile; resting on the preview shows Before |
 | Right-click › Add Folder | folder (PM) | creates a folder "FolderN" in this folder, expands it and puts the name of the new folder in in-place editing (creation and name = two history entries) |
 | Right-click | OM background | panel settings |
 | Wheel, Ctrl + wheel | — | scrolls the list; Ctrl + wheel is not taken |

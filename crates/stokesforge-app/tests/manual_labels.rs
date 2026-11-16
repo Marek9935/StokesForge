@@ -64,6 +64,7 @@ const MENU_FUNCTIONS: &[&str] = &[
     "layout_menu",
     "layout_menu_contents",
     "graph_properties_menu",
+    "theme_menu_entries",
     "view_menu",
     "object_manager_settings_contents",
     "window_menu",
