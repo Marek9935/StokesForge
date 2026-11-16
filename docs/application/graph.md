@@ -453,11 +453,11 @@ series name left empty takes that of the column, displayed as is.
 (`plot-general-text-color`, `plot-general-axes-color`; the background is the row
 above them; they were on the Theme tab, form 514-4 V5) are laid out with the
 other rows of the General form (`global_color_rows` in `plot_settings.rs`, no
-collapsible section, S-L5). A global color is **written into all the local
-fields** (graph title, title and scale of each axis of each panel, free texts;
-`PlotSpec::set_text_color`/`set_axes_color`): the last setting overwrites what
-had been set one by one, and nothing more is remembered (the `.stf` format does
-not change). Painting writes nothing: a value is written only when the user
+collapsible section, S-L5). A global color is **written into the graph-level
+field only** (`PlotSpec::text_color` / `axes_color`, through
+`set_text_color`/`set_axes_color`, #550): a part with its own colour keeps it,
+and the parts left on automatic follow the global colour (resolution order in
+`docs/rendering.md`). Painting writes nothing: a value is written only when the user
 changed it. Everything stays in the draft of the window: a single history step
 on confirmation. `stokesforge_plot::THEMES` (Light and Dark) now only holds the
 colors of the two first built-in themes (`builtin_themes`); the old two-button

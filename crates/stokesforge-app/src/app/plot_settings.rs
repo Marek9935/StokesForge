@@ -622,12 +622,11 @@ fn dialog_layout(
 }
 
 /// The global colors of the General tab (#542, form 514-4 V5; they were on the
-/// Theme tab): the color of all texts and the color of all axes. Each is
-/// written into every local field (graph title, title and scale of each axis of
-/// each panel, free texts), so the last one set overwrites what was set one by
-/// one, and nothing more is remembered. Painting writes nothing: a value is
-/// written only when the user changed it, even if the local colors differ from
-/// what the row shows. The background is the row above it.
+/// Theme tab): the color of all texts and the color of all axes. Since #550
+/// each row reads and writes **only the graph-level field** (`text_color`,
+/// `axes_color`): a part with its own color keeps it, the parts left on
+/// automatic follow the global one. Painting writes nothing: a value is written
+/// only when the user changed it. The background is the row above it.
 fn global_color_rows(form: &mut Form<'_>, spec: &mut PlotSpec, env: &mut PickerEnv) -> bool {
     let mut commit = false;
     let mut text = spec.theme_text_color().to_string();
@@ -6487,8 +6486,9 @@ mod tests {
     /// #11, #542: the General tab shows the global colors (all texts, all
     /// axes) without changing anything as long as nothing is done, even when
     /// the local colors differ from those it shows (the title of one axis, the
-    /// scale of another). Witness: a global color written by the row reaches
-    /// every local field.
+    /// scale of another). Since #550 what the rows write is the graph-level
+    /// field only. Witness: a global color written by the row reaches a local
+    /// field.
     #[test]
     fn the_general_tab_draws_the_global_colors_without_changing_anything() {
         let mut spec = PlotSpec::empty("Figure").with_panels(PanelSpec::at(0, 0));
@@ -6516,11 +6516,16 @@ mod tests {
         ] {
             assert!(is_painted(&painted, &label), "{label:?} missing");
         }
-        // What the rows write is the whole graph at once, in one step.
+        // What the rows write (#550): the graph-level fields only.
         spec.set_text_color("#112233");
         spec.set_axes_color("#445566");
-        assert_eq!(first_panel(&mut spec).left.title_color, "#112233");
-        assert_eq!(first_panel(&mut spec).left.tick_color, "#445566");
+        assert_eq!(
+            (spec.text_color.as_str(), spec.axes_color.as_str()),
+            ("#112233", "#445566")
+        );
+        assert_eq!(first_panel(&mut spec).left.title_color, "#aa0000");
+        assert_eq!(first_panel(&mut spec).left.tick_color, "#00aa00");
+        assert_eq!(spec.title_color, "");
     }
 
     // -- The formula reminder -------------------------------------------------

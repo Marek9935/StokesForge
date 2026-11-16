@@ -530,9 +530,11 @@ impl PlotSpec {
         if families.contains(ThemeFamily::TitleFonts) {
             self.title_font = style.title_font.clone();
             self.title_color = style.title_color.clone();
+            self.text_color = style.text_color.clone();
             self.title_visible = style.title_visible;
         }
         if families.contains(ThemeFamily::Axes) {
+            self.axes_color = style.axes_color.clone();
             self.decimal_comma = style.decimal_comma;
         }
         if families.contains(ThemeFamily::SizeAndPage) {
@@ -555,9 +557,14 @@ impl PlotSpec {
         }
         if families.contains(ThemeFamily::TitleFonts) {
             self.set_text_color(theme.theme_text_color());
+            // #550: pending decision G2 (should Light and Dark leave the parts
+            // with their own colour alone?): today's effect is kept.
+            self.clear_local_text_colors();
         }
         if families.contains(ThemeFamily::Axes) {
             self.set_axes_color(theme.theme_axes_color());
+            // #550: pending decision G2, as above.
+            self.clear_local_axes_colors();
         }
     }
 
@@ -635,6 +642,8 @@ fn every_field_has_a_family(
         panels: _,          // per layer, below
         background: _,      // Background
         title_color: _,     // TitleFonts
+        text_color: _,      // TitleFonts (#550: graph-level text colour)
+        axes_color: _,      // Axes (#550: graph-level axes colour)
         title_anchor: _,    // never: dragged position
         title_font: _,      // TitleFonts
         stale_warning: _,   // never: state of the data
@@ -840,6 +849,28 @@ mod tests {
         let mut expected = before;
         expected.background = "#222222".into();
         assert_eq!(target, expected);
+    }
+
+    #[test]
+    fn the_graph_level_colors_travel_with_their_family() {
+        let mut source = styled();
+        source.text_color = "#123456".into();
+        source.axes_color = "#654321".into();
+        let theme = theme_of(&source);
+        let mut target = graph(&[&["#aaaaaa"]]);
+        target.text_color = "#aaaaaa".into();
+        target.axes_color = "#bbbbbb".into();
+        // Only the Title fonts family: the text colour moves, the axes one stays.
+        target.apply_theme_families(&theme, ThemeFamilies::only(ThemeFamily::TitleFonts));
+        assert_eq!(target.text_color, "#123456");
+        assert_eq!(target.axes_color, "#bbbbbb");
+        // Only the Axes family: the reverse.
+        let mut target = graph(&[&["#aaaaaa"]]);
+        target.text_color = "#aaaaaa".into();
+        target.axes_color = "#bbbbbb".into();
+        target.apply_theme_families(&theme, ThemeFamilies::only(ThemeFamily::Axes));
+        assert_eq!(target.text_color, "#aaaaaa");
+        assert_eq!(target.axes_color, "#654321");
     }
 
     #[test]

@@ -1,12 +1,12 @@
-//! Themes: set the global colors of a graph in one gesture (issue #11).
+//! Themes: set the global colors of a graph in one gesture (issue #11, #550).
 //!
-//! A theme is **not** a field of the [`PlotSpec`]: applying a theme or a
-//! global color writes the same color into all the local fields
-//! (graph title, title and scale of each axis of each panel, background).
-//! The last setting therefore overwrites what was set one by one, and nothing
-//! is remembered beyond the fields themselves — no change to the `.stf`
-//! format. An empty color stays "automatic": rendering resolves it with
-//! `stokesforge_render::color::auto_ink` (white on a dark background).
+//! The global text color and axes color are **graph-level fields** of the
+//! [`PlotSpec`] (`text_color`, `axes_color`). Setting one writes only that
+//! field, never a local one: a part with its own color keeps it, and the parts
+//! left on automatic follow the global color. Rendering resolves each part:
+//! its own color if set, else the graph-level color if set and readable, else
+//! the automatic ink (`stokesforge_render::color::auto_ink`, white on a dark
+//! background). An empty color is "automatic" everywhere.
 
 use crate::{AxisSide, PlotSpec};
 
@@ -51,47 +51,51 @@ const SIDES: [AxisSide; 4] = [
 ];
 
 impl PlotSpec {
-    /// Global text color as the General tab shows it: that of the bottom axis
-    /// title of the first panel, like [`PlotSpec::theme_axes_color`] reads the
-    /// bottom scale. Not the graph title: the General tab has its own « Title
-    /// color » row, and reading the title made the two rows move together
-    /// (#542 trial). Writing it still sets every text, title included.
+    /// Global text color as the General tab shows it: the graph-level field.
+    /// It is not the graph title color: the General tab has its own « Title
+    /// color » row.
     pub fn theme_text_color(&self) -> &str {
-        self.panels
-            .first()
-            .map_or(self.title_color.as_str(), |panel| {
-                panel.bottom.title_color.as_str()
-            })
+        &self.text_color
     }
 
-    /// Global axes color as the « Thème » tab shows it: that
-    /// of the scale of the bottom axis of the first panel.
+    /// Global axes color as the General tab shows it: the graph-level field.
     pub fn theme_axes_color(&self) -> &str {
-        self.panels
-            .first()
-            .map_or("", |panel| panel.bottom.tick_color.as_str())
+        &self.axes_color
     }
 
-    /// Writes `color` as the text color: graph title, title of
-    /// each axis and free texts (issue #35) of each panel.
+    /// Sets the global text color (graph-level field only, #550): the graph
+    /// title, axis titles and free texts left on automatic follow it; a part
+    /// with its own color keeps it.
     pub fn set_text_color(&mut self, color: &str) {
-        self.title_color = color.to_string();
+        self.text_color = color.to_string();
+    }
+
+    /// Sets the global axes color (graph-level field only, #550): the scale
+    /// (line, ticks, labels, grid) of every axis left on automatic follows it.
+    pub fn set_axes_color(&mut self, color: &str) {
+        self.axes_color = color.to_string();
+    }
+
+    /// Empties every local text color: graph title, title of each axis, free
+    /// texts. Used by the colour-only themes (pending decision G2, #550).
+    pub(crate) fn clear_local_text_colors(&mut self) {
+        self.title_color.clear();
         for panel in self.panels.iter_mut() {
             for side in SIDES {
-                panel.axis_mut(side).title_color = color.to_string();
+                panel.axis_mut(side).title_color.clear();
             }
             for annotation in &mut panel.annotations {
-                annotation.color = color.to_string();
+                annotation.color.clear();
             }
         }
     }
 
-    /// Writes `color` as the axes color: scale (line, ticks,
-    /// labels, grid) of each axis of each panel.
-    pub fn set_axes_color(&mut self, color: &str) {
+    /// Empties the scale color of every axis of every panel (see
+    /// [`PlotSpec::clear_local_text_colors`]).
+    pub(crate) fn clear_local_axes_colors(&mut self) {
         for panel in self.panels.iter_mut() {
             for side in SIDES {
-                panel.axis_mut(side).tick_color = color.to_string();
+                panel.axis_mut(side).tick_color.clear();
             }
         }
     }
@@ -101,6 +105,10 @@ impl PlotSpec {
         self.background = theme.background.to_string();
         self.set_text_color(theme.text);
         self.set_axes_color(theme.axes);
+        // #550: pending decision G2 (do Light and Dark clear the local colors?):
+        // today's effect is kept.
+        self.clear_local_text_colors();
+        self.clear_local_axes_colors();
     }
 }
 
@@ -124,19 +132,33 @@ mod tests {
     }
 
     #[test]
-    fn a_global_color_overwrites_local_settings_everywhere() {
+    fn a_global_color_leaves_the_local_colors_alone() {
         let mut spec = two_panel_spec();
-        spec.panels.get_mut(1).unwrap().left.title_color = "#ff0000".to_string();
-        spec.panels.get_mut(0).unwrap().bottom.tick_color = "#00ff00".to_string();
+        spec.panels.get_mut(0).unwrap().left.title_color = "#ff0000".to_string();
+        spec.panels.get_mut(1).unwrap().bottom.tick_color = "#00ff00".to_string();
         spec.set_text_color("#123456");
         spec.set_axes_color("#654321");
-        assert_eq!(spec.title_color, "#123456");
+        assert_eq!(spec.text_color, "#123456");
+        assert_eq!(spec.axes_color, "#654321");
         assert_eq!(spec.theme_text_color(), "#123456");
         assert_eq!(spec.theme_axes_color(), "#654321");
-        for panel in spec.panels.as_slice() {
+        assert_eq!(spec.panels.as_slice()[0].left.title_color, "#ff0000");
+        assert_eq!(spec.panels.as_slice()[1].bottom.tick_color, "#00ff00");
+        assert_eq!(spec.title_color, "");
+        for (i, panel) in spec.panels.as_slice().iter().enumerate() {
             for side in SIDES {
-                assert_eq!(panel.axis(side).title_color, "#123456");
-                assert_eq!(panel.axis(side).tick_color, "#654321");
+                let title = if (i, side) == (0, AxisSide::Left) {
+                    "#ff0000"
+                } else {
+                    ""
+                };
+                let tick = if (i, side) == (1, AxisSide::Bottom) {
+                    "#00ff00"
+                } else {
+                    ""
+                };
+                assert_eq!(panel.axis(side).title_color, title);
+                assert_eq!(panel.axis(side).tick_color, tick);
             }
         }
     }
@@ -145,6 +167,7 @@ mod tests {
     fn a_theme_sets_background_text_and_axes() {
         let mut spec = two_panel_spec();
         spec.set_text_color("#ff0000");
+        spec.panels.get_mut(1).unwrap().right.title_color = "#00ff00".to_string();
         spec.apply_theme(&THEMES[1]);
         assert_eq!(spec.background, "#1e1e1e");
         assert_eq!(spec.theme_text_color(), "", "automatic text");

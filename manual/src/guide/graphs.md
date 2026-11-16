@@ -127,7 +127,7 @@ While the window is open, your changes show on the graph at once. Click **OK** t
 
 A new graph has no background color: the figure is transparent when exported, and white on screen. Choose a dark background and the automatic text turns white.
 
-**Text color** and **Axes color** set a color for every title, axis, tick and gridline of the graph at once. They replace the colors you set one by one in the other tabs, and the last one you set wins. Nothing else is remembered: set a color in another tab afterwards and only that text changes.
+**Text color** and **Axes color** set a color for the whole graph, but only for the parts still on automatic color: the graph title, the axis titles and the free texts for **Text color**, the axis line, ticks, numbers and gridlines for **Axes color**. A part whose color you set yourself in another tab keeps it, and changing the global color later recolors again every part left on automatic.
 
 ### Graph size
 

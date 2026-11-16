@@ -135,3 +135,92 @@ fn a_typst_title_follows_title_color() {
         "a transparent title produced a Typst fragment"
     );
 }
+
+// -- Graph-level colours (#550) ---------------------------------------------
+
+/// A light graph with one kind of text only, in the graph-level colour
+/// `#123456` (read in the uppercased export).
+fn only_title() -> PlotSpec {
+    let mut spec = graph("#ffffff");
+    spec.panels.get_mut(0).unwrap().bottom.label.clear();
+    spec.panels.get_mut(0).unwrap().left.label.clear();
+    spec.text_color = "#123456".to_owned();
+    spec
+}
+
+#[test]
+fn the_graph_text_color_draws_the_graph_title_left_on_automatic() {
+    let document = export_with_typst(&only_title()).to_uppercase();
+    assert!(typst_fragment(&document).contains("#123456"));
+}
+
+#[test]
+fn the_graph_text_color_draws_the_axis_titles_left_on_automatic() {
+    let mut spec = only_title();
+    spec.title.clear();
+    spec.panels.get_mut(0).unwrap().bottom.label = "Time".to_owned();
+    spec.panels.get_mut(0).unwrap().left.label = "Signal".to_owned();
+    let document = export_with_typst(&spec).to_uppercase();
+    assert!(document.contains("#123456"), "axis titles not recoloured");
+    spec.text_color.clear();
+    let document = export_with_typst(&spec).to_uppercase();
+    assert!(!document.contains("#123456"));
+}
+
+#[test]
+fn the_graph_text_color_draws_the_free_texts_left_on_automatic() {
+    let mut spec = only_title();
+    spec.title.clear();
+    spec.panels
+        .get_mut(0)
+        .unwrap()
+        .annotations
+        .push(stokesforge_plot::AnnotationSpec::new("Note", 0.5, 0.5));
+    let document = export_with_typst(&spec).to_uppercase();
+    assert!(document.contains("#123456"), "free text not recoloured");
+    spec.panels.get_mut(0).unwrap().annotations.clear();
+    let document = export_with_typst(&spec).to_uppercase();
+    assert!(!document.contains("#123456"));
+}
+
+#[test]
+fn the_graph_axes_color_draws_the_ticks_and_labels_left_on_automatic() {
+    let mut spec = graph("#ffffff");
+    spec.axes_color = "#654321".to_owned();
+    let document = export(&spec).to_uppercase();
+    assert!(document.contains("#654321"), "scales not recoloured");
+    spec.axes_color.clear();
+    assert!(!export(&spec).to_uppercase().contains("#654321"));
+}
+
+#[test]
+fn a_local_color_beats_the_graph_color_and_the_rest_follows_it() {
+    let mut spec = graph("#ffffff");
+    spec.text_color = "#123456".to_owned();
+    spec.axes_color = "#654321".to_owned();
+    spec.panels.get_mut(0).unwrap().left.title_color = "#ff0000".to_owned();
+    spec.panels.get_mut(0).unwrap().bottom.tick_color = "#00ff00".to_owned();
+    let document = export_with_typst(&spec).to_uppercase();
+    for color in ["#FF0000", "#00FF00", "#123456", "#654321"] {
+        assert!(document.contains(color), "{color} missing");
+    }
+}
+
+#[test]
+fn an_unreadable_graph_color_falls_back_to_the_automatic_ink() {
+    let mut spec = graph("#ffffff");
+    spec.text_color = "#zz".to_owned();
+    spec.axes_color = "nope".to_owned();
+    let document = export_with_typst(&spec).to_uppercase();
+    assert!(document.contains("#202020"), "automatic ink expected");
+    assert!(!document.contains("#ZZ"));
+}
+
+#[test]
+fn a_graph_color_applies_on_a_layer_with_a_dark_background() {
+    let mut spec = graph("#ffffff");
+    spec.panels.get_mut(0).unwrap().layer_background = "#101820".to_owned();
+    spec.axes_color = "#654321".to_owned();
+    let document = export(&spec).to_uppercase();
+    assert!(document.contains("#654321"));
+}
