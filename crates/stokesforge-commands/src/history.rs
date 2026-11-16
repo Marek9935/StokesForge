@@ -1240,7 +1240,6 @@ impl History {
             | Command::EditPlotSpec { .. }
             | Command::SetSavedColors { .. }
             | Command::SetProjectThemes { .. }
-            | Command::SetProjectThemes { .. }
             | Command::SetFolderOrder { .. } => {
                 unreachable!("apply_structural called with a data command")
             }
@@ -1862,7 +1861,6 @@ fn entry_has_no_effect(entry: &Entry) -> bool {
             | DataDelta::ColumnMeta { .. }
             | DataDelta::PlotSpec { .. }
             | DataDelta::SavedColors { .. }
-            | DataDelta::ProjectThemes { .. }
             | DataDelta::ProjectThemes { .. }
             | DataDelta::FolderOrder { .. } => false,
         },

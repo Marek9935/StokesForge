@@ -1560,6 +1560,29 @@ impl Default for Project {
     }
 }
 
+/// The checks of [`Project::set_project_themes`].
+fn check_theme_list(themes: &[GraphTheme]) -> CoreResult<()> {
+    if themes.len() > stokesforge_plot::MAX_THEMES {
+        return Err(CoreError::Structure(format!(
+            "more than {} themes",
+            stokesforge_plot::MAX_THEMES
+        )));
+    }
+    for (i, theme) in themes.iter().enumerate() {
+        let name = theme.name.trim();
+        if name.is_empty() || name.chars().count() > stokesforge_plot::MAX_THEME_NAME_CHARS {
+            return Err(CoreError::InvalidName(theme.name.clone()));
+        }
+        if themes[..i]
+            .iter()
+            .any(|other| stokesforge_plot::same_theme_name(&other.name, name))
+        {
+            return Err(CoreError::DuplicateName(theme.name.clone()));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1974,27 +1997,4 @@ mod tests {
             reloaded.next_id_hint()
         );
     }
-}
-
-/// The checks of [`Project::set_project_themes`].
-fn check_theme_list(themes: &[GraphTheme]) -> CoreResult<()> {
-    if themes.len() > stokesforge_plot::MAX_THEMES {
-        return Err(CoreError::Structure(format!(
-            "more than {} themes",
-            stokesforge_plot::MAX_THEMES
-        )));
-    }
-    for (i, theme) in themes.iter().enumerate() {
-        let name = theme.name.trim();
-        if name.is_empty() || name.chars().count() > stokesforge_plot::MAX_THEME_NAME_CHARS {
-            return Err(CoreError::InvalidName(theme.name.clone()));
-        }
-        if themes[..i]
-            .iter()
-            .any(|other| stokesforge_plot::same_theme_name(&other.name, name))
-        {
-            return Err(CoreError::DuplicateName(theme.name.clone()));
-        }
-    }
-    Ok(())
 }

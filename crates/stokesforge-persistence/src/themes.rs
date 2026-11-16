@@ -154,7 +154,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stokesforge_plot::{PlotSpec, THEMES};
+    use stokesforge_plot::{PlotSpec, MAX_THEMES, THEMES};
 
     fn sample(name: &str) -> GraphTheme {
         let mut spec = PlotSpec::empty("T");
