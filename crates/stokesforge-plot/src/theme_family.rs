@@ -214,6 +214,29 @@ pub fn same_theme_name(a: &str, b: &str) -> bool {
     a.trim().to_lowercase() == b.trim().to_lowercase()
 }
 
+/// A list of themes as a store keeps it: nameless ones dropped, names trimmed
+/// and cut at [`MAX_THEME_NAME_CHARS`], a later duplicate name dropped (case
+/// ignored), the list cut at [`MAX_THEMES`] (the first kept).
+pub fn bounded_themes(themes: Vec<GraphTheme>) -> Vec<GraphTheme> {
+    let mut out: Vec<GraphTheme> = Vec::new();
+    for mut theme in themes {
+        theme.name = theme
+            .name
+            .trim()
+            .chars()
+            .take(MAX_THEME_NAME_CHARS)
+            .collect();
+        if theme.name.is_empty() || out.iter().any(|t| same_theme_name(&t.name, &theme.name)) {
+            continue;
+        }
+        out.push(theme);
+        if out.len() == MAX_THEMES {
+            break;
+        }
+    }
+    out
+}
+
 /// A named theme: the style of a whole graph, kept as a [`PlotSpec`] with no
 /// data in it.
 #[derive(Debug, Clone, PartialEq)]

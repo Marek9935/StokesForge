@@ -1221,6 +1221,41 @@ pub enum Action {
         /// the theme's count; off, only its existing layers are styled.
         add_missing_layers: bool,
     },
+    /// Saves the style of `graph` as a new theme of the project (#540): one
+    /// undo step ([`Command::SetProjectThemes`]). The data is stripped
+    /// ([`stokesforge_plot::GraphTheme::capture`]). A name already used in the
+    /// project (case ignored) or an empty one is refused with a message and
+    /// nothing changes.
+    AddProjectTheme {
+        /// The graph whose style is captured.
+        graph: NodeId,
+        /// Name of the theme.
+        name: String,
+    },
+    /// Renames the project theme `name` to `new_name` (#540), keeping its
+    /// place. Refused like [`Action::AddProjectTheme`]; renaming a theme to
+    /// the same name with another case is allowed.
+    RenameProjectTheme {
+        /// Current name (case ignored).
+        name: String,
+        /// New name.
+        new_name: String,
+    },
+    /// Deletes the project theme `name` (#540). Nothing happens when there is
+    /// none.
+    DeleteProjectTheme {
+        /// Name of the theme (case ignored).
+        name: String,
+    },
+    /// Replaces the style of the project theme `name` with the one captured
+    /// from `graph` (#540), keeping its name and its place. Nothing happens
+    /// when there is no such theme.
+    OverwriteProjectTheme {
+        /// Name of the theme (case ignored).
+        name: String,
+        /// The graph whose style is captured.
+        graph: NodeId,
+    },
     /// Opens (or brings to the wanted tab) the properties window of the
     /// graph `graph` — right-click on a graph component, or the
     /// "Graph" menu. `axis` chooses the axis shown by the "Axes" tab
@@ -6779,6 +6814,44 @@ impl AppState {
             }
             Action::SetPlotSpec { graph, spec } => {
                 self.execute(Command::SetPlotSpec { graph, spec })
+            }
+            Action::AddProjectTheme { graph, name } => {
+                if let Some(spec) = self.plot_spec(graph) {
+                    let mut themes = self.snapshot.tree.project_themes().to_vec();
+                    themes.push(stokesforge_plot::GraphTheme::capture(name, &spec));
+                    self.execute(Command::SetProjectThemes { themes });
+                }
+            }
+            Action::RenameProjectTheme { name, new_name } => {
+                let mut themes = self.snapshot.tree.project_themes().to_vec();
+                if let Some(theme) = themes
+                    .iter_mut()
+                    .find(|t| stokesforge_plot::same_theme_name(&t.name, &name))
+                {
+                    theme.name = new_name;
+                    self.execute(Command::SetProjectThemes { themes });
+                }
+            }
+            Action::DeleteProjectTheme { name } => {
+                let mut themes = self.snapshot.tree.project_themes().to_vec();
+                let before = themes.len();
+                themes.retain(|t| !stokesforge_plot::same_theme_name(&t.name, &name));
+                if themes.len() != before {
+                    self.execute(Command::SetProjectThemes { themes });
+                }
+            }
+            Action::OverwriteProjectTheme { name, graph } => {
+                let Some(spec) = self.plot_spec(graph) else {
+                    return;
+                };
+                let mut themes = self.snapshot.tree.project_themes().to_vec();
+                if let Some(theme) = themes
+                    .iter_mut()
+                    .find(|t| stokesforge_plot::same_theme_name(&t.name, &name))
+                {
+                    *theme = stokesforge_plot::GraphTheme::capture(theme.name.clone(), &spec);
+                    self.execute(Command::SetProjectThemes { themes });
+                }
             }
             Action::ApplyTheme {
                 theme,

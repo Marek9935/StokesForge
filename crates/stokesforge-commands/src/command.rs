@@ -35,7 +35,7 @@ use stokesforge_core::{
     CalculationDraft, Column, ColumnMeta, ColumnType, CopyInsertion, NodeCopy, NodeId,
     RawSheetMark, Tree, ValueBlock, WindowMeta,
 };
-use stokesforge_plot::{PlotSpec, SavedColors};
+use stokesforge_plot::{GraphTheme, PlotSpec, SavedColors};
 
 use crate::label::{ColumnRef, HistoryLabel};
 
@@ -396,6 +396,14 @@ pub enum Command {
         /// New saved colors.
         colors: SavedColors,
     },
+    /// Replaces the graph themes saved in the project, as a whole (adding,
+    /// renaming, deleting or overwriting one theme is one such replacement,
+    /// #540). Refused, nothing written, on an empty or too long name, a name
+    /// taken twice (case ignored) or too many themes. Data, not structure.
+    SetProjectThemes {
+        /// The new list, in order.
+        themes: Vec<GraphTheme>,
+    },
     /// Puts a folder in manual order (`manual: true`, the Project Manager
     /// shows its children in model order) or back in automatic order (sorted),
     /// #425. Data, not structure: no node moves. Does not reorder anything
@@ -468,6 +476,7 @@ impl Command {
             Command::EditPlotSpec { kind, .. } => HistoryLabel::EditPlotSpec(*kind),
             Command::SetPlotSpec { graph, .. } => HistoryLabel::SetPlotSpec { name: name(*graph) },
             Command::SetSavedColors { .. } => HistoryLabel::SetSavedColors,
+            Command::SetProjectThemes { .. } => HistoryLabel::SetProjectThemes,
             Command::SetFolderOrder { folder, .. } => HistoryLabel::SortFolder {
                 name: name(*folder),
             },

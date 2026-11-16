@@ -74,6 +74,7 @@ fn rank(command: &Command) -> usize {
         Command::SetColumnMeta { .. } => 20,
         Command::SetPlotSpec { .. } => 21,
         Command::SetSavedColors { .. } => 22,
+        Command::SetProjectThemes { .. } => 37,
         Command::EditPlotSpec { .. } => 23,
         Command::DuplicateWorksheet { .. } => 24,
         Command::InsertCopy { .. } => 25,
@@ -91,7 +92,7 @@ fn rank(command: &Command) -> usize {
     }
 }
 
-const VARIANTS: usize = 37;
+const VARIANTS: usize = 38;
 
 fn named(name: &str) -> Option<String> {
     Some(name.to_string())
@@ -334,6 +335,10 @@ fn samples(w: &World) -> Vec<(Command, HistoryLabel)> {
                 colors: SavedColors::default(),
             },
             HistoryLabel::SetSavedColors,
+        ),
+        (
+            Command::SetProjectThemes { themes: Vec::new() },
+            HistoryLabel::SetProjectThemes,
         ),
         (
             Command::SetFolderOrder {

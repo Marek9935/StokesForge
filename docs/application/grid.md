@@ -115,6 +115,36 @@ header/data boundary, sets a simple selection again. The whole header fields
 (`HeaderRows`) stay simple ranges. Removing the last element clears the
 selection.
 
+**Drag past the edge (#535).** A selection drag that reaches an edge of the grid
+viewport keeps scrolling, on the four edges. The drag is marked in egui's
+temporary memory when a widget sees `drag_started` (`mark_drag`: zone `Cells`,
+`Letters`, `HeaderField` or `Rows`, per viewport and sheet; never `dragged_id`,
+the origin widget leaves the painted window once the grid scrolls) and cleared at
+the button up, on focus loss, and while a drag of columns or rows onto a graph is
+in progress (`grid_drag_in_progress`). `grid_autoscroll`, called last in
+`grid_contents` (after `follow_cursor`, so it wins on an axis they both write),
+reads the pointer (`latest_pos`), turns it into the **push** past the edge of each
+axis the zone scrolls (cell: both; letter or header field: horizontal; row number:
+vertical; header-row labels never mark a drag) and the push into a speed
+(`stokesforge_app_state::grid_autoscroll`: pure functions, points per second
+growing with the push, capped, times the frame time; not finite gives 0). The scroll
+goes through the follow path of #534 (`take_follow_scroll`). The selection extends
+to the column (`column_at`, the inverse of `column_x_range`, over the full column
+list, never the painted window) and row at the pointer clamped to the viewport,
+through the same `AppState::extend_selection`, `extend_column_selection`,
+`extend_row_selection`, `extend_header_field_selection` as the widgets: the rules
+stay in app-state (past the last row nothing is added; no command, the selection is
+transient). During a **cell** drag the header rows and the column letters are the
+top edge and the row numbers the left edge: their widgets do not extend while a
+cell drag is marked (`cell_drag_marked`), so the rectangle stays a rectangle of
+cells (no jump to row 0, no switch to whole columns) and the grid scrolls instead.
+The pointer is never held (no cursor lock, no probe, no raw motion): it leaves
+the grid and even the window freely, and the system cursor is untouched. The push
+is the signed distance of `latest_pos` past each edge of the viewport (0 inside).
+Back over the grid the push is 0, the scroll stops and the hovered cell extends
+the selection as before.
+A repaint is requested only while an offset can still move.
+
 The consumers reason in **blocks** (`Selection::blocks`, one block =
 columns of the sheet × range of ranks); the order is always that of the
 sheet (left → right, top → bottom), never that of the clicks.
@@ -568,7 +598,7 @@ The decision "which cell is active" stays in `AppState`; the grid watches
 `Selection::grid_cursor`: a navigation key arms the follow for 30 frames
 (`arm_follow`, so that a column added by Tab, created a few frames later, is
 followed too), the first change of cursor while armed asks for the scroll
-(`follow_cursor`, once), and any press or release of the mouse disarms: **a click
+(`follow_cursor`, once), and any press or release of the mouse disarms (a key during a mouse drag arms nothing): **a click
 never scrolls**. The offsets are not applied by a second path: they are handed
 to the workbook (`take_follow_scroll`) which stores them in the same on-hold
 slots as the mirrored bars (`pending_offset`, `pending_vertical_offset`),

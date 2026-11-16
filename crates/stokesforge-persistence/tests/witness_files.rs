@@ -30,7 +30,9 @@ use stokesforge_core::{
 use stokesforge_persistence::{
     load_with_report, save_with_geometries, ViewTables, WindowGeometry, WindowMode, WindowView,
 };
-use stokesforge_plot::{ColorUsage, PanelSpec, PlotSpec, PlotType, SavedColors, SeriesSpec};
+use stokesforge_plot::{
+    ColorUsage, GraphTheme, PanelSpec, PlotSpec, PlotType, SavedColors, SeriesSpec, THEMES,
+};
 
 fn witnesses_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/witnesses")
@@ -360,6 +362,18 @@ fn witness_project() -> (Project, ViewTables) {
             .with_gradient_added("Chaud", &["#000000".to_string(), "#ff0000".to_string()]),
     );
 
+    // Graph themes saved in the project (#540): one captured from a graph, one
+    // of colours only, in an order that is not the alphabetical one.
+    project
+        .set_project_themes(vec![
+            GraphTheme::capture(
+                "Zeta thesis",
+                &common::as_read_back(non_trivial_spec(x, y1, y2)),
+            ),
+            GraphTheme::from_colors("Dark copy", &THEMES[1]),
+        ])
+        .expect("project themes");
+
     // A folder shown in manual order (#425), next to the automatic ones.
     let manual = project.add_folder(root, "Hand-ordered").expect("folder");
     project
@@ -431,6 +445,25 @@ fn the_v1_witness_reads_back_and_gives_the_expected_project() {
     assert_eq!(read_back.next_id_hint(), expected.next_id_hint());
     assert_eq!(views.window_geometries, expected_views.window_geometries);
     assert_eq!(views.column_widths, expected_views.column_widths);
+}
+
+/// The V1 witness as it was before the project themes (#540): an additive
+/// field is absent from it, and it reads back with no theme and a clean report.
+#[test]
+fn a_file_written_before_the_project_themes_reads_back_without_any() {
+    let path = witnesses_dir().join("v1-before-themes").join("project.stf");
+    let (read_back, _, report) = load_with_report(&path).expect("the old witness reads back");
+    assert!(report.is_clean(), "{report:?}");
+    assert!(read_back.tree().project_themes().is_empty());
+    // The current witness carries them, in order.
+    let (current, _, _) = load_with_report(&v1_file()).expect("current witness");
+    let names: Vec<&str> = current
+        .tree()
+        .project_themes()
+        .iter()
+        .map(|theme| theme.name.as_str())
+        .collect();
+    assert_eq!(names, ["Zeta thesis", "Dark copy"]);
 }
 
 #[test]

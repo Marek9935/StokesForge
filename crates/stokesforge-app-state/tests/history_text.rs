@@ -42,6 +42,7 @@ fn rank(label: &HistoryLabel) -> usize {
         HistoryLabel::SetColumnMeta { .. } => 19,
         HistoryLabel::SetPlotSpec { .. } => 20,
         HistoryLabel::SetSavedColors => 21,
+        HistoryLabel::SetProjectThemes => 35,
         HistoryLabel::Macro(_) => 22,
         HistoryLabel::EditPlotSpec(_) => 23,
         HistoryLabel::DuplicateWorksheet { .. } => 24,
@@ -58,7 +59,7 @@ fn rank(label: &HistoryLabel) -> usize {
     }
 }
 
-const VARIANTS: usize = 35;
+const VARIANTS: usize = 36;
 
 /// Each variant, in **each** of its forms (known target or not, 0, 1 and
 /// several rows, each kind of group).
@@ -132,6 +133,7 @@ fn all_labels() -> Vec<HistoryLabel> {
             name: name("Graph1"),
         },
         HistoryLabel::SetSavedColors,
+        HistoryLabel::SetProjectThemes,
         HistoryLabel::SortFolder { name: None },
         HistoryLabel::SortFolder { name: name("Data") },
     ];

@@ -42,6 +42,7 @@ pub mod file_picker;
 mod formula_entry;
 pub mod formula_help;
 pub mod frame_sizes;
+pub mod grid_autoscroll;
 pub mod history_text;
 pub mod i18n;
 pub mod length_unit;

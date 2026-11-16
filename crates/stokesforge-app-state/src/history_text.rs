@@ -155,6 +155,7 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
             PlotEditKind::FitLayout => tr!("history-plot-fit-layout"),
             PlotEditKind::WidenRanges => tr!("history-plot-widen-ranges"),
         },
+        HistoryLabel::SetProjectThemes => tr!("history-set-project-themes"),
         HistoryLabel::SetSavedColors => tr!("history-set-saved-colors"),
         HistoryLabel::SortFolder { name: None } => tr!("history-sort-folder"),
         HistoryLabel::SortFolder { name: Some(name) } => {
