@@ -46,6 +46,8 @@ pub(crate) enum HostError {
     /// #312: the column changed since the version read (or provided by
     /// `expected_version`): the write is refused at once, with no retry.
     ConcurrentWrite(String),
+    /// #546: no theme answers to the name given to `pyst.apply_theme`.
+    UnknownTheme(String),
 }
 
 impl HostError {

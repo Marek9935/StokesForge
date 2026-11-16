@@ -14,16 +14,16 @@
 //!   layers than the theme gets empty layers up to the theme's count
 //!   ([`add_missing_layers`]); without it only the existing layers are styled.
 //!
+//! Both steps now live in [`stokesforge_render_svg::themed_spec`] (#546), shared
+//! with scripts; this module only passes the application's figure texts.
+//!
 //! The result is a spec for [`stokesforge_commands::Command::SetPlotSpec`],
 //! which the application state sends through `execute`: that path already
 //! fixes the frames of a legacy graph and freezes the automatic ranges (#529),
 //! so nothing of that is done here.
 
-use stokesforge_core::compose::{insert_cell, CellSide};
 use stokesforge_core::Tree;
-use stokesforge_plot::{GraphTheme, LayerPlacement, PlotSpec, ThemeFamilies, ThemeFamily};
-
-use crate::frame_sizes;
+use stokesforge_plot::{GraphTheme, PlotSpec, ThemeFamilies};
 
 /// The spec `current` once the `families` of `theme` are applied (module
 /// documentation). `current` itself is never changed; the caller compares the
@@ -35,44 +35,12 @@ pub fn themed_spec(
     families: ThemeFamilies,
     add_missing: bool,
 ) -> PlotSpec {
-    let mut next = current.clone();
-    if !theme.colors_only {
-        if families.contains(ThemeFamily::SizeAndPage)
-            && theme.style.layer_placement != next.layer_placement
-        {
-            let free = theme.style.layer_placement == LayerPlacement::Free;
-            // Refused: the placements stay different and the copy skips the sizes.
-            frame_sizes::set_placement_in_draft(tree, &mut next, free);
-        }
-        if add_missing {
-            add_missing_layers(&mut next, &theme.style);
-        }
-    }
-    next.apply_theme_families(theme, families);
-    next
-}
-
-/// Adds empty layers to `spec` until it has as many as `theme`.
-///
-/// Each new layer opens a cell beside the previous layer, **below** it when the
-/// theme's layer sits in a lower row than the theme's previous layer and in no
-/// further column (a stack, like a fit and its residuals), **right** of it
-/// otherwise. An overlaid layer of the theme becomes an ordinary cell: the
-/// overlay roles (axes on top or right) belong to the data they carry. Stops
-/// quietly if the grid is full (`insert_cell` refuses past its limit).
-fn add_missing_layers(spec: &mut PlotSpec, theme: &PlotSpec) {
-    for index in spec.panels.len()..theme.panels.len() {
-        let (this, previous) = (
-            &theme.panels.as_slice()[index],
-            &theme.panels.as_slice()[index - 1],
-        );
-        let side = if this.row > previous.row && this.column <= previous.column {
-            CellSide::Below
-        } else {
-            CellSide::Right
-        };
-        if insert_cell(spec, index - 1, side).is_none() {
-            break;
-        }
-    }
+    stokesforge_render_svg::themed_spec(
+        tree,
+        current,
+        theme,
+        families,
+        add_missing,
+        &crate::figure_texts::figure_texts(),
+    )
 }

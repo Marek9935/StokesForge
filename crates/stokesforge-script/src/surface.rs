@@ -13,8 +13,9 @@
 //!
 //! # Error vocabulary
 //!
-//! Four exceptions, and only four: [`UnknownPathError`],
-//! [`BrokenReferenceError`], [`InvalidValueError`], [`ConcurrentWriteError`].
+//! Four exceptions, and one more for themes (#546): [`UnknownPathError`],
+//! [`BrokenReferenceError`], [`InvalidValueError`], [`ConcurrentWriteError`],
+//! [`UnknownThemeError`] (a kind of `InvalidValueError`).
 //! The first three are taken as is from the v1 API specification, so as not to
 //! rename them later; the fourth anticipates it (A2, `guide-de-correction-robustesse.md` §F6, then #312):
 //! `set_column` and `set_values` refuse at once a write whose column
@@ -72,6 +73,15 @@ create_exception!(
      read the column again, then write."
 );
 
+create_exception!(
+    pyst,
+    UnknownThemeError,
+    InvalidValueError,
+    "pyst.apply_theme found no theme of that name, or several (#546). A kind of \
+     InvalidValueError: the name is a refused value. A user theme exists only in the \
+     application."
+);
+
 /// Translates a host error, already classified, into a Python exception.
 pub(crate) fn to_py_error(error: HostError) -> PyErr {
     match error {
@@ -79,6 +89,7 @@ pub(crate) fn to_py_error(error: HostError) -> PyErr {
         HostError::BrokenReference(message) => BrokenReferenceError::new_err(message),
         HostError::InvalidValue(message) => InvalidValueError::new_err(message),
         HostError::ConcurrentWrite(message) => ConcurrentWriteError::new_err(message),
+        HostError::UnknownTheme(message) => UnknownThemeError::new_err(message),
     }
 }
 
@@ -864,8 +875,11 @@ saving and figure export.
         deconvolve(y, x=None, ...) -> dict (see help(pyst.analysis))
     pyst.analysis.readiness(kind, **options) -> dict (what is missing before a calculation)
 
+    pyst.apply_theme(graph, theme, *, families=None, add_missing_layers=False) -> None
+    pyst.themes()                   -> list[dict] (name, key, source, modified)
+
 Errors: UnknownPathError, BrokenReferenceError, InvalidValueError,
-          ConcurrentWriteError.
+          ConcurrentWriteError, UnknownThemeError (a kind of InvalidValueError).
 
 Known limits of this surface:
   - the output (print) is returned only at the end of the script, not as it is produced;
@@ -887,7 +901,7 @@ Known limits of this surface:
 /// Alpha while it is `0.x`: any change of surface (addition or break) bumps the
 /// minor. `scripts/versions-aligned.sh` checks it against the frozen snapshot
 /// `tests/api-witnesses/v<version>.txt` (see docs/python-and-scripting.md).
-pub const PYST_API_VERSION: &str = "0.8";
+pub const PYST_API_VERSION: &str = "0.9";
 
 /// Builds the `pyst` module and registers it in `sys.modules`.
 ///
@@ -940,6 +954,8 @@ pub(crate) fn install(py: Python<'_>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(import_file, &module)?)?;
     module.add_function(wrap_pyfunction!(crate::set_graph::set_graph, &module)?)?;
     module.add_function(wrap_pyfunction!(crate::graph_size::graph_size, &module)?)?;
+    module.add_function(wrap_pyfunction!(crate::themes::apply_theme, &module)?)?;
+    module.add_function(wrap_pyfunction!(crate::themes::themes, &module)?)?;
     for function in [
         wrap_pyfunction!(crate::sheet_edit::insert_rows, &module)?,
         wrap_pyfunction!(crate::sheet_edit::delete_rows, &module)?,
@@ -960,6 +976,7 @@ pub(crate) fn install(py: Python<'_>) -> PyResult<()> {
         "ConcurrentWriteError",
         py.get_type::<ConcurrentWriteError>(),
     )?;
+    module.add("UnknownThemeError", py.get_type::<UnknownThemeError>())?;
     crate::analysis::install(py, &module)?;
     py.import("sys")?
         .getattr("modules")?

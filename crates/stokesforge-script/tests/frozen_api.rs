@@ -404,6 +404,7 @@ g2 = pyst.plot(b, a)
 pyst.set_graph(g2, layer_placement='free')
 print('graph_size.layer|' + keys(pyst.graph_size(g2)['layers'][0]))
 print('series.item|' + keys(pyst.series(two)[0]))
+print('themes.item|' + keys(pyst.themes()[0]))
 print('series_groups.item|' + keys(pyst.series_groups(two)[0]))
 r = pyst.analysis.baseline(b, a, method='line', points=[(1, 1), (3, 3)], keep_baseline=True)
 print('analysis|' + keys(r))
@@ -520,6 +521,11 @@ const INPUTS: &[Input] = &[
         refusal: true,
     },
     Input {
+        name: "theme_family",
+        body: "pyst.apply_theme(g, 'light', families=[v])",
+        refusal: true,
+    },
+    Input {
         name: "shape_kind",
         body: "pyst.add_shape(g, v, 0, 0, 1, 1)",
         refusal: true,
@@ -563,7 +569,7 @@ const INPUTS: &[Input] = &[
 ];
 
 /// Enumerations **returned as output** (the test observes them).
-const OUTPUTS: &[&str] = &["kind", "type", "role", "readiness_reason"];
+const OUTPUTS: &[&str] = &["kind", "type", "role", "readiness_reason", "theme_source"];
 
 /// Values that no script can produce: excluded from the completeness check.
 const UNPRODUCIBLE: &[(&str, &str)] = &[("kind", "unknown")];
@@ -600,6 +606,7 @@ for call in (
     except pyst.InvalidValueError:
         pass
 print('OBS|readiness_reason|%s' % ','.join(sorted(reasons)))
+print('OBS|theme_source|%s' % ','.join(sorted({t['source'] for t in pyst.themes()})))
 ";
 
 #[test]

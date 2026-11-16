@@ -28,7 +28,7 @@ Names are case-sensitive. A path without a folder works if the workbook name is 
 
 ### Errors
 
-Four kinds of errors can be raised. All of them derive from Python's `Exception`.
+Five kinds of errors can be raised. All of them derive from Python's `Exception`.
 
 | Error | Raised when |
 |---|---|
@@ -36,6 +36,7 @@ Four kinds of errors can be raised. All of them derive from Python's `Exception`
 | `pyst.BrokenReferenceError` | A handle points to an object that no longer exists, or comes from another project |
 | `pyst.InvalidValueError` | An argument is refused: a wrong type, an unknown option, a name already taken, a file that cannot be read… |
 | `pyst.ConcurrentWriteError` | You write a column that changed since your script read it |
+| `pyst.UnknownThemeError` | No graph theme has the name you gave (a kind of `InvalidValueError`) |
 
 A script can catch them:
 
@@ -433,6 +434,23 @@ When you plot several columns together, the series form a group. These functions
 | `pyst.apply_gradient(graph, group, gradient, *, panel=(0, 0))` | Colors the members along a gradient. `gradient` is the name of a built-in palette, the name of a palette saved in the project, or a list of `"#RRGGBB"` colors. |
 
 Palettes saved in your user settings are not visible to scripts, so that a script gives the same result on every computer.
+
+### Apply a graph theme
+
+`pyst.apply_theme(graph, theme, *, families=None, add_missing_layers=False)` applies a graph theme to a graph, in the undo group of the script. `pyst.themes()` lists the themes a script can name: a list of dictionaries with `name`, `key`, `source` (`"builtin"`, `"user"` or `"project"`) and `modified` (`True` for a built-in you changed). A graph made by `pyst.plot` does not take your default theme: apply one when you want it.
+
+- `theme` is the name of a built-in theme (`"Publication Wide"`, or its key `"publication-wide"`, or its name in French), of a theme of your user settings, or of a theme saved in the project. Capitals and extra spaces do not matter. Start the name with `builtin:`, `user:` or `project:` to look in one place only.
+- `families` lists what to copy: `"background"`, `"texts"`, `"title-fonts"`, `"axes"`, `"axis-ranges"`, `"size-and-page"`, `"legend"`, `"curves"`, `"color-bar"`. Without it, everything is copied except the texts and the axis ranges, as for the default theme of new graphs. An empty list or an unknown name raises `InvalidValueError`.
+- `add_missing_layers=True` adds empty layers when the theme has more layers than the graph.
+- A name that no theme has raises `pyst.UnknownThemeError`; nothing is changed. If several themes have the same name, the project theme is applied before the user theme, and the user theme before the built-in. A warning tells which one was applied and which were ignored (`Theme 'Poster': project:Poster applied, user:Poster ignored`). Start the name with `builtin:`, `user:` or `project:` to choose.
+
+```python
+g = pyst.plot(y, x, name="Spectrum")
+pyst.apply_theme(g, "publication", families=["curves", "axes"])
+print([t["name"] for t in pyst.themes() if t["source"] == "project"])
+```
+
+**A script that uses a theme is less portable.** A theme of your user settings exists on your computer only, and the command line does not know it: elsewhere the script fails with `UnknownThemeError`. A theme saved in the project travels with the project file. A built-in theme has the same name everywhere, but you may have modified it on your computer, and the script then applies your version. A script that must give the same figure everywhere draws its own style (`pyst.set_graph`, the options of `pyst.plot`) and uses no theme.
 
 ### Export a graph
 

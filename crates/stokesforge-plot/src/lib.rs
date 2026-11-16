@@ -84,6 +84,7 @@
 
 pub mod annotation;
 pub mod axis;
+pub mod builtin_themes;
 pub mod color_bar;
 pub mod gradient;
 pub mod legend;
@@ -133,6 +134,6 @@ pub use text_anchor::{TextAnchor, TextTarget};
 pub use text_font::TextFont;
 pub use theme::{Theme, THEMES};
 pub use theme_family::{
-    bounded_themes, same_theme_name, GraphTheme, ThemeFamilies, ThemeFamily, MAX_THEMES,
-    MAX_THEME_NAME_CHARS, SURPLUS_GAP,
+    bounded_themes, default_theme_families, same_theme_name, GraphTheme, ThemeFamilies,
+    ThemeFamily, MAX_THEMES, MAX_THEME_NAME_CHARS, SURPLUS_GAP,
 };

@@ -432,3 +432,115 @@ fn a_script_save_refuses_to_overwrite_a_source_that_lost_data() {
     assert!(elsewhere.exists());
     assert_eq!(std::fs::read(&source).unwrap(), b"original");
 }
+
+// --- Graph themes from a script (#546) -----------------------------------------
+
+/// The graph named `name` as the script made it.
+fn graph_named(state: &AppState, name: &str) -> stokesforge_plot::PlotSpec {
+    let id = state
+        .graphs()
+        .into_iter()
+        .find(|(_, graph_name)| graph_name == name)
+        .map(|(id, _)| id)
+        .unwrap_or_else(|| panic!("graph {name}"));
+    state.plot_spec(id).expect("spec")
+}
+
+/// A user theme "Poster" with a dark background, from a new graph.
+fn save_poster(state: &mut AppState) {
+    state.dispatch(Action::AddGraph);
+    let graph = state.graphs().last().expect("a graph").0;
+    let mut spec = state.plot_spec(graph).expect("spec");
+    spec.background = "#102030".into();
+    state.dispatch(Action::SetPlotSpec { graph, spec });
+    state.add_user_theme("Poster", graph).expect("saved");
+}
+
+/// The default theme of new graphs never reaches a graph made by `pyst.plot`:
+/// the script keeps control of its style.
+#[test]
+fn a_default_theme_does_not_touch_a_graph_made_by_a_script() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = Session::spawn(demo_project(), None).expect("session thread");
+    // Preferences with a file: the default theme is saved there.
+    let mut state = AppState::new_with_preferences(
+        session.handle(),
+        "script-test.stf".to_string(),
+        stokesforge_app_state::preferences::Preferences::load_from(Some(
+            dir.path().join("preferences.json"),
+        )),
+    )
+    .expect("initial application state");
+    state.set_python(EmbeddedPython::with_home(home()));
+    state.use_user_themes_file(dir.path().join("themes.json"));
+    let plot = |name: &str| {
+        format!("t = pyst.resolve('[Book1]Sheet1!Time')\npyst.plot(t, name='{name}')\n")
+    };
+    run_and_wait(&mut state, &plot("Before"));
+    state
+        .set_new_graph_theme(Some(stokesforge_app_state::user_themes::ThemeRef::Builtin(
+            2,
+        )))
+        .unwrap();
+    run_and_wait(&mut state, &plot("After"));
+    assert_eq!(
+        graph_named(&state, "After"),
+        graph_named(&state, "Before"),
+        "a script graph takes no default theme"
+    );
+}
+
+/// The engine is reused: a user theme created after a first run is seen by
+/// the next one, a built-in answers to its French name whatever the interface
+/// language, and a modified built-in applies modified.
+#[test]
+fn the_themes_of_the_application_are_injected_before_every_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state, _sheet) = start();
+    state.use_user_themes_file(dir.path().join("themes.json"));
+    run_and_wait(
+        &mut state,
+        "t = pyst.resolve('[Book1]Sheet1!Time')\ng = pyst.plot(t, name='Scripted')\n\
+         print([x['name'] for x in pyst.themes() if x['source'] == 'user'])\n",
+    );
+    assert_eq!(state.script_output().unwrap().stdout.trim(), "[]");
+    save_poster(&mut state);
+    // Second run, same engine: the new theme is there.
+    run_and_wait(
+        &mut state,
+        "pyst.apply_theme(g, 'poster')\n\
+         print([x['name'] for x in pyst.themes() if x['source'] == 'user'])\n",
+    );
+    let output = state.script_output().unwrap();
+    assert!(output.error.is_none(), "{:?}", output.error);
+    assert_eq!(output.stdout.trim(), "['Poster']");
+    assert_eq!(graph_named(&state, "Scripted").background, "#102030");
+    // A French name works whatever the language of the interface.
+    run_and_wait(
+        &mut state,
+        "pyst.apply_theme(g, 'Publication large')\npyst.apply_theme(g, 'Clair')\n",
+    );
+    let output = state.script_output().unwrap();
+    assert!(output.error.is_none(), "{:?}", output.error);
+    // A built-in the user modified applies modified (and `themes()` says so).
+    let modified = graph_named(&state, "Scripted");
+    let mut spec = modified.clone();
+    spec.background = "#abcdef".into();
+    let graph = state
+        .graphs()
+        .into_iter()
+        .find(|(_, name)| name == "Scripted")
+        .unwrap()
+        .0;
+    state.dispatch(Action::SetPlotSpec { graph, spec });
+    state.edit_builtin_theme(0, graph).unwrap();
+    run_and_wait(
+        &mut state,
+        "pyst.apply_theme(g, 'light')\n\
+         print([x['modified'] for x in pyst.themes() if x['key'] == 'builtin:light'])\n",
+    );
+    let output = state.script_output().unwrap();
+    assert!(output.error.is_none(), "{:?}", output.error);
+    assert_eq!(output.stdout.trim(), "[True]");
+    assert_eq!(graph_named(&state, "Scripted").background, "#abcdef");
+}

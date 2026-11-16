@@ -343,6 +343,81 @@ pub fn set_layer_placement(
     true
 }
 
+/// The spec `current` once the `families` of `theme` are applied (#538, moved
+/// here by #546 so scripts and the application share it). `current` itself is
+/// never changed; the caller compares the result with it to know whether
+/// anything changed.
+///
+/// `stokesforge-plot` copies the families but cannot measure text nor reshape
+/// the grid, so two steps run before the copy:
+///
+/// - **placement**: when the Size and page family is applied and the theme and
+///   the graph differ in placement (regular grid or free frames), the graph is
+///   switched first through [`set_layer_placement`], the same rule as the Graph
+///   Properties switch, so nothing moves before the theme's own sizes land. A
+///   refused switch leaves the sizes alone;
+/// - **missing layers**: with `add_missing`, a graph that has fewer layers than
+///   the theme gets empty layers up to the theme's count; without it only the
+///   existing layers are styled.
+///
+/// `texts` are the figure texts the measurements read, as everywhere else
+/// (invariant 5). The result goes to `Command::SetPlotSpec`.
+pub fn themed_spec(
+    tree: &stokesforge_core::Tree,
+    current: &PlotSpec,
+    theme: &stokesforge_plot::GraphTheme,
+    families: stokesforge_plot::ThemeFamilies,
+    add_missing: bool,
+    texts: &FigureTexts,
+) -> PlotSpec {
+    use stokesforge_plot::{LayerPlacement, ThemeFamily};
+    let mut next = current.clone();
+    if !theme.colors_only {
+        if families.contains(ThemeFamily::SizeAndPage)
+            && theme.style.layer_placement != next.layer_placement
+        {
+            let free = theme.style.layer_placement == LayerPlacement::Free;
+            let measurer = SvgTextMeasurer::default();
+            let choice = FontChoice::default();
+            // Refused: the placements stay different and the copy skips the sizes.
+            set_layer_placement(&mut next, free, &measurer, &choice, &|spec| {
+                bind_spec(tree, spec, texts)
+            });
+        }
+        if add_missing {
+            add_missing_layers(&mut next, &theme.style);
+        }
+    }
+    next.apply_theme_families(theme, families);
+    next
+}
+
+/// Adds empty layers to `spec` until it has as many as `theme`.
+///
+/// Each new layer opens a cell beside the previous layer, **below** it when the
+/// theme's layer sits in a lower row than the theme's previous layer and in no
+/// further column (a stack, like a fit and its residuals), **right** of it
+/// otherwise. An overlaid layer of the theme becomes an ordinary cell: the
+/// overlay roles (axes on top or right) belong to the data they carry. Stops
+/// quietly if the grid is full (`insert_cell` refuses past its limit).
+fn add_missing_layers(spec: &mut PlotSpec, theme: &PlotSpec) {
+    use stokesforge_core::compose::{insert_cell, CellSide};
+    for index in spec.panels.len()..theme.panels.len() {
+        let (this, previous) = (
+            &theme.panels.as_slice()[index],
+            &theme.panels.as_slice()[index - 1],
+        );
+        let side = if this.row > previous.row && this.column <= previous.column {
+            CellSide::Below
+        } else {
+            CellSide::Right
+        };
+        if insert_cell(spec, index - 1, side).is_none() {
+            break;
+        }
+    }
+}
+
 /// The `bind` of [`set_layer_placement`] for a spec that is measured as it is
 /// stored.
 pub fn as_stored(spec: &PlotSpec) -> std::borrow::Cow<'_, PlotSpec> {

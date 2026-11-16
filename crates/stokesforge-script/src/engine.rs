@@ -69,6 +69,7 @@ use stokesforge_session::SessionHandle;
 
 use crate::error::ScriptError;
 use crate::outcome::ScriptOutcome;
+use crate::themes::ThemeLibrary;
 use crate::{bridge::HostError, capture, surface};
 
 /// State shared between the script thread, the interruption thread and the clients.
@@ -102,6 +103,9 @@ struct Shared {
     /// `(model, geometry)` revision of the script's last save, which the host
     /// picks up ([`ScriptEngine::take_saved_revision`]).
     saved_revision: Mutex<Option<(u64, u64)>>,
+    /// The themes the host makes known to `pyst.apply_theme` (#546), set before
+    /// each run. `None`: the original built-ins only. Plain data.
+    theme_library: Mutex<Option<Arc<ThemeLibrary>>>,
 }
 
 /// What the `pyst` surface needs to serve a call: the session, and
@@ -151,6 +155,15 @@ impl ScriptContext {
             .lock()
             .ok()
             .and_then(|path| path.clone())
+    }
+
+    /// The theme library the host injected (`None`: not injected).
+    pub(crate) fn theme_library(&self) -> Option<Arc<ThemeLibrary>> {
+        self.shared
+            .theme_library
+            .lock()
+            .ok()
+            .and_then(|library| library.clone())
     }
 
     /// Path that `save()` without argument refuses to overwrite.
@@ -377,6 +390,18 @@ impl ScriptEngine {
     pub fn set_project_path(&self, path: Option<PathBuf>) {
         if let Ok(mut current) = self.shared.project_path.lock() {
             *current = path;
+        }
+    }
+
+    /// Tells the engine which themes `pyst.apply_theme` and `pyst.themes` know
+    /// besides those of the project (#546): the built-ins as the user left
+    /// them, under each name they have, and the user's themes. The host calls it
+    /// before **each** run (the engine is reused, the library changes between
+    /// runs). `None`: the original built-ins, by key and English name. Touches
+    /// neither the session nor Python.
+    pub fn set_theme_library(&self, library: Option<ThemeLibrary>) {
+        if let Ok(mut current) = self.shared.theme_library.lock() {
+            *current = library.map(Arc::new);
         }
     }
 

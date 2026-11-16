@@ -201,6 +201,15 @@ impl ThemeFamilies {
     }
 }
 
+/// The families a default theme gives to a new graph: all but the texts and
+/// the axis ranges (a new graph keeps its own titles and its own ranges).
+/// Scripts (`pyst.apply_theme`, #546) use the same set when none is named.
+pub fn default_theme_families() -> ThemeFamilies {
+    ThemeFamilies::all()
+        .without(ThemeFamily::Texts)
+        .without(ThemeFamily::AxisRanges)
+}
+
 /// Most themes one store (a project, the user's machine) keeps. A file that
 /// carries more is cut at this count when read (invariant 10).
 pub const MAX_THEMES: usize = 200;
