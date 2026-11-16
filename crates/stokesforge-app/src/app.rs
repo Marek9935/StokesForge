@@ -150,7 +150,7 @@ mod column_formula_help;
 mod column_use;
 mod confirmations;
 mod contents;
-mod cursors;
+pub(crate) mod cursors;
 mod curve_settings;
 mod detached_book;
 mod detached_graph;

@@ -292,11 +292,8 @@ fn number_field_core<T: Number>(
         let button = ui
             .interact(arrow, list_id.with("arrow"), egui::Sense::click())
             .on_hover_text(tr!("number-presets"));
-        // The arrow is a button, not text (#553): the `TextEdit` above set the
-        // text cursor over its whole frame, the last setting of the frame wins.
-        if button.hovered() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::Default);
-        }
+        // The arrow is a button, not text (#553).
+        crate::app::cursors::button_in_field(&button);
         list_frame::paint_arrow(ui, arrow, &button);
         if button.clicked() {
             presets.open = !presets.open;
