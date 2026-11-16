@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use stokesforge_plot::{PlotSpec, SavedColors};
+use stokesforge_plot::{GraphTheme, PlotSpec, SavedColors};
 
 use crate::column::{Column, ColumnMeta, ColumnType, ColumnValues, ValueBlock, ValuesDelta};
 use crate::error::{CoreError, CoreResult};
@@ -997,6 +997,18 @@ impl Project {
         std::mem::replace(tree.saved_colors_mut(), colors.bounded())
     }
 
+    /// Replaces the graph themes saved in the project, and returns the
+    /// previous ones (#540). Refused, nothing written, when a name is empty
+    /// ([`CoreError::InvalidName`]), longer than
+    /// [`stokesforge_plot::MAX_THEME_NAME_CHARS`], or taken twice with the case
+    /// ignored ([`CoreError::DuplicateName`]), or when the list is longer than
+    /// [`stokesforge_plot::MAX_THEMES`] ([`CoreError::Structure`]).
+    pub fn set_project_themes(&mut self, themes: Vec<GraphTheme>) -> CoreResult<Vec<GraphTheme>> {
+        check_theme_list(&themes)?;
+        let tree = Arc::make_mut(&mut self.tree);
+        Ok(std::mem::replace(tree.project_themes_mut(), themes))
+    }
+
     /// Puts `folder` in manual order (`true`: the Project Manager shows its
     /// children in model order) or back in automatic order (sorted), and returns
     /// the previous state (#425). `Err(Structure)` if `folder` is not a folder.
@@ -1546,6 +1558,29 @@ impl Default for Project {
     fn default() -> Self {
         Self::with_root_name("Project")
     }
+}
+
+/// The checks of [`Project::set_project_themes`].
+fn check_theme_list(themes: &[GraphTheme]) -> CoreResult<()> {
+    if themes.len() > stokesforge_plot::MAX_THEMES {
+        return Err(CoreError::Structure(format!(
+            "more than {} themes",
+            stokesforge_plot::MAX_THEMES
+        )));
+    }
+    for (i, theme) in themes.iter().enumerate() {
+        let name = theme.name.trim();
+        if name.is_empty() || name.chars().count() > stokesforge_plot::MAX_THEME_NAME_CHARS {
+            return Err(CoreError::InvalidName(theme.name.clone()));
+        }
+        if themes[..i]
+            .iter()
+            .any(|other| stokesforge_plot::same_theme_name(&other.name, name))
+        {
+            return Err(CoreError::DuplicateName(theme.name.clone()));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

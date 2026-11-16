@@ -60,6 +60,13 @@ pub(crate) struct FileBody {
     /// for the same reason as theirs (see below).
     #[serde(default)]
     pub(crate) saved_colors: SavedColorsRecord,
+    /// Graph themes saved in the project (#540), in order, each a name and a
+    /// `PlotSpecRecord` (`crate::themes`). Absent from earlier files: empty
+    /// list. Undecodable or nameless records are dropped at read and the list is
+    /// cut at `MAX_THEMES` (invariant 10). Placed before `window_geometries` and
+    /// `save_counter`, for the same reason as `saved_colors`.
+    #[serde(default, deserialize_with = "crate::themes::lenient_records")]
+    pub(crate) project_themes: Vec<crate::themes::ThemeRecord>,
     /// Analysis calculations (#181). Absent from earlier files: empty
     /// list. Placed before `window_geometries` and `save_counter`, for the same
     /// reason as `saved_colors`.

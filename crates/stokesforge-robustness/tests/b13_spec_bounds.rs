@@ -758,3 +758,46 @@ fn b13_a_hostile_theme_applies_without_panic_and_stays_bounded() {
         }
     }
 }
+
+/// #540: the themes of a project are bounded however they arrive. A command
+/// refuses an over-long list, a huge name and a duplicate; the codec of a
+/// store cuts a longer list and a longer name instead of failing.
+#[test]
+fn b13_project_themes_are_bounded() {
+    use stokesforge_commands::{Command, History};
+    use stokesforge_plot::{GraphTheme, MAX_THEMES, MAX_THEME_NAME_CHARS};
+    let theme = |name: String| GraphTheme::capture(name, &PlotSpec::empty("t"));
+
+    let mut project = Project::new("P").unwrap();
+    let mut history = History::new();
+    let exact: Vec<_> = (0..MAX_THEMES).map(|i| theme(format!("t{i}"))).collect();
+    history
+        .execute(&mut project, Command::SetProjectThemes { themes: exact })
+        .expect("exactly the cap is fine");
+    let mut over: Vec<_> = (0..=MAX_THEMES).map(|i| theme(format!("t{i}"))).collect();
+    assert!(history
+        .execute(
+            &mut project,
+            Command::SetProjectThemes {
+                themes: over.clone()
+            }
+        )
+        .is_err());
+    over.truncate(1);
+    over[0].name = "n".repeat(MAX_THEME_NAME_CHARS + 1);
+    assert!(history
+        .execute(&mut project, Command::SetProjectThemes { themes: over })
+        .is_err());
+    assert_eq!(project.tree().project_themes().len(), MAX_THEMES);
+
+    // The codec of a store cuts instead of failing.
+    let many: Vec<_> = (0..MAX_THEMES * 3)
+        .map(|i| theme(format!("{}{i}", "n".repeat(500))))
+        .collect();
+    let back = stokesforge_persistence::decode_themes(
+        &stokesforge_persistence::encode_themes(&many).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(back.len(), 1, "names cut to the same text collide");
+    assert_eq!(back[0].name.chars().count(), MAX_THEME_NAME_CHARS);
+}
