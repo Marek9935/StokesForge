@@ -129,7 +129,11 @@ pub(super) fn theme_manager(
     // wrapping row upward).
     let height_id = ui.id().with("theme_controls_height");
     let controls_height: f32 = ui.data(|data| data.get_temp(height_id)).unwrap_or(60.0);
-    let picker_height = (ui.available_height() - controls_height - theme::SPACE_ITEM).max(80.0);
+    // Each allocation is followed by one item spacing: the picker and the gap
+    // take two of them before the controls, which would otherwise be cut by
+    // the footer line.
+    let gaps = theme::SPACE_ITEM + 2.0 * ui.spacing().item_spacing.y;
+    let picker_height = (ui.available_height() - controls_height - gaps).max(80.0);
     ui.allocate_ui_with_layout(
         egui::vec2(ui.available_width(), picker_height),
         egui::Layout::top_down(egui::Align::Min),
