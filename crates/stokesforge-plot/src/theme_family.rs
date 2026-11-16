@@ -60,8 +60,9 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    AxisScale, AxisSide, AxisSpec, ColorBarSpec, FreeFrame, LayerPlacement, LegendSpec, PanelSpec,
-    LineStyle, PlotSpec, SeriesSpec, SymbolShape, Theme, FALLBACK_FRAME, MAX_FRAME_SIZE, MIN_FRAME_SIZE,
+    AxisScale, AxisSide, AxisSpec, ColorBarSpec, FreeFrame, LayerPlacement, LegendSpec, LineStyle,
+    PanelSpec, PlotSpec, SeriesSpec, SymbolShape, Theme, FALLBACK_FRAME, MAX_FRAME_SIZE,
+    MIN_FRAME_SIZE,
 };
 
 /// Space, in points, left between a free frame and the one offset after it
