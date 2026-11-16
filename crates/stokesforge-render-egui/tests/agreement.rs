@@ -728,10 +728,11 @@ fn decimation_applies_and_the_two_backends_decimate_alike() {
     // the two would stay consistent even if the order changed one day.
     let min = ys.iter().copied().fold(f64::INFINITY, f64::min);
     let max = ys.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    let margin = (max - min) * 0.05;
+    // #529: 1 % below and 5 % above on a vertical axis.
+    let span = max - min;
     let (low, high) = drawn.y_range();
     assert!(
-        (low - (min - margin)).abs() < 1e-9 && (high - (max + margin)).abs() < 1e-9,
+        (low - (min - span * 0.01)).abs() < 1e-9 && (high - (max + span * 0.05)).abs() < 1e-9,
         "the framing {:?} no longer matches the extent of the 40,000 points \
          ({min}..{max}): the decimation lost an extremum",
         drawn.y_range()

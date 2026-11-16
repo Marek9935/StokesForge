@@ -14,7 +14,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
-use stokesforge_plot::SavedColors;
+use stokesforge_plot::{GraphTheme, SavedColors};
 
 use crate::calc::{Calculation, CorrectionRecord};
 use crate::column::Column;
@@ -50,6 +50,9 @@ pub struct Tree {
     /// to travel with it: a session snapshot, a structural undo
     /// and persistence see them without a separate path.
     saved_colors: SavedColors,
+    /// Graph themes saved in the project (#540), in the order the user keeps
+    /// them. Carried by the tree for the same reason as the saved colors.
+    project_themes: Vec<GraphTheme>,
     /// Analysis calculations (#181) — see [`crate::calc`]. Carried by the tree to
     /// travel with it, like the saved colors.
     calculations: BTreeMap<NodeId, Arc<Calculation>>,
@@ -92,6 +95,7 @@ impl Tree {
             nodes,
             root: id,
             saved_colors: SavedColors::default(),
+            project_themes: Vec::new(),
             calculations: BTreeMap::new(),
             correction_traces: BTreeMap::new(),
             transposes: BTreeMap::new(),
@@ -221,6 +225,22 @@ impl Tree {
         &mut self.saved_colors
     }
 
+    /// The graph themes saved in the project, in order.
+    pub fn project_themes(&self) -> &[GraphTheme] {
+        &self.project_themes
+    }
+
+    /// The same tree, with these project themes (bounded by
+    /// [`stokesforge_plot::bounded_themes`]) — for persistence.
+    pub fn with_project_themes(mut self, themes: Vec<GraphTheme>) -> Self {
+        self.project_themes = stokesforge_plot::bounded_themes(themes);
+        self
+    }
+
+    pub(crate) fn project_themes_mut(&mut self) -> &mut Vec<GraphTheme> {
+        &mut self.project_themes
+    }
+
     /// The analysis calculations, by identifier.
     pub fn calculations(&self) -> &BTreeMap<NodeId, Arc<Calculation>> {
         &self.calculations
@@ -272,6 +292,7 @@ impl Tree {
             nodes: map,
             root,
             saved_colors: SavedColors::default(),
+            project_themes: Vec::new(),
             calculations: BTreeMap::new(),
             correction_traces: BTreeMap::new(),
             transposes: BTreeMap::new(),

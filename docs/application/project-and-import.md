@@ -118,9 +118,9 @@ doubt does not open the window for the next file of that kind
 of the last import replaced or merged a sheet. The File › Import › Reopen Last
 Import… link reopens every file of the last import, each with its own recipe.
 
-**Origin projects (`.opj`, #490), state side.** An `.opj` never goes to the
-text wizard. Routing is by extension only (`is_origin_path`, no I/O on the
-interface thread): the same background job as above reads it
+**Origin projects (`.opj`, `.opju`, #490, #492), state side.** An `.opj` or `.opju` never goes to the
+text wizard. Routing is by extension or by the first bytes, `CPYA`/`CPYUA`
+(`is_origin_file`, #509; the extension alone costs no I/O on the interface thread): the same background job as above reads it
 (`ImportReply::origin`, `read_origin_file`), and `apply_ready_import` hands the
 parsed projects (shared by `Arc`) to `AppState::add_origin_reads`, which opens
 the **chooser** (`state/origin_import.rs`: files, books, sheets with column and
@@ -134,13 +134,13 @@ chooser for the rest. The chooser is painted only while the wizard is closed
 added to the open wizard (Add Files…, a drop) is taken out of its files, read in
 the background and announced by a status message; a wizard left with no file is
 closed, a wizard that still holds text files stays and the chooser shows when it
-closes. While the chooser is open a drop adds `.opj` files to it and refuses the
+closes. While the chooser is open a drop adds `.opj`/`.opju` files to it and refuses the
 other files with a message. `Action::ImportOrigin` creates one workbook per
 ticked book and one sheet per ticked sheet in one `MacroKind::Import` group (one
 history entry, one undo); a name the model would refuse (invalid, or already a
 sibling's, case aside) is not sent: the object keeps its automatic name and
 nothing is said. Origin columns have no import source, so Refresh from Source
-stays greyed for them. Reopen Last Import after an Origin import undoes it (if
+stays greyed for them. `OriginFileView::partial` (from `OriginProject::partial`, an `.opju` read as far as it goes) makes the chooser print the `origin-import-partial` orange note under that file name (S-R18), and, after the import, an orange status line (`status-import-origin-partial`). Sheets left without a name by a partial read are `Sheet1`, `Sheet2`… (set by `assemble`). Reopen Last Import after an Origin import undoes it (if
 still on top) and reopens the chooser on the same parsed files and ticks; the
 most recent import, text or Origin, decides between wizard and chooser.
 

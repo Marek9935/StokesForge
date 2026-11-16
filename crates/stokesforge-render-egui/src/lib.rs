@@ -80,6 +80,7 @@ mod bar_resize;
 pub mod cache;
 mod corner_follow;
 mod corner_lock;
+pub mod drawings;
 pub mod edge_band;
 pub mod feathering;
 mod layout_mode;
@@ -1270,10 +1271,13 @@ impl GraphView {
 
     /// Sets the texts the figure draws by itself (legend placeholders, #369).
     ///
-    /// The cache is invalidated only when the language tag changes, so the
-    /// application can call this every frame.
+    /// The cache is invalidated only when the language tag or the margins of
+    /// the automatic framing (#529) change, so the application can call this
+    /// every frame.
     pub fn set_figure_texts(&mut self, texts: &FigureTexts) {
-        if self.figure_texts.language != texts.language {
+        if self.figure_texts.language != texts.language
+            || self.figure_texts.margins != texts.margins
+        {
             self.figure_texts = texts.clone();
             self.preview_generation += 1;
         }
@@ -2170,16 +2174,19 @@ impl GraphView {
                 _ => {
                     let shape = pointer.and_then(|pos| self.shape_at(pos));
                     let series = pointer.and_then(|pos| self.series_at(pos, spec));
-                    // The axis beats the curve (#385): on its line a curve
-                    // glued to the edge must not take the gesture.
+                    // On the axis strip (#385) the axis takes the gesture,
+                    // except where the click lands on a curve (stroke or
+                    // marker): a curve glued to the edge, as the automatic
+                    // framing now draws the first and last points (#529),
+                    // is the thing clicked.
                     if let Some(shape) = shape {
                         self.events.push(GraphEvent::OpenShapeProperties(shape));
-                    } else if let Some(PlotComponent::Axis { panel, side }) = component {
-                        self.events
-                            .push(GraphEvent::OpenAxisProperties { panel, side });
                     } else if let Some(series) = series {
                         self.selected_series = Some(series);
                         self.events.push(GraphEvent::OpenSeriesProperties(series));
+                    } else if let Some(PlotComponent::Axis { panel, side }) = component {
+                        self.events
+                            .push(GraphEvent::OpenAxisProperties { panel, side });
                     } else {
                         self.view.reset();
                     }

@@ -10,18 +10,23 @@
 // the port is GPL-3.0-or-later. liborigin's own history also credits Ion
 // Vasilief and Knut Franke. See docs/license-and-extensions.md.
 
-//! Reader of the workbooks of an Origin project file (`.opj`, the binary
-//! format Origin 2018 to 2022b still saves and Horiba's software writes).
+//! Reader of the workbooks of an Origin project file: `.opj` (the binary
+//! format Origin 2018 to 2022b still saves and Horiba's software writes) and
+//! `.opju` (the `CPYUA` container of Origin 2018 and later).
 //!
 //! [`read_project`] returns the books (workbooks) with their sheets and
 //! columns: names, long names, units, comments, values and text cells.
-//! Graphs, matrices and functions are recognised and counted, not read. The
-//! `.opju` container of Origin 2023+ is refused with a clear error.
+//! Graphs, matrices and functions are recognised and counted, not read. Both
+//! containers give the same [`OriginProject`]; the `.opju` one is walked by
+//! `opju` (grammar in its module docs). An `.opju` whose window section is
+//! not understood is read from its datasets and window objects as far as they
+//! go, and [`OriginProject::partial`] says so.
 //!
 //! Robustness (invariant 10): every read is checked, a defect is an
-//! [`OriginError`], never a panic; annotation groups nest at most 64 deep;
-//! nothing is allocated from a count the file declares, and every loop
-//! consumes bytes, so the work is bounded by the file size.
+//! [`OriginError`], never a panic; annotation groups nest at most 64 deep
+//! (`.opj`; the `.opju` reader does not recurse); nothing is allocated from a
+//! count the file declares, and every loop consumes bytes, so the work is
+//! bounded by the file size (an `.opju` also has a cell budget).
 //!
 //! The output uses only this crate's vocabulary (`f64` with `NaN` for a
 //! missing value, [`MetadataLine`]); the conversion to model columns belongs
@@ -29,6 +34,9 @@
 
 mod dataset;
 mod horiba;
+mod opju;
+mod opju_cells;
+mod opju_codec;
 mod reader;
 #[doc(hidden)]
 pub mod synthetic;
@@ -46,10 +54,12 @@ use reader::{le_f64, Blocks};
 pub enum OriginError {
     #[error("not an Origin project file")]
     NotOrigin,
-    #[error(
-        "Origin 2018+ .opju files are not supported: save the project as .opj from Origin 2018 to 2022b, or open it in the free Origin Viewer and save it as .opj"
-    )]
-    OpjuNotSupported,
+    #[error("unsupported Origin .opju structure at offset {offset:#x}: {what}")]
+    OpjuUnsupported { offset: usize, what: &'static str },
+    #[error("the Origin file declares more than {limit} cells")]
+    TooManyCells { limit: usize },
+    #[error("the Origin file declares more than {limit} bytes of text cells")]
+    TooMuchText { limit: usize },
     #[error("unsupported Origin file version {version}")]
     UnsupportedVersion { version: f64 },
     #[error("the Origin file is truncated at offset {offset:#x}")]
@@ -134,9 +144,15 @@ pub struct OriginProject {
     pub version: Option<f64>,
     pub books: Vec<OriginBook>,
     pub skipped: OriginSkipped,
+    /// `true` when the window section of an `.opju` was not understood to the
+    /// end: the books of the windows read are complete, the others come from
+    /// their datasets alone (dataset short names, no long name, designation
+    /// `Disregard`, sheets numbered from the `@N` suffix with empty names) and
+    /// the counts in `skipped` are incomplete. Always `false` for an `.opj`.
+    pub partial: bool,
 }
 
-/// Reads the workbooks of an Origin `.opj` file held in memory.
+/// Reads the workbooks of an Origin `.opj` or `.opju` file held in memory.
 pub fn read_project(bytes: &[u8]) -> Result<OriginProject, OriginError> {
     const MAX_SIGNATURE: usize = 256;
     let line_end = bytes
@@ -146,7 +162,7 @@ pub fn read_project(bytes: &[u8]) -> Result<OriginProject, OriginError> {
         .ok_or(OriginError::NotOrigin)?;
     let signature = &bytes[..line_end];
     if signature.starts_with(b"CPYUA") {
-        return Err(OriginError::OpjuNotSupported);
+        return opju::read(bytes, line_end + 1);
     }
     if !signature.starts_with(b"CPYA") {
         return Err(OriginError::NotOrigin);
@@ -155,6 +171,17 @@ pub fn read_project(bytes: &[u8]) -> Result<OriginProject, OriginError> {
     let global = blocks.object()?.ok_or(OriginError::ShortRecord {
         what: "global header",
     })?;
+    let version = check_version(global)?;
+    if blocks.size()? != 0 {
+        return Err(OriginError::BadDelimiter { offset: line_end });
+    }
+    let datasets = dataset::read_datasets(&mut blocks)?;
+    let windows = window::read_windows(&mut blocks)?;
+    Ok(assemble(version, datasets, windows, false))
+}
+
+/// The version of the global header, refused when it is too old.
+fn check_version(global: &[u8]) -> Result<Option<f64>, OriginError> {
     let version = le_f64(global, 0x1B);
     if let Some(v) = version {
         // Versions before 4.0 use another header layout.
@@ -162,29 +189,31 @@ pub fn read_project(bytes: &[u8]) -> Result<OriginProject, OriginError> {
             return Err(OriginError::UnsupportedVersion { version: v });
         }
     }
-    if blocks.size()? != 0 {
-        return Err(OriginError::BadDelimiter { offset: line_end });
-    }
-    let datasets = dataset::read_datasets(&mut blocks)?;
-    let windows = window::read_windows(&mut blocks)?;
-    Ok(assemble(version, datasets, windows))
+    Ok(version)
 }
 
 fn assemble(
     version: Option<f64>,
     datasets: Vec<Dataset>,
     windows: Vec<window::Window>,
+    partial: bool,
 ) -> OriginProject {
     let mut skipped = OriginSkipped::default();
     let mut matrix_names: HashSet<String> = HashSet::new();
     // Column data per book, in file order, taken once by the header that names it.
     let mut by_book: HashMap<String, Vec<Option<ColumnData>>> = HashMap::new();
+    let mut book_order: Vec<String> = Vec::new();
     for dataset in datasets {
         match dataset.kind {
-            DatasetKind::Column(column) => by_book
-                .entry(column.book.clone())
-                .or_default()
-                .push(Some(column)),
+            DatasetKind::Column(column) => {
+                if !by_book.contains_key(&column.book) {
+                    book_order.push(column.book.clone());
+                }
+                by_book
+                    .entry(column.book.clone())
+                    .or_default()
+                    .push(Some(column));
+            }
             DatasetKind::Matrix(name) => {
                 matrix_names.insert(name);
             }
@@ -204,10 +233,33 @@ fn assemble(
             None => skipped.graphs += 1,
         }
     }
+    if partial {
+        // The window section was cut short: the books it did not describe
+        // are built from their datasets alone, in file order.
+        for name in book_order {
+            if let Some(columns) = by_book.remove(&name) {
+                let window = window::Window {
+                    name,
+                    label: String::new(),
+                    storage: String::new(),
+                    layers: Vec::new(),
+                };
+                let mut book = build_book(window, columns);
+                // No header named the sheets: Origin's default names.
+                for (index, sheet) in book.sheets.iter_mut().enumerate() {
+                    if sheet.name.is_empty() {
+                        sheet.name = format!("Sheet{}", index + 1);
+                    }
+                }
+                books.push(book);
+            }
+        }
+    }
     OriginProject {
         version,
         books,
         skipped,
+        partial,
     }
 }
 

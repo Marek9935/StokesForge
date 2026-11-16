@@ -597,6 +597,7 @@ history-set-column-meta = Modifier les propriétés de la colonne
 history-set-column-meta-of = Modifier les propriétés de la colonne { $column }
 history-set-plot-spec = Modifier le graphique
 history-set-plot-spec-named = Modifier le graphique « { $name } »
+history-set-project-themes = Modifier les thèmes du projet
 history-set-saved-colors = Modifier les couleurs enregistrées
 history-sort-folder = Trier le dossier
 history-sort-folder-named = Trier le dossier « { $name } »
@@ -615,6 +616,7 @@ history-macro-remove-formula = Retirer la formule
 history-macro-delete-columns = Supprimer des colonnes
 history-macro-move-columns = Déplacer des colonnes
 history-macro-analyze-rows = Analyser des lignes
+history-macro-apply-theme = Appliquer un thème
 history-transpose-rows = Transposer les lignes
 history-recalculate-transpose = Recalculer la feuille transposée
 history-transpose-auto-on = Cocher Recalculer automatiquement
@@ -677,7 +679,9 @@ error-import-no-data = Aucune donnée après l'en-tête. Vérifier le nombre de 
 error-import-whitespace-thousands = L'espace ne peut pas à la fois séparer les colonnes et grouper les milliers. Choisir un autre séparateur de colonnes ou de milliers
 error-import-file = { $path } : { $detail }
 error-import-origin-not-origin = Le fichier n'est pas un projet Origin
-error-import-origin-opju = Les fichiers Origin au format .opju ne peuvent pas encore être ouverts. Enregistrer le projet en .opj depuis Origin 2018 à 2022b, ou l'ouvrir dans Origin Viewer (gratuit) et l'enregistrer en .opj
+error-import-origin-opju-unsupported = Ce fichier .opju utilise une partie du format que StokesForge ne sait pas encore lire. L'ouvrir dans Origin Viewer (gratuit) et l'enregistrer en .opj (Origin 2018 à 2022b sait aussi enregistrer en .opj)
+error-import-origin-too-many-cells = Le fichier Origin semble endommagé : il annonce plus de données qu'il ne peut en contenir
+error-import-origin-too-much-text = Le fichier Origin semble endommagé : il annonce plus de texte qu'il ne peut en contenir
 error-import-origin-version = Ce fichier Origin a été enregistré par une version que StokesForge ne sait pas lire
 error-import-origin-truncated = Le fichier Origin est incomplet. Il a peut-être été coupé pendant une copie ou un téléchargement
 error-import-origin-bad-structure = Le fichier Origin est abîmé : sa structure n'est pas valide
@@ -887,8 +891,7 @@ plot-axes-log-scale =
     .hint = Logarithme en base 10
 plot-axes-from = De
 plot-axes-from-auto = Auto
-    .hint = Les bornes suivent de nouveau les données. L'axe garde son sens
-    .disabled = Les bornes suivent déjà les données
+    .hint = Calcule maintenant la plage à partir des données, avec les marges de Préférences > Affichage > Graphiques, et l'écrit dans De et à. Elle ne suit plus les données. L'axe garde son sens
 plot-axes-display-section = Affichage
 plot-axes-decimal-comma = Virgule décimale sur les graduations
     .hint = Écrit 1,5 au lieu de 1.5 sur tous les axes de ce graphe, à l'écran et dans les exports
@@ -1119,6 +1122,13 @@ curve-color-by-bar = La couleur vient de la barre de couleurs de cette couche. R
 plot-theme-themes = Thèmes
 plot-theme-light = Clair
 plot-theme-dark = Sombre
+plot-theme-publication = Publication
+plot-theme-publication-wide = Publication large
+plot-theme-presentation = Présentation
+plot-theme-fit-residuals = Ajustement + résidus
+plot-theme-kinetics = Cinétique
+plot-theme-side-by-side = Côte à côte
+plot-theme-color-map = Carte de couleurs
 plot-theme-global-colors = Couleurs globales
 plot-theme-background = Fond
 plot-theme-text = Texte
@@ -1492,6 +1502,7 @@ history-plot-legend-text = Changer le texte de la légende
 history-plot-color-bar = Changer la barre de couleurs
 history-plot-fit-page = Ajuster la page à la disposition
 history-plot-fit-layout = Ajuster la disposition à la page
+history-plot-widen-ranges = Élargir les plages des axes
 
 # Panneaux fixes et fenêtres détachées (#100)
 panel-expand = Déployer le panneau
@@ -1984,6 +1995,7 @@ error-columns-group = Impossible de modifier les colonnes
 error-create-group = Impossible de créer les objets
 error-import-group = Impossible d'importer les fichiers
 error-group-close = Impossible de terminer l'opération en une seule étape d'annulation : { $cause }
+error-theme-undo-group = Le thème n'a pas pu être appliqué en une seule étape d'annulation : { $cause }
 error-paste-no-cell = Sélectionner une cellule où coller
 status-paste-absolute-empty = Rien à coller en absolu : copier d'abord depuis la grille
 status-import-done = { $imported ->
@@ -2019,6 +2031,10 @@ status-import-origin-done = Import terminé : { $sheets ->
     [one] { $books } classeur
    *[other] { $books } classeurs
     }
+status-import-origin-partial = { $books ->
+    [one] { $books } classeur importé
+   *[other] { $books } classeurs importés
+} ; une partie du fichier n'a pas pu être lue
 status-import-origin-left-wizard = { $count ->
     [one] Le fichier Origin a été déplacé
    *[other] { $count } fichiers Origin ont été déplacés
@@ -2036,6 +2052,7 @@ origin-import-summary = À créer : { $sheets ->
     [one] { $books } classeur
    *[other] { $books } classeurs
     }
+origin-import-partial = Une partie de ce fichier n'a pas pu être lue : certains classeurs gardent leurs données mais perdent noms longs, unités et rôles X/Y
 origin-import-accept =
     Importer
     .hint = Crée un classeur pour chaque classeur coché de la liste (Entrée)
@@ -2136,6 +2153,17 @@ preferences-display = Affichage
 preferences-display-interface = Interface
 preferences-display-object-manager = Gestionnaire d'objets
 preferences-display-new = Nouveaux
+preferences-display-graphs = Graphiques
+preferences-graphs-auto-range = Plage automatique des axes
+preferences-graphs-auto-range-note = Espace laissé autour des données quand un axe est automatique, en % de l'étendue des données. Un nouveau graphique écrit ses plages une fois avec ces valeurs ; les graphiques existants gardent les leurs. Les axes logarithmiques ne sont pas concernés.
+preferences-graphs-margin-left = Gauche (%)
+    .hint = Espace au bord gauche de la zone de tracé, en % de l'étendue des données. Un nouveau graphique écrit ses plages une fois. Par défaut 0.
+preferences-graphs-margin-right = Droite (%)
+    .hint = Espace au bord droit de la zone de tracé, en % de l'étendue des données. Un nouveau graphique écrit ses plages une fois. Par défaut 0.
+preferences-graphs-margin-bottom = Bas (%)
+    .hint = Espace au bord bas de la zone de tracé, en % de l'étendue des données, même sur un axe inversé. Un nouveau graphique écrit ses plages une fois. Par défaut 1.
+preferences-graphs-margin-top = Haut (%)
+    .hint = Espace au bord haut de la zone de tracé, en % de l'étendue des données, même sur un axe inversé. Un nouveau graphique écrit ses plages une fois. Par défaut 5.
 preferences-show-formula-help = Afficher l'aide de syntaxe des formules
     .hint = Affiche l'icône « ? » à côté des champs de texte qui acceptent une formule (titres, étiquettes, unités). Masquée, les champs gardent leur propre rappel.
 preferences-show-column-formula-help = Afficher l'aide de F(x)=
@@ -2288,7 +2316,21 @@ busy-stop = Arrêter
 status-import-stopped = Import arrêté. Rien n'a été importé
 status-page-edge-reached = Bord de la page atteint : tirez un coin pour agrandir la page
 status-figure-grew = L'image a dépassé la place gardée par la taille de figure Fixe. La zone de tracé a gardé sa taille
+status-ranges-written =
+    { $count ->
+        [one] La plage des axes de { $count } graphique a été écrite d'après les données. Enregistrez pour la conserver
+       *[other] Les plages des axes de { $count } graphiques ont été écrites d'après les données. Enregistrez pour les conserver
+    }
 status-recalculating = Recalcul en cours…
+status-axes-widened =
+    { $count ->
+        [one] Axe { $axes } élargi pour montrer la nouvelle série. Ctrl+Z annule la nouvelle plage
+       *[other] Axes { $axes } élargis pour montrer la nouvelle série. Ctrl+Z annule les nouvelles plages
+    }
+widen-axis-x = X
+widen-axis-y = Y
+widen-axis-top-x = X du haut
+widen-axis-right-y = Y de droite
 status-recalc-stopped = Recalcul arrêté. La modification a été annulée
 
 analysis-baseline-constant = Constante…

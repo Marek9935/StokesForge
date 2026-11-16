@@ -1822,7 +1822,17 @@ impl StokesForgeApp {
             self.commit_view_entries(ctx);
         }
         let action = self.prepare_new_project_action(ctx, action);
-        self.dispatch_action(ctx, action)
+        // The margins of the automatic framing (#529) change what every open
+        // graph draws: the root and each detached window look again.
+        let margins_changed = matches!(action, Action::SetAutoMargins(_));
+        let stop = self.dispatch_action(ctx, action);
+        if margins_changed {
+            ctx.request_repaint();
+            for viewport in self.open_viewports() {
+                ctx.request_repaint_of(viewport);
+            }
+        }
+        stop
     }
 
     /// Captures the presentation effects before the command, then applies them to its result.
@@ -2267,7 +2277,7 @@ mod tests {
     //! of the windows by [`StokesForgeApp::new`], and the measurement of a full
     //! frame. Detaching is tested in `window_detach.rs`, each
     //! surface in its module.
-    use super::graph_window::tests::plotted_graph;
+    use super::graph_window::tests::{plotted_graph, plotted_graph_written};
     use super::grid::{header_rows, set_header_rows, HeaderRows};
     use super::*;
     use crate::theme;
@@ -3518,7 +3528,7 @@ mod tests {
     }
 
     fn saved_windows(detach_book: bool) -> SavedWindows {
-        let (session, graph) = plotted_graph();
+        let (session, graph) = plotted_graph_written();
         let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let mut app = StokesForgeApp::new(state);
         let book = app.state.books()[0].0;

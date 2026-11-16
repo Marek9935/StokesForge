@@ -95,11 +95,14 @@ pub enum MacroKind {
     /// Analyze rows: the linked transposed sheet (created or completed)
     /// and the calculation on its column, undone as one block (#253).
     AnalyzeRows,
+    /// Apply a graph theme (some style families) to one or several graphs
+    /// (#538): one `SetPlotSpec` per changed graph, undone as one block.
+    ApplyTheme,
 }
 
 impl MacroKind {
     /// All the group kinds, for exhaustive tests.
-    pub const ALL: [MacroKind; 20] = [
+    pub const ALL: [MacroKind; 21] = [
         MacroKind::PasteCells,
         MacroKind::PasteObjects,
         MacroKind::DuplicateObjects,
@@ -120,6 +123,7 @@ impl MacroKind {
         MacroKind::DeleteColumns,
         MacroKind::MoveColumns,
         MacroKind::AnalyzeRows,
+        MacroKind::ApplyTheme,
     ];
 }
 
@@ -228,6 +232,8 @@ pub enum HistoryLabel {
     },
     /// Changing the colors saved in the project.
     SetSavedColors,
+    /// Changing the graph themes saved in the project (#540).
+    SetProjectThemes,
     /// Putting a folder back in automatic (sorted) order, or in manual order (#425).
     SortFolder {
         /// Name of the folder.
@@ -323,9 +329,12 @@ pub enum PlotEditKind {
     FitPage,
     /// The layout of a graph fitted to its page (#505, K1).
     FitLayout,
+    /// The written axis ranges widened to show a series just added (#529):
+    /// its own history step, after the add.
+    WidenRanges,
 }
 impl PlotEditKind {
-    pub const ALL: [Self; 29] = [
+    pub const ALL: [Self; 30] = [
         Self::Visibility,
         Self::RenameSeries,
         Self::ReorderSeries,
@@ -355,6 +364,7 @@ impl PlotEditKind {
         Self::ColorBar,
         Self::FitPage,
         Self::FitLayout,
+        Self::WidenRanges,
     ];
 }
 impl std::fmt::Display for PlotEditKind {
@@ -389,6 +399,7 @@ impl std::fmt::Display for PlotEditKind {
             Self::ColorBar => "Change Color Bar",
             Self::FitPage => "Fit Page to Layout",
             Self::FitLayout => "Fit Layout to Page",
+            Self::WidenRanges => "Widen Axis Ranges",
         })
     }
 }
@@ -425,6 +436,7 @@ impl fmt::Display for MacroKind {
             MacroKind::DeleteColumns => "Delete Columns",
             MacroKind::MoveColumns => "Move Columns",
             MacroKind::AnalyzeRows => "Analyze Rows",
+            MacroKind::ApplyTheme => "Apply Theme",
         })
     }
 }
@@ -490,6 +502,7 @@ impl fmt::Display for HistoryLabel {
             HistoryLabel::SetPlotSpec { name: None } => f.write_str("Edit Graph"),
             HistoryLabel::EditPlotSpec(kind) => kind.fmt(f),
             HistoryLabel::SetSavedColors => f.write_str("Edit Saved Colors"),
+            HistoryLabel::SetProjectThemes => f.write_str("Edit Project Themes"),
             HistoryLabel::SortFolder { name: Some(name) } => write!(f, "Sort Folder “{name}”"),
             HistoryLabel::SortFolder { name: None } => f.write_str("Sort Folder"),
             HistoryLabel::ReplaceAnalysisData(kind) => {

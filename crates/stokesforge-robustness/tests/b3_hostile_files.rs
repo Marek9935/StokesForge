@@ -1015,3 +1015,95 @@ fn b3_a_followed_sheet_read_by_its_own_source_does_not_loop() {
         );
     }
 }
+
+/// #540: the themes saved in a file are data anyone can forge. A theme that
+/// cannot be decoded (an out-of-range layer, a field of another type, a
+/// variant this reader does not know) is dropped alone; a nameless one too; a
+/// name taken twice keeps the first; a huge name is cut. The file still opens.
+#[test]
+fn b3_hostile_project_themes() {
+    use stokesforge_persistence::load_with_report;
+
+    #[derive(Serialize)]
+    struct ThemeRec {
+        name: String,
+        colors_only: bool,
+        style: PlotSpecRecord,
+    }
+    #[derive(Serialize)]
+    struct FileBodyThemes {
+        root: u64,
+        next_id_hint: u64,
+        nodes: Vec<NodeRecord>,
+        project_themes: Vec<rmpv::Value>,
+    }
+    let record = |name: &str, row: u64| {
+        let style = PlotSpecRecord {
+            panels: vec![PanelSpecRecord {
+                row,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let rec = ThemeRec {
+            name: name.into(),
+            colors_only: false,
+            style,
+        };
+        // Through named MessagePack: `to_value` would write structs as arrays.
+        rmp_serde::from_slice::<rmpv::Value>(&rmp_serde::to_vec_named(&rec).unwrap()).unwrap()
+    };
+    let mut themes = vec![
+        record("Good", 0),
+        record("Far layer", u64::MAX),
+        record("  ", 0),
+        record("good", 0),
+        record(&"é".repeat(5_000), 0),
+        // Wrong types and unknown shapes.
+        rmpv::Value::from("not a record"),
+        rmpv::Value::Nil,
+        rmp_serde::from_slice::<rmpv::Value>(&rmp_serde::to_vec_named(&wrong_style()).unwrap())
+            .unwrap(),
+    ];
+    for i in 0..400 {
+        themes.push(record(&format!("t{i}"), 0));
+    }
+    let body = FileBodyThemes {
+        root: 1,
+        next_id_hint: 2,
+        nodes: vec![folder(1, "R", None, vec![])],
+        project_themes: themes,
+    };
+    let dir = TempDir::new().unwrap();
+    let payload = rmp_serde::to_vec_named(&body).unwrap();
+    let path = dir.path().join("themes.stf");
+    let mut f = std::fs::File::create(&path).unwrap();
+    f.write_all(b"STKF").unwrap();
+    f.write_all(&1u32.to_le_bytes()).unwrap();
+    f.write_all(&payload).unwrap();
+    drop(f);
+    let (project, _, _) = load_with_report(&path).expect("hostile themes do not fail the file");
+    let names: Vec<&str> = project
+        .tree()
+        .project_themes()
+        .iter()
+        .map(|t| t.name.as_str())
+        .collect();
+    assert_eq!(names[0], "Good");
+    assert!(!names.contains(&"Far layer") && !names.contains(&"good"));
+    assert_eq!(
+        names[1].chars().count(),
+        stokesforge_plot::MAX_THEME_NAME_CHARS
+    );
+    assert_eq!(names.len(), stokesforge_plot::MAX_THEMES);
+}
+
+fn wrong_style() -> std::collections::BTreeMap<&'static str, rmpv::Value> {
+    [
+        ("name", rmpv::Value::from("Wrong style")),
+        ("colors_only", rmpv::Value::from(false)),
+        ("style", rmpv::Value::from(12)),
+    ]
+    .into_iter()
+    .collect()
+}

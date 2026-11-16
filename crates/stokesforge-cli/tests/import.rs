@@ -278,3 +278,104 @@ fn a_truncated_origin_file_names_the_file_and_does_not_panic() {
         "{output}"
     );
 }
+
+#[test]
+fn a_truncated_opju_is_skipped_by_name_and_does_not_panic() {
+    let dir = isolated();
+    let bytes = std::fs::read(fixture("origin/synthetic.opju")).unwrap();
+    let cut = dir.path().join("cut.opju");
+    std::fs::write(
+        &cut,
+        &bytes[..stokesforge_import::origin::synthetic::FIRST_DATASET_OFFSET + 3],
+    )
+    .unwrap();
+    let error = run(&["import", cut.to_str().unwrap()]).0.unwrap_err();
+    assert!(error.contains("cut.opju"), "{error}");
+    let (result, output) = run(&[
+        "import",
+        cut.to_str().unwrap(),
+        &fixture("origin/synthetic.opju"),
+    ]);
+    result.unwrap();
+    assert!(
+        output.contains("skipped: ") && output.contains("cut.opju"),
+        "{output}"
+    );
+}
+
+#[test]
+fn a_partly_read_opju_prints_a_warning_line_and_still_writes_the_books() {
+    let dir = isolated();
+    let path = dir.path().join("cut.opju");
+    use stokesforge_import::origin::{synthetic, OriginDesignation};
+    let book = |name: &str| synthetic::Book {
+        short_name: name.into(),
+        long_name: String::new(),
+        sheets: vec![synthetic::Sheet {
+            name: "Data".into(),
+            columns: vec![synthetic::Column::numbers(
+                "A",
+                OriginDesignation::Y,
+                &[1.0, 2.0],
+            )],
+        }],
+        horiba_xml: None,
+    };
+    let bytes = synthetic::write_opju(&synthetic::Project {
+        books: vec![book("B1"), book("B2")],
+        opju_bad_annotation: Some(1),
+        ..Default::default()
+    });
+    std::fs::write(&path, bytes).unwrap();
+    let out_path = dir.path().join("out.stf");
+    let (result, output) = run(&[
+        "import",
+        "--out",
+        out_path.to_str().unwrap(),
+        path.to_str().unwrap(),
+    ]);
+    result.unwrap();
+    assert!(
+        output.contains("cut.opju: part of the file could not be read; long names, units and X/Y roles may be missing"),
+        "{output}"
+    );
+    assert!(output.contains("Origin book \"B2\""), "{output}");
+    assert!(out_path.exists());
+}
+
+#[test]
+fn an_opju_project_gives_the_same_workbooks_as_its_opj_twin() {
+    let dir = isolated();
+    let mut projects = Vec::new();
+    for name in ["opj", "opju"] {
+        let out_path = dir.path().join(format!("{name}.stf"));
+        let (result, output) = run(&[
+            "import",
+            "--out",
+            out_path.to_str().unwrap(),
+            &fixture(&format!("origin/synthetic.{name}")),
+        ]);
+        result.unwrap();
+        assert!(output.contains("Origin book \"Sample book\""), "{output}");
+        projects.push(load(&out_path));
+    }
+    for project in &projects {
+        assert!(project.resolve_path("[Sample book]Note").is_err());
+        assert!(
+            project.resolve_path("[Sample book]Data").is_ok(),
+            "the Data sheet of the Origin book"
+        );
+    }
+    let values = |project: &stokesforge_core::Project| {
+        let sheet = project.resolve_path("[Sample book]Data").unwrap();
+        let columns = project.tree().node(sheet).unwrap().children().to_vec();
+        columns
+            .iter()
+            .map(|id| {
+                let column = project.tree().node(*id).unwrap().as_column().unwrap();
+                (column.meta().long_name.clone(), column.meta().unit.clone())
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(values(&projects[0]), values(&projects[1]));
+}

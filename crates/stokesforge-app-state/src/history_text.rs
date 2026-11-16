@@ -153,7 +153,9 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
             PlotEditKind::ColorBar => tr!("history-plot-color-bar"),
             PlotEditKind::FitPage => tr!("history-plot-fit-page"),
             PlotEditKind::FitLayout => tr!("history-plot-fit-layout"),
+            PlotEditKind::WidenRanges => tr!("history-plot-widen-ranges"),
         },
+        HistoryLabel::SetProjectThemes => tr!("history-set-project-themes"),
         HistoryLabel::SetSavedColors => tr!("history-set-saved-colors"),
         HistoryLabel::SortFolder { name: None } => tr!("history-sort-folder"),
         HistoryLabel::SortFolder { name: Some(name) } => {
@@ -217,6 +219,7 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
             MacroKind::DeleteColumns => tr!("history-macro-delete-columns"),
             MacroKind::MoveColumns => tr!("history-macro-move-columns"),
             MacroKind::AnalyzeRows => tr!("history-macro-analyze-rows"),
+            MacroKind::ApplyTheme => tr!("history-macro-apply-theme"),
         },
     }
 }

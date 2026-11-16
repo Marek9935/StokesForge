@@ -32,6 +32,7 @@
 
 pub mod analysis;
 pub mod analysis_recent;
+pub mod builtin_themes;
 pub mod cell_sides;
 pub mod column_move;
 pub mod creation_folder;
@@ -42,6 +43,7 @@ pub mod file_picker;
 mod formula_entry;
 pub mod formula_help;
 pub mod frame_sizes;
+pub mod grid_autoscroll;
 pub mod history_text;
 pub mod i18n;
 pub mod length_unit;
@@ -58,5 +60,9 @@ pub mod spring_load;
 pub mod startup;
 pub mod state;
 pub mod text_format;
+pub mod theme_apply;
+pub mod theme_specimen;
 pub mod tree_drop;
 pub mod user_colors;
+pub mod user_themes;
+pub mod widen;

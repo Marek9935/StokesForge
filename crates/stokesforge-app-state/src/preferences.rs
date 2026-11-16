@@ -288,6 +288,11 @@ struct PreferencesFile {
     /// unreadable: decimal point.
     #[serde(default, deserialize_with = "lenient")]
     new_graph_decimal_comma: Option<bool>,
+    /// Margins of the automatic axis framing (#529), an object
+    /// `{left, right, bottom, top}` in percent; a missing, unreadable or
+    /// out-of-range member takes its own default (see [`read_auto_margins`]).
+    #[serde(default, deserialize_with = "lenient")]
+    auto_margins: Option<serde_json::Value>,
     /// « Text from » of the legend of **new** graphs (#499), as a
     /// [`stokesforge_plot::LegendTextFrom`] key; missing or unreadable: the
     /// long name.
@@ -298,6 +303,11 @@ struct PreferencesFile {
     /// finds it again. Missing or unreadable: empty.
     #[serde(default, deserialize_with = "lenient")]
     new_graph_legend_template: Option<String>,
+    /// Default theme of **new** graphs (#539), a [`crate::user_themes::ThemeRef`]
+    /// key (built-in or user theme); missing, unreadable or a project theme:
+    /// none.
+    #[serde(default, deserialize_with = "lenient")]
+    new_graph_theme: Option<String>,
     /// "Keep in Results" remembered per analysis operation (M5, #148), by
     /// [`OperationKind::key`]. Kept raw: an unreadable entry is dropped alone.
     #[serde(default)]
@@ -378,7 +388,9 @@ pub struct Preferences {
     show_column_formula_help: bool,
     import_guide_hidden: bool,
     new_graph_decimal_comma: bool,
+    auto_margins: stokesforge_render::AutoMargins,
     new_graph_legend_text: stokesforge_plot::LegendText,
+    new_graph_theme: Option<crate::user_themes::ThemeRef>,
     analysis_keep_by_operation: BTreeMap<String, bool>,
     panels: PanelLayout,
     default_folders: [Option<String>; 3],
@@ -454,11 +466,17 @@ impl Preferences {
             show_column_formula_help: file.show_column_formula_help.unwrap_or(true),
             import_guide_hidden: file.import_guide_hidden.unwrap_or(false),
             new_graph_decimal_comma: file.new_graph_decimal_comma.unwrap_or(false),
+            auto_margins: read_auto_margins(file.auto_margins.as_ref()),
             new_graph_legend_text: stokesforge_plot::LegendText {
                 from: new_graph_legend_choice(file.new_graph_legend_text.as_deref()),
                 template: file.new_graph_legend_template.unwrap_or_default(),
                 row_column: None,
             },
+            new_graph_theme: file
+                .new_graph_theme
+                .as_deref()
+                .and_then(crate::user_themes::ThemeRef::from_key)
+                .filter(|theme| !matches!(theme, crate::user_themes::ThemeRef::Project(_))),
             analysis_keep_by_operation: read_keep_by_operation(file.analysis_keep_by_operation),
             panels: PanelLayout::from_json(file.panels.as_ref()),
             default_folders: [
@@ -658,6 +676,27 @@ impl Preferences {
         self.save_field("new_graph_decimal_comma", comma.into())
     }
 
+    /// Margins of the automatic axis framing (#529), in percent of the data
+    /// extent: 0 / 0 / 1 / 5 (left / right / bottom / top) by default. A user
+    /// preference, never written in a project.
+    pub fn auto_margins(&self) -> stokesforge_render::AutoMargins {
+        self.auto_margins
+    }
+
+    /// Remembers the margins; each is held to `0..=100` (a non-finite one
+    /// takes its default).
+    pub fn save_auto_margins(
+        &mut self,
+        margins: stokesforge_render::AutoMargins,
+    ) -> std::io::Result<()> {
+        self.auto_margins = clamp_auto_margins(margins);
+        let m = self.auto_margins;
+        self.save_field(
+            "auto_margins",
+            serde_json::json!({"left": m.left, "right": m.right, "bottom": m.bottom, "top": m.top}),
+        )
+    }
+
     /// « Text from » and custom template given to the legend of **new**
     /// graphs (#499, #502): the long name by default. The template is kept
     /// whatever the choice; it is read only under Custom. `row_column` is
@@ -684,6 +723,29 @@ impl Preferences {
         ];
         self.new_graph_legend_text = text;
         self.save_fields(fields)
+    }
+
+    /// Default theme of new graphs (#539): a built-in or a user theme, never a
+    /// project theme. Whether it still exists is for the library to say (a
+    /// deleted one falls back to none, see `AppState::new_graph_theme`).
+    pub fn new_graph_theme(&self) -> Option<&crate::user_themes::ThemeRef> {
+        self.new_graph_theme.as_ref()
+    }
+
+    /// Remembers the default theme of new graphs (`None`: no theme), in one
+    /// write, without replacing the other preferences. A project theme is
+    /// refused (stored as none): it belongs to one project.
+    pub fn save_new_graph_theme(
+        &mut self,
+        theme: Option<crate::user_themes::ThemeRef>,
+    ) -> std::io::Result<()> {
+        let theme =
+            theme.filter(|theme| !matches!(theme, crate::user_themes::ThemeRef::Project(_)));
+        let value = theme
+            .as_ref()
+            .map_or(serde_json::Value::Null, |theme| theme.key().into());
+        self.new_graph_theme = theme;
+        self.save_field("new_graph_theme", value)
     }
 
     /// Size cap of a `.stf` on open, in MB (A2, #316); 512 by default, always within
@@ -1033,6 +1095,43 @@ fn default_path() -> Option<PathBuf> {
     stokesforge_import::config_dir::config_dir().map(|dir| dir.join("preferences.json"))
 }
 
+/// Reads the margins of the automatic framing (#529): each member of the
+/// object is taken if it is a number from 0 to 100, else it keeps its default.
+fn read_auto_margins(value: Option<&serde_json::Value>) -> stokesforge_render::AutoMargins {
+    let defaults = stokesforge_render::AutoMargins::default();
+    let member = |key: &str, default: f64| {
+        value
+            .and_then(|object| object.get(key))
+            .and_then(serde_json::Value::as_f64)
+            .filter(|percent| (0.0..=100.0).contains(percent))
+            .unwrap_or(default)
+    };
+    stokesforge_render::AutoMargins {
+        left: member("left", defaults.left),
+        right: member("right", defaults.right),
+        bottom: member("bottom", defaults.bottom),
+        top: member("top", defaults.top),
+    }
+}
+
+/// The margins held to `0..=100`; a non-finite one takes its default.
+fn clamp_auto_margins(margins: stokesforge_render::AutoMargins) -> stokesforge_render::AutoMargins {
+    let defaults = stokesforge_render::AutoMargins::default();
+    let hold = |percent: f64, default: f64| {
+        if percent.is_finite() {
+            percent.clamp(0.0, 100.0)
+        } else {
+            default
+        }
+    };
+    stokesforge_render::AutoMargins {
+        left: hold(margins.left, defaults.left),
+        right: hold(margins.right, defaults.right),
+        bottom: hold(margins.bottom, defaults.bottom),
+        top: hold(margins.top, defaults.top),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1298,6 +1397,38 @@ mod tests {
     }
 
     // -- Preferences window settings (#148, lot A) --
+
+    /// #529: the margins are written, read back, and each unreadable or
+    /// out-of-range member falls back alone.
+    #[test]
+    fn the_auto_margins_round_trip_and_fall_back_member_by_member() {
+        let defaults = stokesforge_render::AutoMargins::default();
+        let (_dir, path) = written(r#"{"language":"fr"}"#);
+        let mut preferences = Preferences::load_from(Some(path.clone()));
+        assert_eq!(preferences.auto_margins(), defaults, "missing: defaults");
+        let margins = stokesforge_render::AutoMargins {
+            left: 2.5,
+            right: 3.0,
+            bottom: 0.0,
+            top: 100.0,
+        };
+        preferences.save_auto_margins(margins).unwrap();
+        let reread = Preferences::load_from(Some(path));
+        assert_eq!(reread.auto_margins(), margins);
+        assert_eq!(reread.language(), Some("fr"));
+        let (_dir, path) = written(
+            r#"{"auto_margins":{"left":"x","right":-3,"bottom":250,"top":7.5},"language":"fr"}"#,
+        );
+        let preferences = Preferences::load_from(Some(path));
+        let read = preferences.auto_margins();
+        assert_eq!(read.left, defaults.left);
+        assert_eq!(read.right, defaults.right);
+        assert_eq!(read.bottom, defaults.bottom, "out of range: default");
+        assert_eq!(read.top, 7.5);
+        let (_dir, path) = written(r#"{"auto_margins":12}"#);
+        let preferences = Preferences::load_from(Some(path));
+        assert_eq!(preferences.auto_margins(), defaults);
+    }
 
     /// A value of the wrong type, or outside the list, falls back to its own
     /// default and never spoils the field next to it (#297).

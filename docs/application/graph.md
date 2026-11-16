@@ -459,6 +459,79 @@ setting overwrites what had been set one by one, and nothing more is remembered
 window: a single history step on confirmation. The themes leave the
 text and the axes on automatic, so they follow the background.
 
+**Themes engine (#538, engine only: no screen yet)**. A graph theme is a style
+snapshot of a whole graph, applied to other graphs **by families** (#514, forms
+514-1 to 514-4). `stokesforge_plot::GraphTheme::capture` copies a `PlotSpec` and
+strips every data reference (series columns and names, free texts, shapes,
+dragged positions, legend and colour bar row columns, colour bar segments,
+group names, stale warning); two graphs that differ only by data give equal
+themes. `ThemeFamily` names the nine families (Background, Texts, Title fonts,
+Axes, Axis ranges, Size and page, Legend, Curves, Colour bar; stable `key()`),
+`ThemeFamilies` is the checked set, and `PlotSpec::apply_theme_families` copies
+only the checked ones. Each style field is in exactly one family or in « never »:
+the table is the destructuring guard `every_field_has_a_family` at the end of
+`theme_family.rs`, which stops compiling when a field is added to `PlotSpec`,
+`PanelSpec`, `AxisSpec`, `SeriesSpec`, `LegendSpec` or `ColorBarSpec` without a
+class. Shape mismatch: layer `i` of the target takes theme layer `min(i, last)`;
+curves cycle inside a layer; grid widths and heights go by index, the surplus
+takes the last; free frames go by index with a surplus layer **offset** to the
+right of the last frame (`SURPLUS_GAP`), never on the same frame. Axis ranges
+carry From and To only (#529); an axis that ends on a log scale with a range
+that is impossible for log goes back to automatic. What needs the project lives
+in `stokesforge-app-state::theme_apply`: switching grid and free placement
+through `frame_sizes::set_placement_in_draft` when the Size and page family is
+applied, and the « Add missing layers » option (off by default: only the
+existing layers are styled; on: empty layers are added beside or below, like
+the theme's own layout). Light and Dark stay **colour-only** themes
+(`GraphTheme::from_colors`, `colors_only`): applying one writes background, text
+colour and axes colour, each behind its family, and nothing else. Applying to
+N graphs is `Action::ApplyTheme`, one `MacroKind::ApplyTheme` step
+(`docs/commands-and-history.md`).
+
+**Built-in themes (#544, S7 of #514; data part, the picker tiles come with #541)**.
+`stokesforge_app_state::builtin_themes` is the catalogue, in this fixed order
+(the index is `ThemeRef::Builtin`, the key is the stable identity in
+`user_themes.json`, the displayed name is the catalog key `plot-theme-<key>`):
+Light (`light`) and Dark (`dark`), colour-only as before; then seven full-style
+themes, each built with the ordinary constructors and passed through
+`GraphTheme::capture` (so it holds no data): **Publication** (`publication`: one
+layer, plot area 8.5 cm wide, closed frame, ticks inside, black and greys,
+8-9 pt texts), **Publication Wide** (`publication-wide`: 17 cm), **Presentation**
+(`presentation`: large texts, 3 pt lines), **Fit + Residuals** (`fit-residuals`:
+two stacked layers, plot area heights 3:1, X numbers and title only under the
+bottom layer, data as red points and the fit as a line, residuals as points),
+**Kinetics** (`kinetics`: a group on the Viridis gradient, colour bar on the
+right), **Side by Side** (`side-by-side`: two equal layers in one row) and
+**Color Map** (`color-map`: a group on the Plasma gradient, colour bar, no
+legend). **No built-in has a grid.** What a theme cannot express: the dashed
+zero line of the residuals (a line at `y = 0` is a data object; a theme holds
+none), so the bottom layer carries the points only. Every built-in is editable
+(an override, `UserThemes::set_builtin_from_graph`) and comes back with Reset.
+Names of user and project themes are never translated; a user theme cannot take
+the English name of a built-in. Order in the picker (`UserThemes::ranked`):
+Light and Dark **always first**, then every other theme by use count, ties in
+catalogue order, then creation order. The manual reference comes with the picker
+(#541).
+
+**Theme specimens (#543, S6 of #514; the tiles come with the picker)**. A tile
+shows what a theme looks like by drawing its **structure and style on reference
+data shipped with the application**: `stokesforge_app_state::theme_specimen`.
+The reference project (`reference_tree`) is built once, lazily and
+deterministically, and is never part of the user's project nor saved: a
+« Wavelength » (nm) column with three Gaussian bands « Molecule A/B/C » (a.u.),
+and a « Reaction time » (h) column with two groups of three « Conversion »
+(mol/L) curves, each with its x' value for a colour bar. Long names and units
+are filled, so axis titles that read column variables look real.
+`specimen(&GraphTheme) -> PlotSpec` keeps the theme's whole structure and style
+and replaces the data layer by layer: 1, 2 or at least 3 ungrouped series give
+1, 2 or 3 curves in the theme's series styles, in order; at most 2 groups of at
+most 3 curves keep their gradient, name and colour bar segment (the segments of
+dropped groups go, and the bar with them when none is left); a layer without
+series gets one curve; axis ranges are automatic; annotations and shapes are
+dropped. A colour-only theme (Light, Dark) is a fresh new graph in its colours
+with three Gaussians. The drawing is cached per theme and scaled whole by
+`stokesforge_render_egui::drawings` (`docs/rendering.md`).
+
 **Color picker** (`crate::color_picker`): every color of the
 window is chosen with a swatch button (`color_field`/`color_button`)
 that opens a pop-up window, **collapsed**: palette, "Auto"

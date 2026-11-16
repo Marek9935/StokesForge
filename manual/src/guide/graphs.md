@@ -281,9 +281,11 @@ In the **Scale** section:
 
 - Tick **Log scale** for a base-10 logarithmic axis. Without it the axis is linear. Zero and negative values are not drawn on a log axis.
 - Type two values in **From** and **to** to fix the range. The order is free: if the first value is larger than the second, the axis is reversed. This is useful for spectra plotted in wavenumbers.
-- Click **Auto** to let the range follow the data again. The axis keeps its direction.
+- Click **Auto** to compute the range from the data once and write it in **From** and **to**, with the margins of Preferences (**Display** > **Graphs**). The range does not follow the data afterwards, and the axis keeps its direction.
 
-While the range is automatic, the two fields show the range StokesForge computed.
+A new graph does the same when it is created: its ranges are written once, so they never move by themselves.
+
+When you add a series that goes beyond the range (by dragging columns onto the graph, with **Add rows**, or with an analysis result), the axis widens at once on the side that is exceeded, with the same margins, and an orange message tells you so. It is a step of its own in the history: **Ctrl+Z** once gives the old range back and keeps the series, **Ctrl+Z** a second time removes the series. When you open a project made with an earlier version, the ranges that were left on automatic are written once in the same way, the figures may be reframed slightly, and the project is marked as modified: save it to keep them.
 
 <img src="../images/graphs-axes-log-scale.png" alt="The Bottom axis with Log scale ticked, the axes listed at the left." width="480">
 
@@ -505,7 +507,7 @@ Additions go to the **active layer**. A small numbered badge for each layer sits
 
 These actions use the active layer: dropping columns, **Send to**, **Add Text** and **New Layer**.
 
-Zoom and pan act on all the layers that share a plot area, so the ticks stay aligned.
+Zoom and pan act on all the layers that share a plot area.
 
 ## Several layers side by side
 

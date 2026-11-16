@@ -48,15 +48,19 @@ pub(super) fn frame_of(
     output
 }
 
-/// [`frame_of`] as seen by the viewport `viewport` (a detached window).
-pub(super) fn frame_in(
+/// [`frame_of`] as seen by the viewport `viewport` (a detached window), the frame
+/// at the absolute `time` in seconds (`None`: egui's default, 1/60 s after the
+/// previous frame of that viewport); a drag that scrolls with time needs real steps.
+pub(super) fn frame_in_after(
     context: &egui::Context,
     viewport: egui::ViewportId,
     size: egui::Vec2,
     events: Vec<egui::Event>,
+    time: Option<f64>,
     content: impl FnMut(&mut egui::Ui),
 ) -> egui::FullOutput {
     let mut raw = raw_input(size, events);
+    raw.time = time;
     raw.viewport_id = viewport;
     raw.viewports
         .insert(viewport, egui::ViewportInfo::default());

@@ -700,3 +700,104 @@ fn b13_a_hostile_grid_slack_is_sanitized_and_the_figure_stays_bounded() {
         );
     }
 }
+
+/// #538: a theme is data a user can store and share, so a hostile one (NaN and
+/// infinite sizes, free frames out of range, layers without curves) must apply
+/// to a grid graph and a free graph without panicking, and leave sizes the
+/// renderer reads back within bounds (invariant 10).
+#[test]
+fn b13_a_hostile_theme_applies_without_panic_and_stays_bounded() {
+    use stokesforge_plot::{
+        FreeFrame, FreePage, GraphTheme, LayerPlacement, ThemeFamilies, MAX_FRAME_SIZE,
+    };
+    let hostile = [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -5.0, 0.0, 1e300];
+    for placement in [LayerPlacement::Grid, LayerPlacement::Free] {
+        let mut spec = PlotSpec::empty("hostile");
+        spec.layer_placement = placement;
+        spec.frame_widths = hostile.to_vec();
+        spec.frame_heights = hostile.to_vec();
+        spec.figure_left = Some(f64::NAN);
+        spec.free_page = Some(FreePage {
+            left: f64::NAN,
+            top: f64::INFINITY,
+            width: -1.0,
+            height: 1e300,
+        });
+        let mut panels = Panels::new([]);
+        for value in hostile {
+            panels.push(PanelSpec {
+                free_frame: Some(FreeFrame {
+                    left: value,
+                    top: value,
+                    width: value,
+                    height: value,
+                    stack: i32::MAX,
+                }),
+                ..PanelSpec::at(0, 0)
+            });
+        }
+        spec.panels = panels;
+        let theme = GraphTheme::capture("hostile", &spec);
+        for target_placement in [LayerPlacement::Grid, LayerPlacement::Free] {
+            let mut target = PlotSpec {
+                layer_placement: target_placement,
+                ..PlotSpec::default()
+            };
+            target.panels.push(PanelSpec::at(0, 1));
+            target.apply_theme_families(&theme, ThemeFamilies::all());
+            for width in target.sanitized_frame_widths().into_iter().flatten() {
+                assert!(width.is_finite() && (36.0..=MAX_FRAME_SIZE).contains(&width));
+            }
+            for panel in target.panels.iter() {
+                let frame = panel.sanitized_free_frame();
+                assert!(frame.left.is_finite() && frame.width.is_finite());
+            }
+            // An empty-handed theme copies nothing and never panics.
+            let empty = GraphTheme::capture("empty", &PlotSpec::default());
+            target.apply_theme_families(&empty, ThemeFamilies::all());
+        }
+    }
+}
+
+/// #540: the themes of a project are bounded however they arrive. A command
+/// refuses an over-long list, a huge name and a duplicate; the codec of a
+/// store cuts a longer list and a longer name instead of failing.
+#[test]
+fn b13_project_themes_are_bounded() {
+    use stokesforge_commands::{Command, History};
+    use stokesforge_plot::{GraphTheme, MAX_THEMES, MAX_THEME_NAME_CHARS};
+    let theme = |name: String| GraphTheme::capture(name, &PlotSpec::empty("t"));
+
+    let mut project = Project::new("P").unwrap();
+    let mut history = History::new();
+    let exact: Vec<_> = (0..MAX_THEMES).map(|i| theme(format!("t{i}"))).collect();
+    history
+        .execute(&mut project, Command::SetProjectThemes { themes: exact })
+        .expect("exactly the cap is fine");
+    let mut over: Vec<_> = (0..=MAX_THEMES).map(|i| theme(format!("t{i}"))).collect();
+    assert!(history
+        .execute(
+            &mut project,
+            Command::SetProjectThemes {
+                themes: over.clone()
+            }
+        )
+        .is_err());
+    over.truncate(1);
+    over[0].name = "n".repeat(MAX_THEME_NAME_CHARS + 1);
+    assert!(history
+        .execute(&mut project, Command::SetProjectThemes { themes: over })
+        .is_err());
+    assert_eq!(project.tree().project_themes().len(), MAX_THEMES);
+
+    // The codec of a store cuts instead of failing.
+    let many: Vec<_> = (0..MAX_THEMES * 3)
+        .map(|i| theme(format!("{}{i}", "n".repeat(500))))
+        .collect();
+    let back = stokesforge_persistence::decode_themes(
+        &stokesforge_persistence::encode_themes(&many).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(back.len(), 1, "names cut to the same text collide");
+    assert_eq!(back[0].name.chars().count(), MAX_THEME_NAME_CHARS);
+}

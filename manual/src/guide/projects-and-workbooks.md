@@ -245,6 +245,8 @@ To restore the default, right-click the letter and choose **Reset Width**. Chang
 
 Use the arrow keys to move between cells. <kbd>Tab</kbd> moves to the next column. <kbd>Enter</kbd> on the last row moves to the entry row. When the active cell leaves the visible part of the sheet, the sheet scrolls just enough to show it; a click never scrolls.
 
+To select a large block, press on a cell and drag past an edge of the sheet (left, right, top or bottom). The sheet keeps scrolling while you hold the button, even if you do not move, and the selection keeps growing. The pointer is free: it may leave the sheet and even the window, and the farther it goes past the edge, the faster the sheet scrolls. Bring it back over the sheet to stop the scroll and carry on selecting. Dragging from a column letter scrolls sideways only, and from a row number up and down only. While you drag cells upwards, the header rows and the column letters count as the top edge, so the selection stays a block of cells.
+
 ### Add a row
 
 Below the last row, the grid always shows an empty **entry row**, marked `*` in the row-number column (hover it: *Type here to add a row*). It is there in a new workbook too, which has no rows yet. Click a cell of the entry row and type a value, then press <kbd>Enter</kbd>: the row is created, and the cursor moves to the next entry row. One **Undo** removes the row. The entry row is not data: it is not saved, not plotted, and **Select All** does not include it. A range extended with <kbd>Shift</kbd> (click, drag or arrows) stops at the last row and never includes the entry row.

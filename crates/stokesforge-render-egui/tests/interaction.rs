@@ -701,6 +701,36 @@ fn text_tool_asks_for_text_on_click_and_does_not_scroll() {
     assert_eq!(view.view().generation(), 0);
 }
 
+/// #529: the automatic framing draws the first point on the left edge of the
+/// plot area; a click on the half of its marker that lies outside the frame
+/// still picks the series (a double click then opens it, not the axis).
+#[test]
+fn a_point_on_the_frame_edge_is_picked_from_outside_the_frame() {
+    use stokesforge_plot::SeriesRef;
+    let (session, graph) = fixture();
+    let snapshot = session.handle().snapshot().unwrap();
+    let stokesforge_core::node::NodeKind::Graph { spec, .. } =
+        snapshot.tree.node(graph).unwrap().kind()
+    else {
+        panic!("graph")
+    };
+    let spec = spec.clone();
+    let context = new_context();
+    let mut view = GraphView::new();
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
+    let panel = &view.last_drawn().unwrap().panels[0];
+    let first = panel.series_geometry[0].paths[0][0];
+    let origin = f64::from(panel.pixel_origin.0);
+    assert!(
+        (first.0 - origin).abs() < 1.5,
+        "the first point is on the edge"
+    );
+    let outside = Pos2::new((origin - 3.0) as f32, first.1 as f32);
+    assert_eq!(view.series_at(outside, &spec), Some(SeriesRef::new(0, 0)));
+    let far = Pos2::new((origin - 12.0) as f32, first.1 as f32);
+    assert_eq!(view.series_at(far, &spec), None);
+}
+
 #[test]
 fn series_selection_by_click_and_tree_without_mutation_or_rebuild() {
     use stokesforge_plot::SeriesRef;

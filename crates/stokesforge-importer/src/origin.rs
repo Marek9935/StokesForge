@@ -1,4 +1,4 @@
-//! Origin project files (`.opj`): from the books read by
+//! Origin project files (`.opj`, `.opju`): from the books read by
 //! [`stokesforge_import::origin`] to model columns.
 //!
 //! The consumers (application, CLI, `pyst`) share this module: detection
@@ -17,8 +17,7 @@ use stokesforge_import::origin::{
 
 use crate::{ImportFailure, ImportFailureCause};
 
-/// `true` for a `.opj` or `.opju` extension, whatever its case. `.opju` is
-/// routed here too, so the reader gives its clear "not supported" message.
+/// `true` for a `.opj` or `.opju` extension, whatever its case.
 pub fn is_origin_path(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())

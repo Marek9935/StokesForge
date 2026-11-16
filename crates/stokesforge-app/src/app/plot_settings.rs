@@ -282,6 +282,7 @@ fn plot_settings_contents(
     // The Legend page honoured the request to unfold the colour bar section.
     let mut unfolded = false;
     let unit = state.length_unit();
+    let margins = state.auto_margins();
     // The ratio lock is session state of the graph, shared with the strip of
     // the Page Layout Mode (#426): the page edits a copy and hands it back.
     let mut size_lock = state.size_lock(settings.graph);
@@ -374,6 +375,7 @@ fn plot_settings_contents(
         } else if chosen_tab == PlotSettingsTab::Axes {
             // Two levels (S-L9, #393): the vertical axis strip stays fixed and
             // only the page of the axis scrolls, so no common scrolling.
+            let before = target_axis(spec, edit.selected_panel, chosen_axis).cloned();
             commit |= axes_settings_page(
                 ui,
                 spec,
@@ -382,6 +384,19 @@ fn plot_settings_contents(
                 published_axis_bounds(ui.ctx(), settings.graph, edit.selected_panel),
                 &mut env,
             );
+            // The Auto button computes once and writes (#529).
+            if take_auto_asked(ui.ctx()) {
+                if let Some(before) = before {
+                    commit = write_auto_range(
+                        spec,
+                        edit.selected_panel,
+                        chosen_axis,
+                        &before,
+                        &bind_tree,
+                        margins,
+                    );
+                }
+            }
         } else {
             crate::theme::page_scroll_area()
                 .auto_shrink([false, false])
@@ -470,6 +485,65 @@ fn plot_settings_contents(
         current.tab = chosen_tab;
         current.axis = chosen_axis;
     }
+}
+
+fn auto_asked_id() -> egui::Id {
+    egui::Id::new("stokesforge_axis_auto_asked")
+}
+
+/// Did the Auto button of an axis page get clicked since the last call? The
+/// editor only says so; the page that owns the whole draft computes (#529).
+fn take_auto_asked(ctx: &egui::Context) -> bool {
+    ctx.data_mut(|data| data.remove_temp::<bool>(auto_asked_id()))
+        .unwrap_or(false)
+}
+
+/// The axis of the draft the page of `place` edits, with the rule of
+/// [`axes_settings_page`] (an overlaid layer's top / right edits its own
+/// bottom / left). `None` for a mirror side or one that is not available.
+fn target_axis(spec: &mut PlotSpec, layer: usize, place: PlotAxis) -> Option<&mut AxisSpec> {
+    let side = cell_sides::sides(spec, layer)
+        .into_iter()
+        .find(|side| side.place == place.side())
+        .filter(|side| side.available() && !side.mirror)?;
+    let field = side.field?;
+    let panel = spec.panels.get_mut(layer)?;
+    Some(if side.own_scale {
+        if field == AxisSide::Bottom {
+            &mut panel.bottom
+        } else {
+            &mut panel.left
+        }
+    } else {
+        panel.axis_mut(field)
+    })
+}
+
+/// The Auto button (#529): the axis takes the range the automatic framing
+/// computes now, with the user's margins, written as From / To; it does not
+/// follow the data afterwards. An axis with no data stays on Auto. `true` when
+/// the draft changed, so that an unchanged result is no history entry.
+fn write_auto_range(
+    spec: &mut PlotSpec,
+    layer: usize,
+    place: PlotAxis,
+    before: &AxisSpec,
+    tree: &Tree,
+    margins: stokesforge_render::AutoMargins,
+) -> bool {
+    let mut probe = spec.clone();
+    if let Some(axis) = target_axis(&mut probe, layer, place) {
+        axis.auto_range = true;
+    }
+    stokesforge_app_state::frame_sizes::freeze_ranges(tree, &mut probe, margins);
+    let computed = target_axis(&mut probe, layer, place).map(|axis| axis.clone());
+    let Some(axis) = target_axis(spec, layer, place) else {
+        return false;
+    };
+    if let Some(computed) = computed {
+        *axis = computed;
+    }
+    *axis != *before
 }
 
 /// The layout the size fields read: the one the graph's view last published
@@ -1737,12 +1811,12 @@ fn axis_editor(
                 changed |= first.changed || second.changed;
                 auto_asked |= first.auto || second.auto;
                 if ui
-                    .add_enabled(!auto, egui::Button::new(tr!("plot-axes-from-auto")))
+                    .add(egui::Button::new(tr!("plot-axes-from-auto")))
                     .on_hover_text(tr!("plot-axes-from-auto", "hint"))
-                    .on_disabled_hover_text(tr!("plot-axes-from-auto", "disabled"))
                     .clicked()
                 {
                     auto_asked = true;
+                    ui.data_mut(|data| data.insert_temp(auto_asked_id(), true));
                 }
             });
         });
@@ -3992,10 +4066,12 @@ mod tests {
         }
     }
 
-    /// #344: the Auto button gives the bounds back to the data and **keeps the direction**;
-    /// an inverted axis under Auto shows its upper bound in the From field.
+    /// #529: the Auto button computes the range of the data once, with the
+    /// user's margins, and writes it as From / To (it no longer switches the
+    /// tracking back on); it **keeps the direction**, in one history entry, and
+    /// a second click that computes the same range adds none.
     #[test]
-    fn the_auto_button_gives_back_to_the_data_keeping_the_direction() {
+    fn the_auto_button_writes_the_computed_range_once_keeping_the_direction() {
         let context = test_support::context();
         let mut harness = harness(|spec| {
             let axis = &mut first_panel(spec).bottom;
@@ -4004,27 +4080,46 @@ mod tests {
             axis.range_min = Some(20.0);
             axis.range_max = Some(5.0);
         });
+        let original = harness.model();
+        // The preference reaches the computation: 10 % on the left.
+        harness
+            .state
+            .dispatch(Action::SetAutoMargins(stokesforge_render::AutoMargins {
+                left: 10.0,
+                right: 0.0,
+                bottom: 1.0,
+                top: 5.0,
+            }));
         harness.open(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
-        publish_bottom_bounds(&context, &harness, (5.0, 20.0));
-        let painted = paint_window(&context, &mut harness.state, Vec::new());
-        let button = in_the_row(
-            &painted,
-            &tr!("plot-axes-from"),
-            &tr!("plot-axes-from-auto"),
-        )
-        .center;
-        click(&context, button, egui::PointerButton::Primary, |ui| {
+        let button = |harness: &mut Harness| {
+            let painted = paint_window(&context, &mut harness.state, Vec::new());
+            in_the_row(
+                &painted,
+                &tr!("plot-axes-from"),
+                &tr!("plot-axes-from-auto"),
+            )
+            .center
+        };
+        let at = button(&mut harness);
+        click(&context, at, egui::PointerButton::Primary, |ui| {
             plot_settings_window(ui.ctx(), &mut harness.state)
         });
         let axis = harness.model().panels[0].bottom.clone();
-        assert!(axis.auto_range);
+        assert!(!axis.auto_range, "written, not tracking");
         assert!(axis.inverted, "the direction is kept");
-        assert_eq!((axis.range_min, axis.range_max), (Some(20.0), Some(5.0)));
-        let painted = paint_window(&context, &mut harness.state, Vec::new());
-        assert!(
-            text_exact(&painted, "20").center.x < text_exact(&painted, "5").center.x,
-            "inverted axis: From shows the upper bound"
-        );
+        // Data 0..1, inverted axis: the stored bounds follow the direction and
+        // `Left` (10 %) is the left edge of the frame, here the high bound.
+        let (from, to) = (axis.range_min.unwrap(), axis.range_max.unwrap());
+        assert!(from > to, "display order: {from} {to}");
+        assert!((from - 1.1).abs() < 1e-9 && to.abs() < 1e-9, "{from} {to}");
+        // Same range computed again: no new entry.
+        let at = button(&mut harness);
+        click(&context, at, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state)
+        });
+        harness.state.close_plot_settings();
+        harness.state.dispatch(Action::Undo);
+        assert_eq!(harness.model(), original, "a single history entry");
     }
 
     /// #344: the "Advanced" settings (length of tick marks, width) are written
@@ -4171,7 +4266,13 @@ mod tests {
             &tr!("plot-area-gridlines-vertical"),
         );
         let after = harness.model();
-        assert_eq!(after.panels[0], original.panels[0]);
+        // The edit freezes the Auto axes that have data (#529): the ranges
+        // are the only thing layer 1 gains.
+        let mut expected = original.panels[0].clone();
+        expected.bottom = after.panels[0].bottom.clone();
+        expected.left = after.panels[0].left.clone();
+        assert!(!expected.bottom.auto_range && !expected.left.auto_range);
+        assert_eq!(after.panels[0], expected);
         assert!(
             after.panels[1].bottom.grid,
             "the click committed the chosen layer"

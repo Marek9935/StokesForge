@@ -1744,3 +1744,60 @@ fn dragging_a_handle_of_a_stored_fit_with_an_out_of_range_number_is_refused() {
         assert_eq!(s.state.revision(), revision, "{formula}");
     }
 }
+
+/// #529, L5: an analysis result plotted on its graph that goes beyond the
+/// written ranges widens them in a step of its own, after the analysis macro:
+/// one Ctrl+Z restores the ranges and keeps the result, a second one removes it.
+#[test]
+fn an_analysis_result_beyond_the_ranges_widens_them_in_a_second_step() {
+    use stokesforge_commands::{HistoryLabel, PlotEditKind};
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    s.state.dispatch(Action::PlotColumns {
+        sheet: s.sheet,
+        columns: vec![s.x, s.y],
+        plot_type: stokesforge_plot::PlotType::Line,
+    });
+    let graph = s.state.graphs()[0].0;
+    let spec = s.state.plot_spec(graph).unwrap();
+    let top_before = spec.panels[0].left.range_max.expect("written at creation");
+    s.state.dispatch(Action::OpenGraphAnalysis {
+        preset: Preset::BaselineLine,
+        graph,
+        series: vec![stokesforge_plot::SeriesRef::new(0, 0)],
+        spec: Box::new(spec.clone()),
+    });
+    // The baseline climbs to 1000 while Y = 2x + 1 stays under 21.
+    s.state.analysis_form_mut().unwrap().setup.baseline.points = vec![(0.0, 1.0), (10.0, 1000.0)];
+    s.state.dispatch(Action::ApplyAnalysis);
+    assert!(
+        !s.state.status().unwrap().is_error(),
+        "{:?}",
+        s.state.status()
+    );
+    let widened = s.state.plot_spec(graph).unwrap();
+    assert!(widened.panels[0].series.len() > spec.panels[0].series.len());
+    // The corrected curve (Y minus the baseline) dives to about -990: the
+    // bottom moves, the top keeps its written value.
+    assert!(widened.panels[0].left.range_min.unwrap() < -900.0);
+    assert_eq!(widened.panels[0].left.range_max, Some(top_before));
+    assert_eq!(
+        s.state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(PlotEditKind::WidenRanges)),
+        "the widening is its own step, after the analysis entry"
+    );
+    s.state.dispatch(Action::Undo);
+    let back = s.state.plot_spec(graph).unwrap();
+    assert_eq!(back.panels[0].left.range_max, Some(top_before));
+    assert_eq!(
+        back.panels[0].series.len(),
+        widened.panels[0].series.len(),
+        "the result is still plotted"
+    );
+    s.state.dispatch(Action::Undo);
+    assert_eq!(
+        s.state.plot_spec(graph).unwrap().panels[0].series.len(),
+        spec.panels[0].series.len(),
+        "the second Ctrl+Z removes the result"
+    );
+}

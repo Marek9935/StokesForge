@@ -36,9 +36,10 @@ applies `HIT_RADIUS` and returns a `PointHit` as a `Pos2`), putting down the
 | `scale` | the axis scales, including the logarithmic one |
 | `paint` | the pixel primitives: sub-pixel strokes, markers, bars, whiskers |
 | `clip` | geometric clipping of a polyline against the plot rectangle |
+| `framing` | the margins of the automatic framing (`AutoMargins`) and the one rule that applies them (`auto_frame`, #529): see § Automatic framing |
 | `legend` | the legend, laid out by hand |
 | `decimate` | LTTB |
-| `interact` | pixel ↔ data mapping of a plotted panel (`PanelTransform`, `Gesture`) and the point nearest the cursor (`nearest_point`, cursor as `(f64, f64)`, #262). For a caller that paints by itself (analysis preview, #261): `PanelTransform::new` (fractional area in `f64`, bounds in display order), `fit_range` / `axis_frame` (initial frame: 5 % margin in the transformed space, remembered bounds, inversion) and `snap_to_curve` (nearest point in X, average over *n* points; `snap_to_curve_zone` also returns the averaged zone, min and max abscissas and the real number of points, #334). `scale::axis_ticks` gives the ticks and their label through the pipeline path (`linear_key_points` + `label_count` + `TickFormat`) |
+| `interact` | pixel ↔ data mapping of a plotted panel (`PanelTransform`, `Gesture`) and the point nearest the cursor (`nearest_point`, cursor as `(f64, f64)`, #262). For a caller that paints by itself (analysis preview, #261): `PanelTransform::new` (fractional area in `f64`, bounds in display order), `fit_range` / `axis_frame` (initial frame: the same rule and margins as the graph, `framing::auto_frame`, #529, #269; remembered bounds, inversion) and `snap_to_curve` (nearest point in X, average over *n* points; `snap_to_curve_zone` also returns the averaged zone, min and max abscissas and the real number of points, #334). `scale::axis_ticks` gives the ticks and their label through the pipeline path (`linear_key_points` + `label_count` + `TickFormat`) |
 | `view` | the view state — zoom and pan (`ViewState`, `Framing`) — and the framing a gesture gives (`commit_gesture`, `commit_axis_gesture`), without egui (#262) |
 | `hit` | component (title, plot area, axis, axis title) under a pixel, on the geometry allocated by Plotters (`DrawnPlot::title_height`, `DrawnPanel::axis_areas`) |
 | `series_selection` | series under a pixel, on its actually plotted pixels, and handles of the selected series (#98) |
@@ -505,6 +506,14 @@ Plotters pipeline at **every frame**, even a still one. With a collector, the
 result is cached and a frame without change costs one
 `painter.extend(...)`.
 
+### Automatic framing (#529)
+
+An axis without an explicit range takes the extent of the data plus margins, in percent of that extent (`framing::AutoMargins`, `framing::auto_frame`; `pipeline::padded` and `interact::fit_range` both call it, so the graph and the analysis preview agree, #269). The margins are per edge of the frame: defaults left 0, right 0, bottom 1, top 5. The horizontal axis takes left and right, the vertical axes (left and Y2) bottom and top. On an inverted axis (Inverted, or From > To) bottom and top stay the edges of the frame, so `bottom` applies to the high bound. A bound that lands on the zero baseline of positive bars takes no margin (the bars sit on the frame); a constant series or a single point widens by 5 % of its value (1 at zero); a logarithmic axis snaps to whole decades and ignores the margins; no data gives `0..1`; a margin that would overflow leaves the bound where it is (invariant 10). X error bars and bar edges are part of the horizontal extent, Y error bars of the vertical one. An overlaid layer's own axis (its Y2 or its own top X) takes this same rule on its own data and is never aligned on the covered layer's ticks (#529 form 529-5 replaced the #174 alignment). The margins reach the pipeline in `FigureTexts::margins` (`FigureTexts::with_margins`), never in the `PlotSpec`; `GraphView::set_figure_texts` drops the screen cache when they change, and an export must be given the same ones as the screen.
+
+**Edge numbers (#529, A5).** The first and the last number of a horizontal axis are never cut by the figure edge. `pipeline::edge_reserves` reads the **written** range of each cell's bottom axis (the top one for an overlay with its own X), takes the ticks the draw places (same `tick_count` with the stored frame width as length, so there is no circularity; same `TickFormat` and "Label every"), measures the numbers like the draw does and returns, per column, how far the first and the last overhang the frame edge. `ExplicitGrid::build` takes the larger of that and the usual gutter, so the figure grows its outer margin just enough, only when a tick sits at the edge and its label is wider than `MARGIN`; screen, exports and `figure_layout` share it (invariant 5). An axis still on Auto (no data yet, a file opened by the CLI) asks for nothing and keeps the old margin; a legacy graph (no stored frames) and the free placement are not reserved either.
+
+**Frozen ranges (#529).** The automatic range is computed once, at creation, and written. `stokesforge_render_svg::freeze_auto_ranges(tree, spec, margins, measurer, choice)` draws the spec once with the export's measurement and copies `DrawnPanel::x_range` / `y_range` / `y2_range` into the `bottom` / `left` / `right` axes still on Auto (`auto_range = false`, From/To in data space, in the axis direction via `AxisSpec::orient`). It draws rather than calling `padded` so that the written range is the single drawn one (the drawing is the one source of `DrawnPanel::x_range` / `y_range` / `y2_range`, on the export's measurement); an axis the layer does not own (`overlay.x_top` / `y_right` unticked) is skipped, and an axis with no data (`DrawnPanel::has_data`) stays on Auto until a command gives it some. The application calls it in `AppState::execute` (new graph, Add Layer, Y2 added by an add, analysis graphs), `pyst` in `bridge::freeze_ranges` (default margins); the Auto button of the Axes page calls it on a copy of the draft. `auto_range = true` stays readable and drawn (old files). Reset Zoom (`ViewState::reset`) falls back on the written range, since it is now the spec's explicit framing.
+
 ### The cache key has exactly four terms
 
 `(revision, rect, pixels_per_point, view_generation)`
@@ -584,8 +593,10 @@ plot area along the axis direction and is placed at its band.
 strip). Clamped to a quarter of the plot area; none for a band with
 `offset > 0` or an edge with no axis area (`size == 0`); nearest edge wins in a
 corner. All axis gestures go through `component_at`, so they work there too.
-The axis beats the curve on the strip (double-click: shape, then axis, then
-curve; right-click looks for a curve only on the plot area); shapes, texts and
+On the strip a curve under the pointer beats the axis (#529: double-click
+looks for a shape, then a curve, then the axis; a marker on the frame edge is
+picked from outside the frame too; right-click looks for a curve only on the
+plot area); off the curve the strip picks the axis. Shapes, texts and
 annotations keep their priority. Known limit: a data right axis
 (`SeriesAxis::Right`) of the ordinary layer keeps its title at the outer edge of
 the whole area. Test: `geometry.rs`, `layers.rs`, `hit.rs`.
@@ -681,14 +692,13 @@ and an inverted axis puts its remembered bounds back in decreasing order; test
 Tests: `mirrors.rs` (SVG), `agreement.rs`
 (`the_custom_ticks_agree_and_change_the_figure`).
 
-The own linear scales of an overlaid layer are **joined** to those of the
-covered layer (#174): without a hand-fixed extent, `scale::aligned_range`
-chooses a round step and a position such that the interval encloses the data
-of the layer and its ticks fall at the same fractions of the axis as
-those of the covered layer (the top 0 facing the bottom 0); each candidate
-is checked against the ticks Plotters will really put down. With no solution,
-a logarithmic scale or an explicit extent (zoom included): independent
-framing. Linear ticks are written without decimals when they
+The own linear scales of an overlaid layer are **not** joined to those of the
+covered layer: its own axis (Y2, own top X) takes its own automatic range
+(`framing::auto_frame` with the margins, see the margins rule above) and its
+ticks are its own; data 0..1 over a base 4..6 frame about -0.01..1.05 with the
+default margins. #529 form 529-5 replaced the #174 alignment, which left 40 to
+60 % of the axis empty in common cases (to share a graduation, stay on Y1).
+Linear ticks are written without decimals when they
 are all integers, with the same number of decimals otherwise
 (`scale::TickFormat`, #175); all axes go through a formatter.
 
@@ -699,8 +709,7 @@ per axis** (x, y, y2) from the plot area's pixel length (a throwaway
 everything that places or writes a tick: the labels of every mesh (bottom, left,
 secondary, mirrors, overlay axes), the home-made tick marks, the minor ticks
 (`minor_key_points`), the decimals and the "Label every" origin
-(`TickFormat::new` / `with_label_every`), `aligned_range` (the covered layer's
-count, kept in `BaseFrame`) and the analysis preview (`axis_ticks`). A caller that
+(`TickFormat::new` / `with_label_every`), and the analysis preview (`axis_ticks`). A caller that
 rebuilt its own count would put the marks and the numbers at different places:
 there is no count-less entry point left (`max_label_count` is only the upper bound).
 The rule: one tick per `TICK_SPACING_X` (29 px, horizontal) or `TICK_SPACING_Y`
@@ -1282,6 +1291,31 @@ shift stays under one pixel; the layout is not touched
 (`a_reduced_formula_is_snapped_to_the_pixels`). Outside the `scaled` path
 (`paint` with logical rectangle = displayed rectangle) the snapping is not
 applied.
+
+### Small drawings of whole figures (#543)
+
+`stokesforge_render_egui::drawings::ScaledDrawings<K>` keeps, per key, a figure
+drawn **once at its natural size** (`pipeline::figure_layout` for the size, the
+ordinary pipeline for the shapes) and paints it scaled whole into a rectangle
+(`paint`, centred, at most `max_scale`; `draw_scaled` is draw then paint). It is
+what the theme tiles and their hover zoom use (`docs/application/graph.md`,
+« Theme specimens »). Pitfalls:
+
+- **One measurer, the application's fonts.** The set owns the `TextMeasurer`,
+  the `FormulaCache` and the resolved Typst fonts, built from the same
+  definitions as a `GraphView`; the application holds one set and every key
+  shares it. No private static measurer, and never the Typst-less path: titles
+  would be measured and drawn differently from the graph.
+- **Textures are held, not memoized.** Each entry's `ShapeCache` holds the
+  formula textures of its shapes (`TypstScreen::holding`) and its `ScaledShapes`
+  those of its scaled meshes; the memo is only trimmed with `evict_unshared`
+  after the new entry exists (invariant of #508 above), so a title never
+  vanishes from a tile. Locked by
+  `a_title_survives_the_eviction_of_unshared_formulas`.
+- **Invalidation.** An entry is valid while its `PlotSpec` (by value) and the
+  pixel density are the ones it was drawn with; the tree under a key must not
+  change (the specimens' reference tree never does). A new theme style or a new
+  density draws again; `retain` lets go of deleted keys.
 
 ## Out-of-date series (#198)
 

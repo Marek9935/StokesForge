@@ -586,6 +586,23 @@ pub(crate) fn fix_frames(
     let _ = stokesforge_render_svg::fix_legacy_frames(&reference, spec, &measurer, &choice);
 }
 
+/// The one door of the automatic axis ranges of a graph written by a script
+/// (#529): every axis still on Auto that has data is given the range drawn now
+/// and leaves Auto, so a graph made or edited by a script never moves
+/// afterwards. Drawn with the default margins: a script has no preferences
+/// (the same figure on every machine). Rides in the command of the edit.
+pub(crate) fn freeze_ranges(tree: &stokesforge_core::Tree, spec: &mut PlotSpec) {
+    let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    let _ = stokesforge_render_svg::freeze_auto_ranges(
+        tree,
+        spec,
+        stokesforge_render_svg::AutoMargins::default(),
+        &measurer,
+        &choice,
+    );
+}
+
 pub(crate) fn set_graph_spec(
     session: &SessionHandle,
     graph: NodeId,
@@ -597,6 +614,7 @@ pub(crate) fn set_graph_spec(
         _ => None,
     };
     fix_frames(&snapshot.tree, current.as_ref(), &mut spec);
+    freeze_ranges(&snapshot.tree, &mut spec);
     session
         .execute(Command::SetPlotSpec { graph, spec })
         .map(|_| ())
@@ -681,7 +699,7 @@ pub(crate) fn remove_shape(
     set_graph_spec(session, id, spec)
 }
 
-/// Imports a file into a new workbook, one sheet per plane (an Origin `.opj`:
+/// Imports a file into a new workbook, one sheet per plane (an Origin `.opj` or `.opju`:
 /// one workbook per book, see [`import_origin_file`]). All the
 /// analysis and conversion stay those of the CLI and the application.
 /// File errors are detected before the first command; an

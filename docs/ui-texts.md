@@ -89,6 +89,12 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Template | Modèle | Import settings saved under a name | Recette, Preset, Filtre | O |
 | Wizard | Assistant | Window with steps | Wizard, Guide | G |
 | Theme | Thème | Set of global colors of a graph | Style, Palette | O |
+| Publication / Publication Wide | Publication / Publication large | Built-in graph themes (#544, keys `plot-theme-publication`, `plot-theme-publication-wide`): the plot area is 8.5 cm or 17 cm wide | — | O |
+| Presentation | Présentation | Built-in graph theme with large texts and thick lines (#544) | Diaporama | O |
+| Fit + Residuals | Ajustement + résidus | Built-in graph theme of two stacked layers: the data with its fit, the residuals below (#544) | Fit | O |
+| Kinetics | Cinétique | Built-in graph theme of a group of curves on a gradient with a colour bar (#544) | — | O |
+| Side by Side | Côte à côte | Built-in graph theme of two equal layers in one row (#544) | — | O |
+| Color Map | Carte de couleurs | Built-in graph theme of gradient curves with a colour bar and no legend (#544) | — | O |
 | Shortcut | Raccourci | Keys that run a command | Raccourci clavier | G |
 
 ### 2.3 Workbook and grid
@@ -210,7 +216,12 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Own scale | Échelle propre | Box on the Top and Right tabs of an overlaid layer: it has its own scale on that side; unticked, it follows the layer it covers (#396) | Independent scale, Échelle indépendante | G |
 | Reciprocal† | Inverse | 1/x scale (spectra in wavenumber) | Réciproque | O |
 | Range | Plage | Interval of values shown on the axis | Bornes, Étendue | O |
-| Auto range | Plage auto | Range computed from the data; **no checkbox** since #344: « De » and « À » follow the data as long as nothing has been typed, and the « Auto » button of the row brings them back to it | Bornes automatiques | O |
+| Auto range | Plage auto | Range computed from the data; **no checkbox** since #344. A new graph writes its ranges into « De » and « À » once (#529); the « Auto » button of the row, always enabled, computes the range once with the margins of Preferences › Display › Graphs and writes it, it no longer switches tracking back on | Bornes automatiques | O |
+| Graphs (Preferences sub-tab) | Graphiques | Display sub-tab after New (#529): the preferences of how graphs are framed | Charts, Plots | G |
+| Automatic axis range (group) | Plage automatique des axes | Group of Display › Graphs: Left / Right / Bottom / Top (Gauche / Droite / Bas / Haut), empty space around the data in % of the data extent; tooltip « A new graph writes its ranges once ». Not "Rescale" / "Recadrer" (refused) (#529) | Rescale, Recadrer, Margins | G |
+| Axis ranges written at opening | Plages des axes écrites à l'ouverture | Orange status message after opening a project (#529, key `status-ranges-written`, plural on the number of graphs): « The axis ranges of 3 graphs were written from the data. Save to keep them » / « Les plages des axes de 3 graphiques ont été écrites d'après les données. Enregistrez pour les conserver ». Said only when at least one graph was written; the project then counts as modified | Bounds, Limits, Rescaled | G |
+| Axis widened (status message) | Axe élargi (message d'état) | Orange status message after a series added beyond the written range (#529, key `status-axes-widened`, plural on the number of axes): « Widened the Y axis to show the new series. Ctrl+Z undoes the new range » (the sentence starts with the verb: an axis name such as « right Y » never opens it) / « Axe Y élargi pour montrer la nouvelle série. Ctrl+Z annule la nouvelle plage ». The axes are named by `widen-axis-x` (X), `widen-axis-y` (Y), `widen-axis-top-x` (« top X » / « X du haut »), `widen-axis-right-y` (« right Y » / « Y de droite »), joined by commas. « series » / « série » by the glossary, not « curve » | curve, courbe, Rescaled | G |
+| Widen Axis Ranges | Élargir les plages des axes | History label of the second step of an add that goes beyond the written range (#529, key `history-plot-widen-ranges`, `PlotEditKind::WidenRanges`) | Rescale, Recadrer | G |
 | Min / Max | Min / Max | Ends of the range | De / À | O |
 | Reverse axis | Axe inversé | Values decreasing in the reading direction; **no checkbox** since #344: « De » > « À » reverses the axis | Axe retourné | O |
 | Legend | Légende | List of the series with their style | — | G |

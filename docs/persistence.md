@@ -903,6 +903,69 @@ reads `Abs (a.u.)`, a unit alone reads `(s)`, and the unit of the loaded axis is
 empty. An empty title stays empty: nothing is filled at load, so an old graph
 keeps its look. Tests: `convert.rs` and `tests/witness_files.rs`.
 
+## Project themes: additive field (#540)
+
+`FileBody::project_themes` (`Vec<ThemeRecord>`, `#[serde(default)]`, placed before
+`window_geometries` and `save_counter`): the graph themes of the project
+(`Tree::project_themes`, `stokesforge_plot::GraphTheme`), in order. A theme is
+`{ name, colors_only, style }` where `style` is a `PlotSpecRecord`, exactly the
+record of a graph spec (`themes.rs`, the same module offers `encode_theme`,
+`decode_theme`, `encode_themes`, `decode_themes` for the themes of the user's
+machine). **`FORMAT_VERSION` did not move.** A file without the field reads with
+no theme; an older reader ignores it and drops it at its next save.
+
+Read degrades (invariant 10): each theme is decoded on its own, so one the reader
+cannot decode (a newer variant, a wrong type, an out-of-range layer) is dropped
+alone and the project opens; a nameless theme is dropped, a later theme whose
+name repeats an earlier one (case ignored) is dropped, a name is cut at
+`MAX_THEME_NAME_CHARS`, the list at `MAX_THEMES`. Witnesses:
+`tests/witnesses/v1/project.stf` regenerated with two themes;
+`tests/witnesses/v1-before-themes/project.stf` is the previous bytes, frozen,
+read back with no theme (`witness_files.rs`); `b3_hostile_project_themes`,
+`b13_project_themes_are_bounded`.
+
+## The user's themes file (#539)
+
+The graph themes kept on this machine (offered in every project) are not in a
+`.stf`: they live in `user_themes.json` of the configuration folder, written by
+`stokesforge-app-state::user_themes`. The file has its **own** `version`
+(`1`), independent of the `.stf` version. A theme is stored as the record of
+`stokesforge_persistence::encode_theme` (the same record as a project theme,
+#540), in hexadecimal, so the codec stays the only reader of theme bytes:
+
+```json
+{ "version": 1, "next_id": 4,
+  "themes":    [ { "id": 3, "data": "<hex>" } ],
+  "overrides": { "light": "<hex>", "dark": "<hex>" },
+  "uses":      { "builtin:dark": 2, "user:3": 5, "project:fig a": 1 } }
+```
+
+- `id`: stable, never reused, survives renaming. Names are unique ignoring case
+  and spaces (`same_theme_name`), and may not be the English name of a built-in.
+- `overrides`: an edited built-in, by its stable key: `light`, `dark` (#539) and,
+  since #544, `publication`, `publication-wide`, `presentation`,
+  `fit-residuals`, `kinetics`, `side-by-side`, `color-map`
+  (`stokesforge_app_state::builtin_themes::KEYS`; never the translated name).
+  Reset removes the key. Without an override the built-in is its original
+  (`GraphTheme::from_colors` for Light and Dark, a full-style theme for the
+  others). A file with only the `light` and `dark` keys reads unchanged: the
+  file `version` stays `1`, a new key is just an additional optional entry.
+- `uses`: use counts on this machine, by `builtin:<key>`, `user:<id>` or
+  `project:<name>` (a project theme is keyed by its trimmed, lowercased name
+  only: a path would lose the count when the file moves). At most 500 project
+  counts are kept, the least used forgotten first.
+- A missing, oversized (> 64 MiB), unreadable or corrupt file reads as an empty
+  library; a theme whose record does not decode is dropped alone; at most 200
+  themes. The first write replaces a corrupt file.
+- **A newer `version` is neither read nor overwritten**: empty library,
+  read-only for the session (`UserThemes::read_only`), every write refused.
+- Writes are atomic (temporary file, rename). None of it is in the history.
+
+The default theme of new graphs is `new_graph_theme` in `preferences.json` (a
+`builtin:` or `user:` key, `null` for none; a deleted theme reads as none). It
+is applied by `AppState::with_new_graph_defaults` through the theme engine with
+every family but Texts and Axis ranges; graphs made by scripts do not take it.
+
 ## Accepted limits (2026-10-20, after #302-#305)
 
 Do not re-raise: import recipes stored with `"data_end":"Auto"` keep cutting (no migration); a Stop after a no-effect command ends in `Done` with no status message (no `RecalcEnd::Interrupted`).
