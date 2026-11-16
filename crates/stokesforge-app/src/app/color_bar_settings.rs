@@ -243,9 +243,10 @@ const PREVIEW_ROW: f32 = 13.0;
 /// A schematic of the bar under « Show color bar » (#510): one strip, a
 /// segment per group on the bar in graph order, each with its gradient and a
 /// width proportional to its drawn range on the bar's scale (the renderer's
-/// own `segment_extents`), the group names above, the values at the ends and
-/// the breaks (the renderer's own `tick_marks`) and the break labels under
-/// them, as plain text. Nothing when no segment can be drawn.
+/// own `segment_extents`), the group names above, the ticks of the bar's own
+/// « Ticks » setting (the renderer's own `tick_marks`: ends and breaks, or
+/// automatic) and the break labels under them, as plain text. Nothing when no
+/// segment can be drawn.
 fn color_bar_preview(
     ui: &mut egui::Ui,
     bar: &ColorBarSpec,
@@ -263,11 +264,6 @@ fn color_bar_preview(
         PREVIEW_ROW * 2.0 + PREVIEW_STRIP + if with_labels { PREVIEW_ROW } else { 0.0 } + 4.0;
     let width = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
-    // The ends and the breaks only: the strip is a sketch, not the ticks.
-    let sketch = ColorBarSpec {
-        ticks: ColorBarTicks::Breaks,
-        ..bar.clone()
-    };
     let length = (width - 2.0 * PREVIEW_INSET).floor().max(1.0) as i32;
     let (starts, lens) = segment_extents(&bar.scale.effective(), segments, length);
     let painter = ui.painter_at(rect);
@@ -295,7 +291,9 @@ fn color_bar_preview(
         }
     }
     let below = strip_top + PREVIEW_STRIP + 2.0;
-    for (pixel, text, anchor) in tick_marks(&sketch, segments, &starts, &lens) {
+    // The ticks the bar itself draws (#510 trial: « les graduations doivent
+    // être aussi présentes »), whatever its « Ticks » setting.
+    for (pixel, text, anchor) in tick_marks(bar, segments, &starts, &lens) {
         let at = x(pixel as f32);
         painter.line_segment(
             [egui::pos2(at, strip_top), egui::pos2(at, below)],

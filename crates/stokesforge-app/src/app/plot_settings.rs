@@ -5374,6 +5374,21 @@ mod tests {
     /// #510: a layer of two groups whose bar carries `ranges` (group, from,
     /// to), drawn or not, chained or not; the Legend tab scrolled to the bar.
     fn preview_page(shown: bool, chain: bool, ranges: &[(u32, f64, f64)]) -> Vec<Text> {
+        preview_page_ticks(
+            shown,
+            chain,
+            stokesforge_plot::ColorBarTicks::default(),
+            ranges,
+        )
+    }
+
+    /// [`preview_page`] with the bar's « Ticks » setting.
+    fn preview_page_ticks(
+        shown: bool,
+        chain: bool,
+        ticks: stokesforge_plot::ColorBarTicks,
+        ranges: &[(u32, f64, f64)],
+    ) -> Vec<Text> {
         use stokesforge_plot::{ColorBarSegment, ColorBarSpec};
         let context = test_support::context();
         let mut harness = grouped(2);
@@ -5381,6 +5396,7 @@ mod tests {
         first_panel(&mut spec).color_bar = Some(ColorBarSpec {
             visible: shown,
             chain,
+            ticks,
             segments: ranges
                 .iter()
                 .map(|&(group, from, to)| ColorBarSegment {
@@ -5451,6 +5467,24 @@ mod tests {
         let unchained = preview_page(true, false, &ranges);
         assert!(topmost(&unchained, "90").is_none());
         assert!(topmost(&unchained, "100").is_some());
+    }
+
+    /// #510 trial (510-9): the preview draws the ticks the bar draws, so with
+    /// « Automatic » it shows the intermediate graduations of 0-100, and with
+    /// « Ends and breaks » only 0 and 100. Witness: the preview forcing the
+    /// ends and breaks whatever the setting.
+    #[test]
+    fn the_color_bar_preview_draws_the_ticks_of_the_bar() {
+        use stokesforge_plot::ColorBarTicks;
+        let inner = |painted: &[Text]| {
+            ["20", "25", "40", "50", "60", "75", "80"]
+                .iter()
+                .any(|value| topmost(painted, value).is_some())
+        };
+        let auto = preview_page_ticks(true, false, ColorBarTicks::Auto, &[(1, 0.0, 100.0)]);
+        assert!(inner(&auto), "automatic ticks are previewed");
+        let ends = preview_page_ticks(true, false, ColorBarTicks::Breaks, &[(1, 0.0, 100.0)]);
+        assert!(!inner(&ends), "ends and breaks only");
     }
 
     /// The segments of the draft bar, as group numbers.
