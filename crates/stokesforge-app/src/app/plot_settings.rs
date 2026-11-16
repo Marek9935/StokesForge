@@ -50,6 +50,38 @@ use super::tab_strip::{tab_strip, tab_strip_left_with_reasons, TabStripSide};
 /// Key, in the egui context, of "the formula help icon is hidden" (#148).
 const FORMULA_HELP_HIDDEN: &str = "stokesforge_formula_help_hidden";
 
+/// The row of the Series list, as a selection of its graph (#510).
+type ListSelection = (
+    NodeId,
+    stokesforge_app_state::object_manager::VisibilityTarget,
+);
+
+/// Hands the row chosen in the Series list to the app, once per change, so
+/// the graph selects it as the Object Manager does (#510). `None` (window
+/// closed) forgets it: reopening selects the row again.
+fn publish_list_selection(ctx: &egui::Context, selection: Option<ListSelection>) {
+    let last = egui::Id::new("series_list_selection_last");
+    if ctx
+        .data(|d| d.get_temp::<Option<ListSelection>>(last))
+        .flatten()
+        == selection
+    {
+        return;
+    }
+    ctx.data_mut(|d| {
+        d.insert_temp(last, selection);
+        if let Some(selection) = selection {
+            d.insert_temp(egui::Id::new("series_list_selection"), Some(selection));
+        }
+    });
+}
+
+/// The row the Series list chose since the last call, to select on its graph.
+pub(super) fn take_list_selection(ctx: &egui::Context) -> Option<ListSelection> {
+    ctx.data_mut(|d| d.remove_temp::<Option<ListSelection>>(egui::Id::new("series_list_selection")))
+        .flatten()
+}
+
 /// Properties window of a graph: a floating dialog (same family
 /// as `import_window`), opened by the right-click on a component of the
 /// graph or by the "Graph" menu, and organized into thematic tabs
@@ -82,6 +114,7 @@ const FORMULA_HELP_HIDDEN: &str = "stokesforge_formula_help_hidden";
 /// editing *the* graph.
 pub(super) fn plot_settings_window(ctx: &egui::Context, state: &mut AppState) {
     let Some(settings) = state.plot_settings() else {
+        publish_list_selection(ctx, None);
         return;
     };
     // The preference of the formula help icon, read by `formula_help` (the fields
@@ -324,6 +357,20 @@ fn plot_settings_contents(
                     &mut gradient_actions,
                 );
             }
+            // The page chosen in the list is also the selection of the graph,
+            // as a click in the Object Manager (#510).
+            use stokesforge_app_state::object_manager::VisibilityTarget as T;
+            let target = match edit.selected_group {
+                Some(group) => T::SeriesGroup(stokesforge_plot::SeriesGroupRef {
+                    panel: edit.selected_panel,
+                    group,
+                }),
+                None => T::Series(stokesforge_plot::SeriesRef {
+                    panel: edit.selected_panel,
+                    index: edit.selected_series,
+                }),
+            };
+            publish_list_selection(ui.ctx(), Some((settings.graph, target)));
         } else if chosen_tab == PlotSettingsTab::Axes {
             // Two levels (S-L9, #393): the vertical axis strip stays fixed and
             // only the page of the axis scrolls, so no common scrolling.
