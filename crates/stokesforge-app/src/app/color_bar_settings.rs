@@ -175,10 +175,14 @@ pub(super) fn color_bar_editor(
         .into_iter()
         .map(|id| (id, group_title(panel, id)))
         .collect();
-    let missing = if bar.visible {
-        stokesforge_render::color_bar::missing_value_count(&resolve_panel(tree, panel))
+    let (missing, preview) = if bar.visible {
+        let resolved = resolve_panel(tree, panel);
+        (
+            stokesforge_render::color_bar::missing_value_count(&resolved),
+            stokesforge_render::color_bar::bar_segments(&resolved),
+        )
     } else {
-        0
+        (0, Vec::new())
     };
     let mut intent = Intent::default();
     let colors: Vec<Vec<String>> = groups
@@ -193,6 +197,7 @@ pub(super) fn color_bar_editor(
             Some(tr!("plot-color-bar-show", "hint")),
         );
         let shown = bar.visible;
+        color_bar_preview(form.ui(), &bar, &preview, &groups);
         let rows = form.enabled(shown, |form| {
             groups_block(form, &mut bar, &groups, &colors, &mut intent, &mut commit);
             breaks_block(form, &mut bar, &groups, &mut commit);
@@ -224,6 +229,99 @@ pub(super) fn color_bar_editor(
         commit = true;
     }
     commit
+}
+
+/// Height of the strip of the preview, in points.
+const PREVIEW_STRIP: f32 = 20.0;
+/// Slices of the gradient painted in one segment of the preview.
+const PREVIEW_SLICES: usize = 24;
+/// Room kept on each side for the half of an end label.
+const PREVIEW_INSET: f32 = 14.0;
+/// Height of a row of small text above and below the strip.
+const PREVIEW_ROW: f32 = 13.0;
+
+/// A schematic of the bar under « Show color bar » (#510): one strip, a
+/// segment per group on the bar in graph order, each with its gradient and a
+/// width proportional to its drawn range on the bar's scale (the renderer's
+/// own `segment_extents`), the group names above, the values at the ends and
+/// the breaks (the renderer's own `tick_marks`) and the break labels under
+/// them, as plain text. Nothing when no segment can be drawn.
+fn color_bar_preview(
+    ui: &mut egui::Ui,
+    bar: &ColorBarSpec,
+    segments: &[stokesforge_render::color_bar::BarSegment],
+    groups: &[(u32, String)],
+) {
+    use stokesforge_render::color_bar::{segment_extents, tick_marks, Anchor};
+    if !bar.visible || segments.is_empty() {
+        return;
+    }
+    let with_labels = segments[..segments.len() - 1]
+        .iter()
+        .any(|segment| !segment.label.is_empty());
+    let height =
+        PREVIEW_ROW * 2.0 + PREVIEW_STRIP + if with_labels { PREVIEW_ROW } else { 0.0 } + 4.0;
+    let width = ui.available_width();
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    // The ends and the breaks only: the strip is a sketch, not the ticks.
+    let sketch = ColorBarSpec {
+        ticks: ColorBarTicks::Breaks,
+        ..bar.clone()
+    };
+    let length = (width - 2.0 * PREVIEW_INSET).floor().max(1.0) as i32;
+    let (starts, lens) = segment_extents(&bar.scale.effective(), segments, length);
+    let painter = ui.painter_at(rect);
+    let small = egui::FontId::proportional(10.0);
+    let ink = ui.visuals().text_color();
+    let dim = ui.visuals().weak_text_color();
+    let strip_top = rect.top() + PREVIEW_ROW;
+    let x = |u: f32| rect.left() + PREVIEW_INSET + u;
+    for ((segment, start), len) in segments.iter().zip(&starts).zip(&lens) {
+        let strip = egui::Rect::from_min_size(
+            egui::pos2(x(*start as f32), strip_top),
+            egui::vec2(*len as f32, PREVIEW_STRIP),
+        );
+        let colors = stokesforge_plot::gradient_colors(&segment.stops, PREVIEW_SLICES);
+        crate::color_picker::paint_gradient_at(&painter, strip, &colors);
+        if let Some((_, title)) = groups.iter().find(|(id, _)| *id == segment.group) {
+            // Centred on the segment, kept inside the preview.
+            let galley = painter.layout_no_wrap(title.clone(), small.clone(), dim);
+            let half = galley.size().x / 2.0;
+            let centre = strip.center().x.clamp(
+                rect.left() + half,
+                (rect.right() - half).max(rect.left() + half),
+            );
+            painter.galley(egui::pos2(centre - half, rect.top()), galley, dim);
+        }
+    }
+    let below = strip_top + PREVIEW_STRIP + 2.0;
+    for (pixel, text, anchor) in tick_marks(&sketch, segments, &starts, &lens) {
+        let at = x(pixel as f32);
+        painter.line_segment(
+            [egui::pos2(at, strip_top), egui::pos2(at, below)],
+            egui::Stroke::new(1.0, ink),
+        );
+        let align = match anchor {
+            Anchor::Centre => egui::Align2::CENTER_TOP,
+            Anchor::Before => egui::Align2::RIGHT_TOP,
+            Anchor::After => egui::Align2::LEFT_TOP,
+        };
+        painter.text(egui::pos2(at, below), align, text, small.clone(), ink);
+    }
+    for (index, segment) in segments[..segments.len() - 1].iter().enumerate() {
+        if segment.label.is_empty() {
+            continue;
+        }
+        let gap =
+            starts[index] + lens[index] + (starts[index + 1] - starts[index] - lens[index]) / 2;
+        painter.text(
+            egui::pos2(x(gap as f32), below + PREVIEW_ROW),
+            egui::Align2::CENTER_TOP,
+            &segment.label,
+            small.clone(),
+            dim,
+        );
+    }
 }
 
 /// The groups of the bar that are followed by another one, in graph order

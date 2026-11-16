@@ -5311,6 +5311,88 @@ mod tests {
         (context, harness, painted)
     }
 
+    /// #510: a layer of two groups whose bar carries `ranges` (group, from,
+    /// to), drawn or not, chained or not; the Legend tab scrolled to the bar.
+    fn preview_page(shown: bool, chain: bool, ranges: &[(u32, f64, f64)]) -> Vec<Text> {
+        use stokesforge_plot::{ColorBarSegment, ColorBarSpec};
+        let context = test_support::context();
+        let mut harness = grouped(2);
+        let mut spec = harness.model();
+        first_panel(&mut spec).color_bar = Some(ColorBarSpec {
+            visible: shown,
+            chain,
+            segments: ranges
+                .iter()
+                .map(|&(group, from, to)| ColorBarSegment {
+                    from: Some(from),
+                    to: Some(to),
+                    ..ColorBarSegment::new(group)
+                })
+                .collect(),
+            ..ColorBarSpec::default()
+        });
+        harness.state.dispatch(Action::SetPlotSpec {
+            graph: harness.graph,
+            spec,
+        });
+        harness.open(PlotSettingsTab::Legend, None);
+        scroll_page(&context, &mut harness, -1000.0);
+        scroll_page(&context, &mut harness, 100.0);
+        paint_window(&context, &mut harness.state, Vec::new())
+    }
+
+    /// The topmost text `wanted` (the preview sits above the range fields,
+    /// which show the same numbers).
+    fn topmost(texts: &[Text], wanted: &str) -> Option<egui::Pos2> {
+        texts
+            .iter()
+            .filter(|t| t.text == wanted)
+            .map(|t| t.center)
+            .min_by(|a, b| a.y.total_cmp(&b.y))
+    }
+
+    /// #510: the preview of the bar sits under « Show color bar », only with
+    /// a shown bar and a group on it. Witness: drawn anyway (the end values
+    /// are painted by the preview alone when the fields are greyed or absent).
+    #[test]
+    fn the_color_bar_preview_needs_a_shown_bar_with_a_group() {
+        let ranges = [(1, 10.0, 40.0), (2, 50.0, 60.0)];
+        let painted = preview_page(true, false, &ranges);
+        // Preview value labels sit above the group table's first row.
+        let groups_title = text_exact(&painted, &tr!("plot-color-bar-groups-section")).center;
+        assert!(topmost(&painted, "40").is_some_and(|p| p.y < groups_title.y));
+        let painted = preview_page(false, false, &ranges);
+        assert!(topmost(&painted, "40").is_none());
+        let painted = preview_page(true, false, &[]);
+        assert!(topmost(&painted, "40").is_none());
+    }
+
+    /// #510: two groups on the bar, unchained: two segments, the first three
+    /// times wider, the labels 10, 40, 50, 60. Witness: equal widths put 40
+    /// at the middle of the strip.
+    #[test]
+    fn the_color_bar_preview_sizes_segments_by_their_ranges() {
+        let painted = preview_page(true, false, &[(1, 10.0, 40.0), (2, 50.0, 60.0)]);
+        let at = |text: &str| topmost(&painted, text).unwrap().x;
+        let (first, second) = (at("40") - at("10"), at("60") - at("50"));
+        assert!(first > 2.0 * second, "{first} against {second}");
+        assert!(at("40") < at("50"));
+    }
+
+    /// #510: chained, the segments follow each other on one scale: 10-40
+    /// then 50-100 is drawn 10-40 then 40-90, the break carrying one label
+    /// and the end 90, a number no field holds. Witness: chain ignored
+    /// paints 50 and 100 instead of 90.
+    #[test]
+    fn the_color_bar_preview_follows_the_chain() {
+        let ranges = [(1, 10.0, 40.0), (2, 50.0, 100.0)];
+        let chained = preview_page(true, true, &ranges);
+        assert!(topmost(&chained, "90").is_some());
+        let unchained = preview_page(true, false, &ranges);
+        assert!(topmost(&unchained, "90").is_none());
+        assert!(topmost(&unchained, "100").is_some());
+    }
+
     /// The segments of the draft bar, as group numbers.
     fn draft_bar_groups(harness: &Harness) -> Vec<u32> {
         let mut spec = harness.draft();
