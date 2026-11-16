@@ -32,6 +32,8 @@ pub(crate) const SET_GRAPH_OPTIONS: &[&str] = &[
     "title",
     "title_visible",
     "title_color",
+    "text_color",
+    "axes_color",
     "background",
     "stale_warning",
     "decimal_comma",
@@ -154,6 +156,8 @@ struct Changes {
     title: Option<String>,
     title_visible: Option<bool>,
     title_color: Option<String>,
+    text_color: Option<String>,
+    axes_color: Option<String>,
     background: Option<String>,
     stale_warning: Option<bool>,
     decimal_comma: Option<bool>,
@@ -322,6 +326,8 @@ impl Changes {
                 "title" => changes.title = Some(string()?),
                 "title_visible" => changes.title_visible = Some(boolean()?),
                 "title_color" => changes.title_color = Some(color()?),
+                "text_color" => changes.text_color = Some(color()?),
+                "axes_color" => changes.axes_color = Some(color()?),
                 "background" => changes.background = Some(color()?),
                 "stale_warning" => changes.stale_warning = Some(boolean()?),
                 "decimal_comma" => changes.decimal_comma = Some(boolean()?),
@@ -537,6 +543,14 @@ impl Changes {
         if let Some(color) = &self.title_color {
             spec.title_color.clone_from(color);
         }
+        // The graph-level colours (#550): only these fields, a part with its
+        // own colour keeps it.
+        if let Some(color) = &self.text_color {
+            spec.set_text_color(color);
+        }
+        if let Some(color) = &self.axes_color {
+            spec.set_axes_color(color);
+        }
         if let Some(background) = &self.background {
             spec.background.clone_from(background);
         }
@@ -721,7 +735,9 @@ fn set_graph_native(
 /// nothing.
 ///
 /// The graph: `title`, `title_visible`, `title_color` (`'#RRGGBB'`, `''` =
-/// automatic), `background` (`'#RRGGBB[AA]'`, `''` = white), `stale_warning`,
+/// automatic), `text_color` and `axes_color` (`'#RRGGBB'`, `''` = automatic: the
+/// graph-level colours, which only the parts left on automatic follow, as the
+/// General tab does), `background` (`'#RRGGBB[AA]'`, `''` = white), `stale_warning`,
 /// `decimal_comma` (booleans), `text_font` (a family name, `''` = the embedded
 /// default) and `text_scale` (percent, 25 to 400, `None` = 100 %): the font and
 /// the scale of every text left on Auto (titles, ticks, legend, colour bar, new

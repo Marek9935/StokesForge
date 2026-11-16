@@ -404,6 +404,9 @@ pub fn non_trivial_spec(
     PlotSpec {
         background: "#0a0a0a".to_string(),
         title_color: "#ffcc00".to_string(),
+        // #550: the graph-level text and axes colours.
+        text_color: "#203040".to_string(),
+        axes_color: "#405060".to_string(),
         title_visible: true,
         title_anchor: Some(stokesforge_plot::TextAnchor::new(1.0, 9.5)),
         title_font: stokesforge_plot::TextFont {

@@ -390,6 +390,39 @@ pub fn figure_ink(spec: &PlotSpec) -> (u8, u8, u8) {
     auto_ink(over_white(figure_background(spec)))
 }
 
+/// The graph-level colours (#550): what a part left on automatic follows.
+///
+/// One resolver per role. A part takes its own colour if it is readable, else
+/// the graph-level colour if it is set and readable, else the automatic ink.
+/// An unreadable graph-level value is as good as an empty one. The text
+/// role reaches every text (graph and layer titles, axis titles, free texts,
+/// legend text, colour bar labels); strokes (legend frame, shape and bar
+/// outlines) keep the automatic ink.
+#[derive(Debug, Clone, Copy, Default)]
+struct GraphInks {
+    text: Option<(u8, u8, u8, u8)>,
+    axes: Option<(u8, u8, u8, u8)>,
+}
+
+impl GraphInks {
+    fn of(spec: &PlotSpec) -> Self {
+        Self {
+            text: parse_hex(&spec.text_color),
+            axes: parse_hex(&spec.axes_color),
+        }
+    }
+
+    /// Text role: own colour, else graph-level text colour, else `ink`.
+    fn text(&self, local: &str, ink: (u8, u8, u8)) -> (u8, u8, u8, u8) {
+        parse_hex(local).or(self.text).unwrap_or(opaque(ink))
+    }
+
+    /// Axes role: own colour, else graph-level axes colour, else `ink`.
+    fn axes(&self, local: &str, ink: (u8, u8, u8)) -> (u8, u8, u8, u8) {
+        parse_hex(local).or(self.axes).unwrap_or(opaque(ink))
+    }
+}
+
 /// Draws the resolved graph on the given backend.
 ///
 /// Consumes the backend — this is Plotters' convention
@@ -447,7 +480,8 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
     // depend on where the title is placed — otherwise the plot area would
     // change size on drop, and the title, anchored to the data, would jump. It
     // is drawn on its anchor once the panels are done, on top.
-    let title_color = rgba_or(&spec.title_color, opaque(ink));
+    let graph_inks = GraphInks::of(spec);
+    let title_color = graph_inks.text(&spec.title_color, ink);
     let title_style = font_style(
         &spec.title_font,
         TITLE_SIZE,
@@ -701,6 +735,7 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
             plot.spec.decimal_comma,
             plot.spec.graph_text(),
             figure_texts,
+            graph_inks,
         )?;
         if panel.spec.overlay.is_none() {
             bases.insert(cell_index, frame);
@@ -3056,6 +3091,7 @@ fn draw_panel<DB: DrawingBackend>(
     decimal_comma: bool,
     graph: GraphText<'_>,
     figure_texts: &FigureTexts,
+    graph_inks: GraphInks,
 ) -> Result<(DrawnPanel, Projection, BaseFrame<DB>), DrawingAreaErrorKind<DB::ErrorType>> {
     let spec = panel.spec;
     let figure_width = canvas.dim_in_pixel().0;
@@ -3162,7 +3198,7 @@ fn draw_panel<DB: DrawingBackend>(
         &spec.title_font,
         PANEL_TITLE_SIZE,
         graph,
-        rgba_or(&spec.title_color, opaque(ink)),
+        graph_inks.text(&spec.title_color, ink),
         canvas.dim_in_pixel().0,
     );
     let area = if let Some(base) = base {
@@ -3495,7 +3531,7 @@ fn draw_panel<DB: DrawingBackend>(
     // are displayed at the top and on the right, through Plotters' secondary
     // axes (same frame as the layer itself, see below).
     if overlay.is_none() {
-        let colors = AxisColors::of(&spec.bottom, ink, figure_width, graph);
+        let colors = AxisColors::of(&spec.bottom, ink, &graph_inks, figure_width, graph);
         let custom = custom_ticks(&spec.bottom);
         for pass in mesh_passes(custom, spec.bottom.tick_labels) {
             let mut mesh = chart.configure_mesh();
@@ -3542,7 +3578,7 @@ fn draw_panel<DB: DrawingBackend>(
         }
     }
     if overlay.is_none() {
-        let colors = AxisColors::of(&spec.left, ink, figure_width, graph);
+        let colors = AxisColors::of(&spec.left, ink, &graph_inks, figure_width, graph);
         let custom = custom_ticks(&spec.left);
         for pass in mesh_passes(custom, spec.left.tick_labels) {
             let mut mesh = chart.configure_mesh();
@@ -3600,7 +3636,7 @@ fn draw_panel<DB: DrawingBackend>(
                 String::new()
             }
         };
-        let colors = AxisColors::of(&spec.right, ink, figure_width, graph);
+        let colors = AxisColors::of(&spec.right, ink, &graph_inks, figure_width, graph);
         // The top tick marks only count if the top mirror is drawn.
         let top_custom = mirror_top && custom_ticks(&spec.top);
         let custom = custom_ticks(&spec.right) || top_custom;
@@ -3673,7 +3709,7 @@ fn draw_panel<DB: DrawingBackend>(
     // the left, without a title. A right axis with data is already drawn
     // above; only the top mirror is then added.
     if (mirror_top || mirror_right) && y2_range.is_none() {
-        let colors = AxisColors::of(&spec.bottom, ink, figure_width, graph);
+        let colors = AxisColors::of(&spec.bottom, ink, &graph_inks, figure_width, graph);
         let custom_top = mirror_top && custom_ticks(&spec.top);
         let custom_right = mirror_right && custom_ticks(&spec.right);
         let custom = custom_top || custom_right;
@@ -3756,8 +3792,8 @@ fn draw_panel<DB: DrawingBackend>(
     if let Some(o) = overlay {
         let show_x = o.x_top && spec.bottom.visible && top_area > 0;
         let show_y = o.y_right && spec.left.visible && right_area > 0;
-        let colors_x = AxisColors::of(&spec.bottom, ink, figure_width, graph);
-        let colors_y = AxisColors::of(&spec.left, ink, figure_width, graph);
+        let colors_x = AxisColors::of(&spec.bottom, ink, &graph_inks, figure_width, graph);
+        let colors_y = AxisColors::of(&spec.left, ink, &graph_inks, figure_width, graph);
         let stub = 4;
         if show_x {
             let y0 = top_label_area.saturating_sub(top_offset + top_area);
@@ -3826,7 +3862,7 @@ fn draw_panel<DB: DrawingBackend>(
     if overlay.is_none() {
         let (left, right) = (origin.0 - 1, origin.0 + size.0 as i32);
         let (top, bottom) = (origin.1 - 1, origin.1 + size.1 as i32);
-        let ink = rgba(AxisColors::of(&spec.bottom, ink, figure_width, graph).ticks);
+        let ink = rgba(AxisColors::of(&spec.bottom, ink, &graph_inks, figure_width, graph).ticks);
         for (vertical, horizontal, x, y) in [
             (plan.left, plan.bottom, left, bottom),
             (plan.right, plan.bottom, right, bottom),
@@ -3991,7 +4027,7 @@ fn draw_panel<DB: DrawingBackend>(
         if !axis.title_visible || label.is_empty() || anchor.is_some() || area_size == 0 {
             continue;
         }
-        let colors = AxisColors::of(axis, ink, figure_width, graph);
+        let colors = AxisColors::of(axis, ink, &graph_inks, figure_width, graph);
         let text_size = area.estimate_text_size(&label, &colors.title_style)?;
         let half = text_size.1 as f64 / 2.0;
         let area_size = area_size as f64;
@@ -4123,7 +4159,7 @@ fn draw_panel<DB: DrawingBackend>(
         .chain(&overlay_prepared)
         .filter(|s| s.in_legend())
         .collect();
-    let legend_ink = rgba_or(&spec.legend.color, opaque(ink));
+    let legend_ink = graph_inks.text(&spec.legend.color, ink);
     let inscribed = legend::draw(
         canvas,
         origin,
@@ -4183,7 +4219,7 @@ fn draw_panel<DB: DrawingBackend>(
     if let Some(bar) = spec.color_bar_in_order().filter(|bar| bar.visible) {
         let bar = &*bar;
         let segments = crate::color_bar::bar_segments(panel);
-        let bar_ink = opaque(ink);
+        let bar_ink = graph_inks.text("", ink);
         let placed = crate::color_bar::draw(
             canvas,
             bar,
@@ -4258,7 +4294,7 @@ fn draw_panel<DB: DrawingBackend>(
     ] {
         let Some(anchor) = anchor else { continue };
         let pixel = centered(anchor);
-        let colors = AxisColors::of(axis, ink, figure_width, graph);
+        let colors = AxisColors::of(axis, ink, &graph_inks, figure_width, graph);
         let measured = draw_centered_text(
             canvas,
             &axis.display_label(),
@@ -4331,7 +4367,7 @@ fn draw_panel<DB: DrawingBackend>(
             chart.plotting_area().map_coordinate(&point)
         };
         if let Some(drawn_annotation) =
-            draw_annotation(canvas, annotation, index, pixel, ink, graph)?
+            draw_annotation(canvas, annotation, index, pixel, ink, graph, &graph_inks)?
         {
             drawn.annotations.push(drawn_annotation);
         }
@@ -4384,11 +4420,12 @@ fn draw_annotation<DB: DrawingBackend>(
     pixel: plotters_backend::BackendCoord,
     ink: (u8, u8, u8),
     graph: GraphText<'_>,
+    graph_inks: &GraphInks,
 ) -> Result<Option<DrawnAnnotation>, DrawingAreaErrorKind<DB::ErrorType>> {
     if annotation.text.is_empty() {
         return Ok(None);
     }
-    let color = rgba_or(&annotation.color, opaque(ink));
+    let color = graph_inks.text(&annotation.color, ink);
     let size = annotation.resolved_size(graph);
     let rotation = annotation.effective_rotation();
     // A fixed width (fraction of the figure, capped to it) makes the text wrap
@@ -5083,8 +5120,8 @@ fn draw_marks<DB: DrawingBackend>(
     Ok(())
 }
 
-/// Effective colors of an axis: those of the spec, or the automatic ink when
-/// they are empty.
+/// Effective colors of an axis: its own, else the graph-level ones, else the
+/// automatic ink (#550, see [`GraphInks`]).
 struct AxisColors {
     ticks: (u8, u8, u8, u8),
     /// The style of the tick numbers under the graph settings (#545).
@@ -5094,9 +5131,15 @@ struct AxisColors {
 }
 
 impl AxisColors {
-    fn of(axis: &AxisSpec, ink: (u8, u8, u8), figure_width: u32, graph: GraphText<'_>) -> Self {
-        let title = rgba_or(&axis.title_color, opaque(ink));
-        let ticks = rgba_or(&axis.tick_color, opaque(ink));
+    fn of(
+        axis: &AxisSpec,
+        ink: (u8, u8, u8),
+        graph_inks: &GraphInks,
+        figure_width: u32,
+        graph: GraphText<'_>,
+    ) -> Self {
+        let title = graph_inks.text(&axis.title_color, ink);
+        let ticks = graph_inks.axes(&axis.tick_color, ink);
         Self {
             ticks,
             tick_style: tick_style(graph, axis.tick_label_size, ticks),

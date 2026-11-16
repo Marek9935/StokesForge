@@ -346,6 +346,7 @@ pyst.plot(y2, x, graph=g, line_style="dash", label="Blank")
 | `title`, `panel_title`, `x_title`, `y_title` | Text |
 | `title_visible`, `stale_warning`, `decimal_comma` | `True` or `False` |
 | `title_color`, `background` | `"#RRGGBB"` or `"#RRGGBBAA"`. An empty text means automatic (title) or white (background). |
+| `text_color`, `axes_color` | `"#RRGGBB"`. The graph's text color and axes color, as in the General tab of Graph Properties: only the parts left on automatic color follow them; a part with its own color keeps it. An empty text means automatic. |
 | `x_scale`, `y_scale` | `"linear"` or `"log"` |
 | `x_from`, `x_to`, `y_from`, `y_to` | Axis range, both bounds together. The axis then has a fixed range. |
 | `x_auto_range`, `y_auto_range` | `True` returns the axis to automatic range |
@@ -440,7 +441,7 @@ Palettes saved in your user settings are not visible to scripts, so that a scrip
 `pyst.apply_theme(graph, theme, *, families=None, add_missing_layers=False)` applies a graph theme to a graph, in the undo group of the script. `pyst.themes()` lists the themes a script can name: a list of dictionaries with `name`, `key`, `source` (`"builtin"`, `"user"` or `"project"`) and `modified` (`True` for a built-in you changed). A graph made by `pyst.plot` does not take your default theme: apply one when you want it.
 
 - `theme` is the name of a built-in theme (`"Publication Wide"`, or its key `"publication-wide"`, or its name in French), of a theme of your user settings, or of a theme saved in the project. Capitals and extra spaces do not matter. Start the name with `builtin:`, `user:` or `project:` to look in one place only.
-- `families` lists what to copy: `"background"`, `"texts"`, `"title-fonts"`, `"axes"`, `"axis-ranges"`, `"size-and-page"`, `"legend"`, `"curves"`, `"color-bar"`. Without it, everything is copied except the texts and the axis ranges, as for the default theme of new graphs. An empty list or an unknown name raises `InvalidValueError`.
+- `families` lists what to copy: `"background"`, `"texts"`, `"title-fonts"`, `"axes"`, `"axis-ranges"`, `"size-and-page"`, `"legend"`, `"curves"`, `"color-bar"`, or the names the Apply Theme window shows, in English or in French whatever the language of the application (`"Curves"`, `"Courbes"`, `"Size"`, `"Polices des titres"`); `"style"` stands for the six parts of the Style box. Accents matter. Without it, everything is copied except the texts and the axis ranges, as for the default theme of new graphs. An empty list or an unknown name raises `InvalidValueError`.
 - `add_missing_layers=True` adds empty layers when the theme has more layers than the graph.
 - A name that no theme has raises `pyst.UnknownThemeError`; nothing is changed. If several themes have the same name, the project theme is applied before the user theme, and the user theme before the built-in. A warning tells which one was applied and which were ignored (`Theme 'Poster': project:Poster applied, user:Poster ignored`). Start the name with `builtin:`, `user:` or `project:` to choose.
 

@@ -439,8 +439,9 @@ test will read. The Y keys target the `axis` axis (`left` by default, `right`).
 |---|---|
 | `title`, `panel_title`, `x_title`, `y_title` | strings (Typst markup for the titles) |
 | `title_visible`, `stale_warning`, `decimal_comma` | booleans (graph) |
-| `text_font`, `text_scale` | the graph font (a family name, `""` = the embedded default) and the text scale (percent, 25 to 400, refused outside; `None` = 100 %) of Graph Properties › General (#545): the default of every text left on Auto (titles, tick numbers, legend, colour bar, new free texts). A text with its own font or size keeps it: the scale does not multiply a size set by hand. Added to `PYST_API_VERSION` 0.10 |
+| `text_font`, `text_scale` | the graph font (a family name, `""` = the embedded default) and the text scale (percent, 25 to 400, refused outside; `None` = 100 %) of Graph Properties › General (#545): the default of every text left on Auto (titles, tick numbers, legend, colour bar, new free texts). A text with its own font or size keeps it: the scale does not multiply a size set by hand. Added to `PYST_API_VERSION` 0.11 |
 | `title_color`, `background` | `#RRGGBB` or `#RRGGBBAA`; `""` = automatic (title) or white (background) |
+| `text_color`, `axes_color` | `#RRGGBB`; `""` = automatic. The graph-level colours (#550, General tab « Text color » and « Axes color »): they write only the graph's own fields, so a part (axis title, scale, free text, layer title, legend) with its own colour keeps it and the parts left on automatic follow. There is no read-back |
 | `x_scale`, `y_scale` | `linear` or `log` |
 | `x_from`/`x_to`, `y_from`/`y_to` | both together, finite and different, positive on a log axis; `from > to` draws the axis reversed (and marks the axis as inverted, #344); switch the framing to manual |
 | `x_auto_range`, `y_auto_range` | `True` computes the automatic range **once**, with the default margins (a script has no preferences), and writes it as From/To (#529): the axis does not follow the data afterwards (contradictory with bounds given in the same call). Like every graph written by a script (`plot`, `set_graph`, series groups), a new axis range is frozen at the write; a surface of keys unchanged, so `__api_version__` does not move |
@@ -550,13 +551,22 @@ applied only by this call.
   **before every run** (the engine is reused, the user's themes change between
   runs; `AppState::script_theme_library`). Without it (the command line, the
   script tests) the built-ins are the originals, known by key and English name
-  only, and there are no user themes. The themes of the project are always read
+  only, and there are no user themes; the families answer to their key, their
+  English label and `style` only (see Families). The themes of the project are always read
   from the snapshot: they travel with the `.stf`.
 - **Families.** Left out, `families` is that of the default theme of new graphs
   (every family but the texts and the axis ranges). A family is named by its key
-  (`title-fonts`), the same with underscores (`title_fonts`) or its English
-  displayed name (`Title fonts`); an empty list or an unknown name raises
-  `InvalidValueError` (the message lists the keys). `add_missing_layers` adds
+  (`title-fonts`), the same with underscores (`title_fonts`) or the name the
+  Apply Theme window shows (#551): its English label (`Title fonts`, `Size`),
+  everywhere, headless too; the label of every catalogue language (`Courbes`,
+  `Polices des titres`) when the application injected them
+  (`ThemeLibrary::with_family_names`, plain data, whatever the interface
+  language; never the pseudo-locale). `style` (the Style box: Background, Title
+  fonts, Axes, Legend, Curves, Color bar) names the six parts, everywhere. Case
+  and spaces are ignored, `_` counts as `-`, accents are **not** folded
+  (`Legende` is refused); naming a family twice is fine. An empty list or an
+  unknown name raises `InvalidValueError` (the message lists the keys and
+  `style`). `add_missing_layers` adds
   empty layers up to the theme's count; off by default.
 - **Same name in several places (#546 T7).** Never an error. The order is
   project theme, then user theme, then built-in: the first is applied and a
@@ -767,7 +777,7 @@ difference with the module actually built, saying which one.
 ### API version (#356)
 
 `pyst.__api_version__` is a string `"MAJOR.MINOR"`, the constant
-`PYST_API_VERSION` of `stokesforge-script/src/surface.rs` (currently `"0.10"`).
+`PYST_API_VERSION` of `stokesforge-script/src/surface.rs` (currently `"0.11"`).
 It is independent of the software version.
 
 - **Alpha, `0.x`**: any change of the list (addition or break) raises the minor
@@ -911,6 +921,8 @@ symbol_every
 title
 title_visible
 title_color
+text_color
+axes_color
 background
 stale_warning
 decimal_comma

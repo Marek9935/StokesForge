@@ -87,7 +87,17 @@ The graph title (`PlotSpec::title_color`), the title of each axis
 ticks, labels, and the grid, taken at 20 % / 10 % opacity)
 have their own color. An empty string means **automatic**:
 `color::auto_ink(fond)`, white on a dark background, dark on a light one
-(the choice with the best WCAG contrast ratio). The same ink is used for the
+(the choice with the best WCAG contrast ratio). Since #550 the graph carries a
+**graph-level text colour** (`PlotSpec::text_color`) and **axes colour**
+(`PlotSpec::axes_color`), and each part resolves its colour in this order: its
+own colour if set, else the graph-level colour if set and readable, else the
+automatic ink. One resolver per role in `pipeline.rs` (`GraphInks::text`,
+`GraphInks::axes`): text for the graph title, the layer titles, the axis titles,
+the free texts, the legend text and the colour bar labels; axes for the line, ticks, labels and grid of each axis. An unreadable
+graph-level value is as good as an empty one. The text role also reaches the layer
+titles, the legend text and the colour bar labels; the strokes (legend frame,
+shape outlines, bar outlines) keep the automatic ink. Without any colour set,
+the automatic ink is used for the
 panel title, the frame and text of the legend, and the outline of bars. A dark
 background therefore turns everything in automatic color to white at once —
 on screen as in the export, since the pipeline is shared

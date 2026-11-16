@@ -480,11 +480,11 @@ fields; the window stays one history step.
 (`plot-general-text-color`, `plot-general-axes-color`; the background is the row
 above them; they were on the Theme tab, form 514-4 V5) are laid out with the
 other rows of the General form (`global_color_rows` in `plot_settings.rs`, no
-collapsible section, S-L5). A global color is **written into all the local
-fields** (graph title, title and scale of each axis of each panel, free texts;
-`PlotSpec::set_text_color`/`set_axes_color`): the last setting overwrites what
-had been set one by one, and nothing more is remembered (the `.stf` format does
-not change). Painting writes nothing: a value is written only when the user
+collapsible section, S-L5). A global color is **written into the graph-level
+field only** (`PlotSpec::text_color` / `axes_color`, through
+`set_text_color`/`set_axes_color`, #550): a part with its own colour keeps it,
+and the parts left on automatic follow the global colour (resolution order in
+`docs/rendering.md`). Under each row a grey note says how many parts have their own color (`PlotSpec::parts_with_own_text_color` / `parts_with_own_axes_color`, plural key `plot-general-own-colors-note`); the button « Reset Parts to Graph Settings » (`plot-general-reset-parts`, `PlotSpec::reset_parts_to_graph`, greyed when no part has its own color) clears those own colors in the draft (one undo step on OK) and never touches the curves, the graph title's own Title color, the backgrounds, the legend frame or the tick mark colors. The Auto choice of a part's color picker reads « Auto (graph color) » (`plot-color-auto-graph`); the General rows keep « Auto (contrasts with background) ». Light and Dark put every part back to automatic (G2). Painting writes nothing: a value is written only when the user
 changed it. Everything stays in the draft of the window: a single history step
 on confirmation. `stokesforge_plot::THEMES` (Light and Dark) now only holds the
 colors of the two first built-in themes (`builtin_themes`); the old two-button

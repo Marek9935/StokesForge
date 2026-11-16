@@ -158,29 +158,21 @@ fn hover_flip<T>(
 
 /// The label and the « ? » help of a family box.
 fn texts_of(family: ThemeFamily) -> (String, String) {
-    match family {
-        ThemeFamily::Background => (
-            tr!("theme-part-background"),
-            tr!("theme-part-background", "hint"),
-        ),
-        ThemeFamily::TitleFonts => (
-            tr!("theme-part-title-fonts"),
-            tr!("theme-part-title-fonts", "hint"),
-        ),
-        ThemeFamily::Axes => (tr!("theme-part-axes"), tr!("theme-part-axes", "hint")),
-        ThemeFamily::Legend => (tr!("theme-part-legend"), tr!("theme-part-legend", "hint")),
-        ThemeFamily::Curves => (tr!("theme-part-curves"), tr!("theme-part-curves", "hint")),
-        ThemeFamily::ColorBar => (
-            tr!("theme-part-color-bar"),
-            tr!("theme-part-color-bar", "hint"),
-        ),
-        ThemeFamily::Texts => (tr!("theme-what-texts"), tr!("theme-what-texts", "hint")),
-        ThemeFamily::SizeAndPage => (tr!("theme-what-size"), tr!("theme-what-size", "hint")),
-        ThemeFamily::AxisRanges => (
-            tr!("theme-what-axis-ranges"),
-            tr!("theme-what-axis-ranges", "hint"),
-        ),
-    }
+    let hint = match family {
+        ThemeFamily::Background => tr!("theme-part-background", "hint"),
+        ThemeFamily::TitleFonts => tr!("theme-part-title-fonts", "hint"),
+        ThemeFamily::Axes => tr!("theme-part-axes", "hint"),
+        ThemeFamily::Legend => tr!("theme-part-legend", "hint"),
+        ThemeFamily::Curves => tr!("theme-part-curves", "hint"),
+        ThemeFamily::ColorBar => tr!("theme-part-color-bar", "hint"),
+        ThemeFamily::Texts => tr!("theme-what-texts", "hint"),
+        ThemeFamily::SizeAndPage => tr!("theme-what-size", "hint"),
+        ThemeFamily::AxisRanges => tr!("theme-what-axis-ranges", "hint"),
+    };
+    (
+        stokesforge_app_state::theme_window::family_name(family),
+        hint,
+    )
 }
 
 /// Width the fold arrow of a header row takes (the gap after it is the item gap).
@@ -230,7 +222,7 @@ fn boxes(ui: &mut egui::Ui, window: &mut ApplyThemeWindow, hover: &mut Hover) {
             let mut on = state == StyleState::All;
             let response = help_beside(ui, tr!("theme-what-style", "hint"), |ui| {
                 ui.add(
-                    egui::Checkbox::new(&mut on, tr!("theme-what-style"))
+                    egui::Checkbox::new(&mut on, stokesforge_app_state::theme_window::style_name())
                         .indeterminate(state == StyleState::Mixed),
                 )
             });

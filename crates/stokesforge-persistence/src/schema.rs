@@ -756,6 +756,13 @@ pub(crate) struct PlotSpecRecord {
     /// empty string (automatic color) by `#[serde(default)]`.
     #[serde(default)]
     pub(crate) title_color: String,
+    /// Graph-level text colour (#550): absent from an older file and **not
+    /// written when empty**, so such files stay byte-identical.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub(crate) text_color: String,
+    /// Graph-level axes colour (#550), like `text_color`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub(crate) axes_color: String,
     /// Moved title (issue #53): absent from an older file, hence at its
     /// default place.
     #[serde(default)]
@@ -885,6 +892,8 @@ impl Default for PlotSpecRecord {
             panels: vec![PanelSpecRecord::default()],
             background: "#ffffff00".to_string(), // stokesforge_plot::TRANSPARENT
             title_color: String::new(),
+            text_color: String::new(),
+            axes_color: String::new(),
             title_visible: true,
             title_anchor: None,
             title_font: TextFontRecord::default(),
@@ -1736,6 +1745,13 @@ mod tests {
             "an old graph keeps its title visible"
         );
         assert_eq!(reloaded.title_color, "");
+        // #550: an old graph has no graph-level text or axes colour.
+        assert_eq!(reloaded.text_color, "");
+        assert_eq!(reloaded.axes_color, "");
+        // And an empty one is not written: such files stay byte-identical.
+        let written = rmp_serde::to_vec_named(&reloaded).expect("encoding");
+        let text = String::from_utf8_lossy(&written);
+        assert!(!text.contains("text_color") && !text.contains("axes_color"));
         // #398: an old graph is on the grid, and its panels have no free frame.
         assert_eq!(reloaded.layer_placement, LayerPlacementRecord::Grid);
         assert_eq!(reloaded.panels[0].free_frame, None);

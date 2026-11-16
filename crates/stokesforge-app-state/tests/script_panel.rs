@@ -544,3 +544,28 @@ fn the_themes_of_the_application_are_injected_before_every_run() {
     assert_eq!(output.stdout.trim(), "[True]");
     assert_eq!(graph_named(&state, "Scripted").background, "#abcdef");
 }
+
+/// A family answers to the name the Apply Theme window shows, in French as
+/// well as in English, whatever the interface language (#551).
+#[test]
+fn a_family_is_named_in_every_catalogue_language_in_the_application() {
+    let (_session, mut state, _sheet) = start();
+    run_and_wait(
+        &mut state,
+        "t = pyst.resolve('[Book1]Sheet1!Time')\n\
+         a = pyst.plot(t, name='ByName')\nb = pyst.plot(t, name='ByKey')\n\
+         c = pyst.plot(t, name='Untouched')\n\
+         pyst.apply_theme(a, 'publication', families=['Courbes', 'Taille'])\n\
+         pyst.apply_theme(b, 'publication', families=['curves', 'size-and-page'])\n",
+    );
+    let output = state.script_output().unwrap();
+    assert!(output.error.is_none(), "{:?}", output.error);
+    let (by_name, by_key, untouched) = (
+        graph_named(&state, "ByName"),
+        graph_named(&state, "ByKey"),
+        graph_named(&state, "Untouched"),
+    );
+    assert_ne!(by_name.panels[0].series, untouched.panels[0].series);
+    assert_eq!(by_name.panels[0].series, by_key.panels[0].series);
+    assert_eq!(by_name.frame_widths, by_key.frame_widths);
+}
