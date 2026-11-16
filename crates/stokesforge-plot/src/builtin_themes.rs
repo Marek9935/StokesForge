@@ -107,11 +107,14 @@ fn sized(size: f64) -> crate::TextFont {
     }
 }
 
-/// The ink of every text and scale of `panel`, the size of its titles, and the
-/// grid off on the four axes.
-fn ink(panel: &mut PanelSpec, color: &str, title_size: f64) {
+/// The ink of every text and scale of `panel`, the size of its titles (`None`
+/// = Auto, which follows the graph text scale), and the grid off on the four
+/// axes.
+fn ink(panel: &mut PanelSpec, color: &str, title_size: Option<f64>) {
     panel.title_color = color.to_string();
-    panel.title_font = sized(title_size);
+    if let Some(size) = title_size {
+        panel.title_font = sized(size);
+    }
     for side in [
         AxisSide::Bottom,
         AxisSide::Left,
@@ -123,7 +126,9 @@ fn ink(panel: &mut PanelSpec, color: &str, title_size: f64) {
         axis.title_color = color.to_string();
         axis.tick_color = color.to_string();
         axis.tick_mark_color = color.to_string();
-        axis.title_font = sized(title_size);
+        if let Some(size) = title_size {
+            axis.title_font = sized(size);
+        }
     }
 }
 
@@ -162,11 +167,10 @@ fn points(color: &str, size: f64) -> SeriesSpec {
 }
 
 /// Publication and Publication Wide: black and greys, a closed frame with the
-/// ticks inside, small texts, no grid, a plot area `width_cm` wide.
+/// ticks inside, small texts (text scale 60 %), no grid, a plot area `width_cm` wide.
 fn publication(name: &str, width_cm: f64) -> GraphTheme {
     let mut panel = PanelSpec::at(0, 0);
-    ink(&mut panel, "#000000", 9.0);
-    panel.legend.font = sized(8.0);
+    ink(&mut panel, "#000000", None);
     panel.legend.color = "#000000".to_string();
     panel.legend.frame = false;
     for side in [AxisSide::Bottom, AxisSide::Left] {
@@ -184,17 +188,16 @@ fn publication(name: &str, width_cm: f64) -> GraphTheme {
         plain_line(2, "#999999", LineStyle::Dot, 1.0),
     ];
     let mut spec = spec_of(vec![panel]);
-    spec.title_font = sized(9.0);
+    spec.text_scale = Some(0.6);
     spec.frame_widths = vec![cm(width_cm)];
     spec.frame_heights = vec![cm(width_cm) * 0.75];
     theme(name, &spec)
 }
 
-/// Large texts and thick lines, for a slide.
+/// Large texts (text scale 150 %) and thick lines, for a slide.
 fn presentation(name: &str) -> GraphTheme {
     let mut panel = PanelSpec::at(0, 0);
-    ink(&mut panel, "#000000", 24.0);
-    panel.legend.font = sized(18.0);
+    ink(&mut panel, "#000000", None);
     for side in [AxisSide::Bottom, AxisSide::Left] {
         let axis = panel.axis_mut(side);
         axis.tick_length = Some(8.0);
@@ -209,7 +212,7 @@ fn presentation(name: &str) -> GraphTheme {
         })
         .collect();
     let mut spec = spec_of(vec![panel]);
-    spec.title_font = sized(28.0);
+    spec.text_scale = Some(1.5);
     spec.frame_widths = vec![560.0];
     spec.frame_heights = vec![380.0];
     theme(name, &spec)
@@ -220,7 +223,7 @@ fn presentation(name: &str) -> GraphTheme {
 /// only.
 fn fit_residuals(name: &str) -> GraphTheme {
     let mut top = PanelSpec::at(0, 0);
-    ink(&mut top, "#000000", 12.0);
+    ink(&mut top, "#000000", Some(12.0));
     top.bottom.tick_labels = false;
     top.bottom.title_visible = false;
     top.series = vec![
@@ -228,7 +231,7 @@ fn fit_residuals(name: &str) -> GraphTheme {
         plain_line(0, "#000000", LineStyle::Solid, 1.5),
     ];
     let mut bottom = PanelSpec::at(1, 0);
-    ink(&mut bottom, "#000000", 12.0);
+    ink(&mut bottom, "#000000", Some(12.0));
     bottom.title_visible = false;
     bottom.legend.visible = false;
     bottom.series = vec![points("#d62728", 3.0)];
@@ -243,7 +246,7 @@ fn fit_residuals(name: &str) -> GraphTheme {
 /// legend); otherwise the Kinetics look (lines with markers).
 fn gradient_group(name: &str, preset: &str, bare: bool) -> GraphTheme {
     let mut panel = PanelSpec::at(0, 0);
-    ink(&mut panel, "#000000", 12.0);
+    ink(&mut panel, "#000000", Some(12.0));
     let curves = if bare { 8 } else { 5 };
     panel.series = (0..curves)
         .map(|i| {
@@ -282,7 +285,7 @@ fn gradient_group(name: &str, preset: &str, bare: bool) -> GraphTheme {
 fn side_by_side(name: &str) -> GraphTheme {
     let layer = |column_index: usize| {
         let mut panel = PanelSpec::at(0, column_index);
-        ink(&mut panel, "#000000", 12.0);
+        ink(&mut panel, "#000000", Some(12.0));
         panel.series = vec![SeriesSpec::from_palette(column(), 0)];
         panel
     };
@@ -364,6 +367,21 @@ mod tests {
         assert!(panel.frame_closed());
         assert_eq!(panel.bottom.tick_direction, TickDirection::In);
         assert_eq!(panel.top.tick_direction, TickDirection::In);
+    }
+
+    /// #545 (form 545-2): Publication and Presentation are a text scale, their
+    /// texts stay on Auto. Witness: a hand-set size back in `ink` fails both.
+    #[test]
+    fn publication_and_presentation_are_a_scale_with_texts_on_auto() {
+        for (index, scale) in [(2, 0.6), (3, 0.6), (4, 1.5)] {
+            let theme = original(index).expect("theme");
+            assert_eq!(theme.style.text_scale, Some(scale), "theme {index}");
+            let panel = &theme.style.panels[0];
+            assert_eq!(panel.title_font.size, None);
+            assert_eq!(panel.legend.font.size, None);
+            assert_eq!(panel.axis(AxisSide::Bottom).title_font.size, None);
+            assert_eq!(theme.style.title_font.size, None);
+        }
     }
 
     #[test]

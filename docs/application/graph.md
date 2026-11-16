@@ -548,8 +548,8 @@ Light (`light`) and Dark (`dark`), colour-only as before; then seven full-style
 themes, each built with the ordinary constructors and passed through
 `GraphTheme::capture` (so it holds no data): **Publication** (`publication`: one
 layer, plot area 8.5 cm wide, closed frame, ticks inside, black and greys,
-8-9 pt texts), **Publication Wide** (`publication-wide`: 17 cm), **Presentation**
-(`presentation`: large texts, 3 pt lines), **Fit + Residuals** (`fit-residuals`:
+text scale 60 %, every text on Auto), **Publication Wide** (`publication-wide`: 17 cm), **Presentation**
+(`presentation`: text scale 150 %, texts on Auto, 3 pt lines), **Fit + Residuals** (`fit-residuals`:
 two stacked layers, plot area heights 3:1, X numbers and title only under the
 bottom layer, data as red points and the fit as a line, residuals as points),
 **Kinetics** (`kinetics`: a group on the Viridis gradient, colour bar on the
