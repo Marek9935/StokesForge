@@ -355,6 +355,10 @@ fn no_hardcoded_label() {
 /// — a renamed function does not leave the zone silently.
 const ZONE_43: &[&str] = &[
     "plot_settings_window",
+    "global_color_rows",
+    "theme_manager",
+    "button_row",
+    "use_and_apply_row",
     "plot_settings_contents",
     "graph_settings_page",
     "plot_area_settings_page",
@@ -366,7 +370,6 @@ const ZONE_43: &[&str] = &[
     "group_editor",
     "membership_editor",
     "gradient_editor",
-    "theme_editor",
     "formula_help",
     "formula_field",
     "axis_editor",

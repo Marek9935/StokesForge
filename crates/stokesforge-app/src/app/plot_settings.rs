@@ -3933,6 +3933,9 @@ mod tests {
         harness.open(PlotSettingsTab::Graph, None);
         let grid =
             stokesforge_app_state::frame_sizes::figure_layout(&harness.model()).expect("layout");
+        // The General page opens with the colors rows (#542): the Size section
+        // starts below the first screen.
+        scroll_page(&context, &mut harness, -80.0);
         let painted = paint_window(&context, &mut harness.state, Vec::new());
         for label in [
             tr!("plot-size-placement"),
@@ -3977,6 +3980,7 @@ mod tests {
         );
 
         scroll_to_top(&context, &mut harness);
+        scroll_page(&context, &mut harness, -80.0);
         click_label(
             &context,
             &mut harness.state,

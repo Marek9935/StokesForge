@@ -280,7 +280,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Model expression | Expression de modèle | What the user writes for a custom fit | Formula, Équation | #322 |
 | Zoom / Reset Zoom | Zoom / Réinitialiser le zoom | Framing of the view; return to the original ranges | Rescale, Recadrer | G |
 | Pan† | Panoramique | Move the framing | Déplacement | G |
-| Global colors | Couleurs globales | Color of all texts and color of all axes, on the General tab of Graph Properties (#542): each is written into every local color, the last one set wins | Theme colors | — |
+| Global colors | Couleurs globales | Text color and Axes color, on the General tab of Graph Properties (#542): each is written into every local color, the last one set wins | Theme colors | — |
 | Palette | Palette | Set of colors offered | — | G |
 | Swatch | Nuance | One color of a palette | Échantillon | G |
 | Saved colors | Couleurs enregistrées | Colors kept in the project or for the user | Favoris | — |

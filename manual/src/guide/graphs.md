@@ -119,7 +119,7 @@ While the window is open, your changes show on the graph at once. Click **OK** t
 
 | Tab | What you set |
 |---|---|
-| **General** | **Title**, **Title color**, **Background**, **Color of all texts**, **Color of all axes**, **Warn about out-of-date data**, **Size**, and the closed **Advanced** block (**When axes are added**) |
+| **General** | **Title**, **Title color**, **Background**, **Text color**, **Axes color**, **Warn about out-of-date data**, **Size**, and the closed **Advanced** block (**When axes are added**) |
 | **Plot Area** | **Layer title**, vertical and horizontal **Gridlines** |
 | **Axes** | One axis at a time: title, scale, range, ticks, color |
 | **Legend** | **Show legend**, **Position**, **Text from**, the **Text**, **Frame** and **Layout** settings, and the folded **Color bar** section at the bottom |
@@ -127,7 +127,7 @@ While the window is open, your changes show on the graph at once. Click **OK** t
 
 A new graph has no background color: the figure is transparent when exported, and white on screen. Choose a dark background and the automatic text turns white.
 
-**Color of all texts** and **Color of all axes** set a color for every title, axis, tick and gridline of the graph at once. They replace the colors you set one by one in the other tabs, and the last one you set wins. Nothing else is remembered: set a color in another tab afterwards and only that text changes.
+**Text color** and **Axes color** set a color for every title, axis, tick and gridline of the graph at once. They replace the colors you set one by one in the other tabs, and the last one you set wins. Nothing else is remembered: set a color in another tab afterwards and only that text changes.
 
 ### Graph size
 

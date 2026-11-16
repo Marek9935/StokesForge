@@ -425,7 +425,7 @@ select a graph in the foreground with nothing selected in it, Ctrl+C, then
 (`wl-paste -t image/png > figure.png` to read a representation).
 
 **Tabs** (`state::PlotSettingsTab`, `plot-tab-*` keys, in English):
-"General" (title and its color, background, the color of all texts and of all axes), "Plot Area" (layer title,
+"General" (title and its color, background, Text color and Axes color), "Plot Area" (layer title,
 grid lines), "Axes" (one side of the cell at a time, chosen in the vertical
 strip at the left of the page: axis title (quantity and units), scale, display,
 axis color; see "Axes tab: four sides" below),
@@ -449,7 +449,7 @@ Typst text (interface side: "Math", #322) goes through `formula_field`; any othe
 The test `each_reminder_example_compiles` checks that each example compiles. A
 series name left empty takes that of the column, displayed as is.
 
-**Global colors (General tab, #542)**: the color of all texts and the color of all axes
+**Global colors (General tab, #542)**: Text color and Axes color
 (`plot-general-text-color`, `plot-general-axes-color`; the background is the row
 above them; they were on the Theme tab, form 514-4 V5) are laid out with the
 other rows of the General form (`global_color_rows` in `plot_settings.rs`, no
