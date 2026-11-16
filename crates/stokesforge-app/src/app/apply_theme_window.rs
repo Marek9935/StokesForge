@@ -36,8 +36,6 @@ use super::hover_help::help_beside;
 use super::theme_picker::{retain_listed, theme_picker, DrawKey, Drawings};
 use crate::theme;
 
-const WINDOW_ID: &str = "stokesforge_apply_theme";
-
 /// Widest the left column (picker and boxes) grows, and the narrowest it
 /// shrinks to so that the preview always keeps room.
 const LEFT_MAX: f32 = 300.0;
@@ -72,7 +70,7 @@ pub(super) fn apply_theme_window(
     // Type: creation on a draft (S-F1), `[Cancel] [Apply]`.
     let outcome = modal_dialog_with(
         ctx,
-        egui::Id::new(WINDOW_ID),
+        egui::Id::new("stokesforge_apply_theme"),
         &tr!("theme-apply-title"),
         // FREE-SIZE(#300): the picker (three rows of tiles), the boxes under it and a preview beside them need about 700 x 560, beyond the Large class
         DialogNature::Draft(InteractiveSize::Free(egui::vec2(700.0, 560.0))),

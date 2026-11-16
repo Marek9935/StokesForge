@@ -20,8 +20,6 @@ use super::hover_help::help_text;
 use super::state_toggle::state_toggle;
 use crate::theme;
 
-const WINDOW_ID: &str = "stokesforge_save_theme";
-
 /// Paints the window while it is open.
 pub(super) fn save_theme_window(
     ctx: &egui::Context,
@@ -43,7 +41,7 @@ pub(super) fn save_theme_window(
     let reason = tr!("theme-save-name-needed");
     let outcome = modal_dialog_with(
         ctx,
-        egui::Id::new(WINDOW_ID),
+        egui::Id::new("stokesforge_save_theme"),
         &tr!("theme-save-title"),
         DialogNature::Draft(InteractiveSize::Class(SizeClass::Small)),
         DialogFooter::gated(&verb, &hint, usable, &reason),
