@@ -244,7 +244,9 @@ pub const TEXT_FORMAT_SIZE: Quantity = TEXT_SIZE
 pub const TEXT_SCALE_PERCENT: Quantity = Quantity::whole(5.0)
     .between(25.0, 400.0)
     .with_presets(&[50.0, 75.0, 100.0, 125.0, 150.0, 200.0, 300.0])
-    .with_auto(AutoKind::Field);
+    .with_auto(AutoKind::Field)
+    // Wide enough for the hint « Auto (100) ».
+    .wide();
 
 /// Rotation of a text, in degrees.
 pub const ROTATION: Quantity = Quantity::real(1.0, 15.0, 1).between(-180.0, 180.0);

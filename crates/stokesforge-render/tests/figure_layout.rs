@@ -1801,7 +1801,10 @@ fn a_text_scale_grows_the_axis_bands_and_keeps_the_frame() {
 /// A smaller scale keeps today's bands (they grow, never shrink).
 #[test]
 fn a_smaller_text_scale_keeps_the_bands() {
-    assert_eq!(layout_of(&scaled_frame(Some(0.5))), layout_of(&scaled_frame(None)));
+    assert_eq!(
+        layout_of(&scaled_frame(Some(0.5))),
+        layout_of(&scaled_frame(None))
+    );
 }
 
 /// A hand-set axis title size widens the band like the scale does, and only

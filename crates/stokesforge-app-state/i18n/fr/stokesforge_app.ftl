@@ -841,7 +841,7 @@ plot-general-axes-color = Couleur des axes
 plot-general-global-note = Couleur du texte et Couleur des axes s'appliquent à chaque titre, axe, graduation et quadrillage, et remplacent les couleurs réglées dans les autres onglets
 plot-general-text-scale =
     Échelle du texte (%)
-    .hint = Multiplie la taille de chaque texte laissé en Auto : titres, nombres des graduations, légende, barre de couleurs et nouveaux textes libres. Une taille réglée à la main garde sa valeur
+    .hint = Multiplie la taille de chaque texte laissé en Auto : titres, nombres des graduations, légende, barre de couleurs et nouveaux textes libres. Une taille réglée à la main garde sa valeur
 plot-general-dark-note = Les couleurs auto passent au blanc sur fond sombre
 plot-stale-warning = Avertir si des données ne sont pas à jour
     .hint = Grise les courbes des calculs pas à jour et les marque, à l'écran et dans les exports

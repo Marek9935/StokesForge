@@ -412,7 +412,9 @@ fn the_graph_font_reaches_every_text_and_a_local_family_wins() {
     }
     spec.title_font.family = "Fira Sans".into();
     let svg = svg_mode(&spec, Text);
-    assert!(family_of(&svg, "Spectrumalpha").unwrap().contains("Fira Sans"));
+    assert!(family_of(&svg, "Spectrumalpha")
+        .unwrap()
+        .contains("Fira Sans"));
     assert!(family_of(&svg, "Time").unwrap().contains("Libertinus Sans"));
     // No graph font: the default family, as before.
     let svg = svg_mode(&rich_spec(), Text);
@@ -444,8 +446,33 @@ fn the_text_scale_resizes_auto_texts_only() {
         spec.title_font.size = Some(24.0);
         size_of(&svg_mode(&spec, Text), "Spectrumalpha")
     };
-    assert!((hand - alone).abs() < 1e-6, "hand-set size scaled: {hand} vs {alone}");
+    assert!(
+        (hand - alone).abs() < 1e-6,
+        "hand-set size scaled: {hand} vs {alone}"
+    );
     spec.text_scale = Some(1.0);
     spec.title_font.size = None;
     assert_eq!(svg_mode(&spec, Text), plain);
+}
+
+/// The tick count is chosen from the room the numbers take, measured at the
+/// resolved tick size: larger text, fewer numbers. At 300 % the plot area keeps
+/// its size and the numbers are three times as wide, so no more than ten texts
+/// are drawn (title and axis title included); measured at the built-in size, 13
+/// would be. Witness: the count measured at `LABEL_SIZE`.
+#[test]
+fn a_larger_text_scale_thins_the_ticks_out() {
+    use stokesforge_render_svg::SvgTextMode::Text;
+    let texts = |scale: Option<f64>| {
+        let mut spec = rich_spec();
+        // Stored frames: the plot area keeps its size whatever the bands do,
+        // so only the measure of the numbers can change the count.
+        spec.frame_widths = vec![300.0];
+        spec.frame_heights = vec![200.0];
+        spec.text_scale = scale;
+        svg_mode(&spec, Text).matches("<text").count()
+    };
+    let (plain, scaled) = (texts(None), texts(Some(3.0)));
+    assert!(scaled < plain, "{scaled} texts at 300 %, {plain} at 100 %");
+    assert!(scaled <= 10, "{scaled} texts at 300 %");
 }

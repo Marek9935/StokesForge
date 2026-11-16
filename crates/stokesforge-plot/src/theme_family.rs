@@ -846,6 +846,31 @@ mod tests {
         assert_eq!(target, expected);
     }
 
+    /// #545: the graph font and the text scale belong to the Title fonts
+    /// family. Witness: the fields left out of the copy, or copied by another
+    /// family.
+    #[test]
+    fn the_title_fonts_family_carries_the_graph_font_and_scale() {
+        let mut source = styled();
+        source.text_font = "Libertinus Sans".into();
+        source.text_scale = Some(1.5);
+        let theme = theme_of(&source);
+        let mut target = graph(&[&["#aaaaaa"]]);
+        target.apply_theme_families(&theme, ThemeFamilies::only(ThemeFamily::Texts));
+        assert!(target.text_font.is_empty() && target.text_scale.is_none());
+        target.apply_theme_families(&theme, ThemeFamilies::only(ThemeFamily::TitleFonts));
+        assert_eq!(target.text_font, "Libertinus Sans");
+        assert_eq!(target.text_scale, Some(1.5));
+        // A theme without them clears a graph's own (it sets, never merges).
+        let mut other = graph(&[&["#aaaaaa"]]);
+        other.text_scale = Some(2.0);
+        other.apply_theme_families(
+            &theme_of(&styled()),
+            ThemeFamilies::only(ThemeFamily::TitleFonts),
+        );
+        assert_eq!(other.text_scale, None);
+    }
+
     #[test]
     fn the_texts_family_copies_the_titles_only() {
         let theme = theme_of(&styled());

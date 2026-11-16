@@ -359,9 +359,17 @@ fn cross_size<DB: DrawingBackend>(
     horizontal: bool,
 ) -> Result<i32, DrawingAreaErrorKind<DB::ErrorType>> {
     let (labels, title) = extras(bar);
-    let title = if title { grown(font, graph, TITLE_ROW) } else { 0 };
+    let title = if title {
+        grown(font, graph, TITLE_ROW)
+    } else {
+        0
+    };
     Ok(if horizontal {
-        i32::from(labels) * MARKER_ROW + thick(bar) + TICK_GAP + grown(font, graph, TICK_ROW) + title
+        i32::from(labels) * MARKER_ROW
+            + thick(bar)
+            + TICK_GAP
+            + grown(font, graph, TICK_ROW)
+            + title
     } else {
         let (ticks, breaks) = label_columns(area, bar, font, graph)?;
         i32::from(labels) * MARKER_ROW
@@ -479,7 +487,8 @@ fn grown(
     graph: stokesforge_plot::GraphText<'_>,
     size: i32,
 ) -> i32 {
-    let ratio = font.resolved_size(graph, crate::pipeline::LABEL_SIZE) / crate::pipeline::LABEL_SIZE;
+    let ratio =
+        font.resolved_size(graph, crate::pipeline::LABEL_SIZE) / crate::pipeline::LABEL_SIZE;
     if ratio > 1.0 {
         (f64::from(size) * ratio).round() as i32
     } else {
@@ -503,7 +512,10 @@ pub fn band<DB: DrawingBackend>(
     };
     Ok(match place_of(bar) {
         Place::Below => ((GAP + cross_size(probe, bar, font, graph, true)?) as u32, 0),
-        Place::Right => (0, (GAP + cross_size(probe, bar, font, graph, false)?) as u32),
+        Place::Right => (
+            0,
+            (GAP + cross_size(probe, bar, font, graph, false)?) as u32,
+        ),
         _ => (0, 0),
     })
 }
@@ -779,14 +791,20 @@ pub fn draw<DB: DrawingBackend>(
     let rich = |pos: Pos| styles.rich.pos(pos);
     if title {
         if along_x {
-            let (x, y) = (bx + length / 2, by + cross - grown(font, graph, TITLE_ROW) / 2);
+            let (x, y) = (
+                bx + length / 2,
+                by + cross - grown(font, graph, TITLE_ROW) / 2,
+            );
             area.draw(&Text::new(
                 bar.title.as_str(),
                 (x, y),
                 rich(Pos::new(HPos::Center, VPos::Center)),
             ))?;
         } else {
-            let (x, y) = (bx + cross - grown(font, graph, TITLE_ROW) / 2, by + length / 2);
+            let (x, y) = (
+                bx + cross - grown(font, graph, TITLE_ROW) / 2,
+                by + length / 2,
+            );
             crate::pipeline::draw_centered_text(area, &bar.title, &styles.rich, -90.0, (x, y))?;
         }
     }

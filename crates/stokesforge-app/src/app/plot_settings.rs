@@ -689,7 +689,8 @@ fn global_text_rows(form: &mut Form<'_>, spec: &mut PlotSpec) -> bool {
             "plot_general_text_scale",
             &mut percent,
             &quantities::TEXT_SCALE_PERCENT,
-            &tr!("common-auto"),
+            // The size Auto stands for stays readable: « Auto (100) ».
+            &tr!("common-auto-value", value = "100"),
         );
         field
             .response
@@ -3445,7 +3446,9 @@ mod tests {
             spec.frame_heights = vec![284.0];
         });
         harness.open(PlotSettingsTab::Graph, None);
-        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        // The General page is longer than the window since #545 (Font and Text
+        // scale): scroll to the bottom, where the Size section is.
+        let painted = scroll_down(&context, &mut harness.state, &tr!("plot-size"));
         let width = tr!("plot-size-width", unit = "cm");
         let height = tr!("plot-size-height", unit = "cm");
         assert!(

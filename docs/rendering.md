@@ -492,6 +492,32 @@ point `fonts::resolve`, and not two functions "for the screen" / "for
 the export" — a caller that changed font on one side only would reproduce
 exactly the defect `text.rs` exists to prevent.
 
+### Graph font and text scale (#545)
+
+`PlotSpec::text_font` and `text_scale` are the **graph default** of every text
+left on Auto; `PlotSpec::graph_text()` (sanitized: a non-finite scale is 100 %,
+others clamped to 25-400 %) gives a `stokesforge_plot::GraphText`, and **that is
+the one place that decides** a text's size and family: `GraphText::size` (own
+size, else the built-in size of the role times the scale, clamped to
+`TextFont::SIZE_RANGE`) and `GraphText::family` (own family, else the graph's,
+else the embedded default). Today a size set by hand is absolute and the scale
+does not multiply it; the line to change is in `GraphText::size`. The role
+constants are `TITLE_SIZE`, `PANEL_TITLE_SIZE`, `AXIS_DESC_SIZE` (axis titles and
+free texts that follow the graph, `AnnotationSpec::follows_graph_size`) and
+`LABEL_SIZE` (ticks, legend, colour bar). Rich texts go through `font_style`;
+**tick numbers** go through `tick_style`: with no graph font they are the
+`epaint` text of before (so an untouched graph keeps its pixels), with one they
+are literal Typst text in that family like the colour-bar numbers.
+
+**Invariant 4 holds**: the size that measures is the size that draws
+(`edge_reserves`, tick count, `text_band`, `Grow`, the drawing all read the same
+`GraphText`). The axis areas grow with the resolved sizes (`CellPlan::grow_*`,
+`grown_room`: today's tick depth and title zone times the ratio above the
+built-in size, **never shrunk**), so the frame keeps its size and the figure
+grows around it; at the built-in sizes every band is today's constant, to the
+pixel. The hit test widens the axis-title band by the same growth
+(`AxisArea::title_grow`).
+
 ## `stokesforge-render-egui` — the screen
 
 `GraphView` is what the UI really holds: a cache, plus the link between a

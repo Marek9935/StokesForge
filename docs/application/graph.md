@@ -425,7 +425,7 @@ select a graph in the foreground with nothing selected in it, Ctrl+C, then
 (`wl-paste -t image/png > figure.png` to read a representation).
 
 **Tabs** (`state::PlotSettingsTab`, `plot-tab-*` keys, in English):
-"General" (title and its color, background, Text color and Axes color), "Plot Area" (layer title,
+"General" (title and its color, background, Text color and Axes color, Font and Text scale), "Plot Area" (layer title,
 grid lines), "Axes" (one side of the cell at a time, chosen in the vertical
 strip at the left of the page: axis title (quantity and units), scale, display,
 axis color; see "Axes tab: four sides" below),
@@ -448,6 +448,19 @@ visible and the help no longer takes up height. Any future field that accepts
 Typst text (interface side: "Math", #322) goes through `formula_field`; any other hover help, through `hover_help`.
 The test `each_reminder_example_compiles` checks that each example compiles. A
 series name left empty takes that of the column, displayed as is.
+
+**Graph font and Text scale (General tab, #545)**: two rows under the global
+colour rows (`global_text_rows` in `plot_settings.rs`), stored on the graph
+(`PlotSpec::text_font`, `text_scale`) and **read by rendering**, not written into
+the local fields. **Font** is the same list as the format toolbar (« Graph font »
+= the embedded default); **Text scale (%)** takes 25 to 400, Auto = 100 %. Every
+text left on Auto follows them (graph and layer titles, axis titles, tick
+numbers, legend, colour bar, free texts created since #545); a text whose family
+or size was set by hand keeps it (`GraphText`, `stokesforge-plot`: the one place
+that decides, see `docs/rendering.md` § Graph font and text scale). The format
+toolbar's size shows « Auto (N) » with the size drawn, scale included. The window
+is one history step (`GraphProperties`); Cancel writes nothing. The Title fonts
+theme family carries both. `pyst.set_graph(text_font=…, text_scale=…)`.
 
 **Global colors (General tab, #542)**: Text color and Axes color
 (`plot-general-text-color`, `plot-general-axes-color`; the background is the row

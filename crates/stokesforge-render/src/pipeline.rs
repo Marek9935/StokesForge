@@ -124,8 +124,8 @@ pub const FONT_FAMILY: &str = "sans-serif";
 /// many is impossible; the fallback is described in [`grid_of`].
 pub const MAX_CELLS: usize = 256;
 
-pub use stokesforge_plot::{DEFAULT_FIGURE_SIZE, FALLBACK_FRAME, MIN_CELL};
 use stokesforge_plot::{GraphText, MAX_FRAME_SIZE, MIN_FRAME_SIZE};
+pub use stokesforge_plot::{DEFAULT_FIGURE_SIZE, FALLBACK_FRAME, MIN_CELL};
 
 /// Which axes of a drawn layer had data to frame, see [`DrawnPanel::has_data`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -519,7 +519,9 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
             &layout,
             &plans,
             Some(root_width),
-            &mut |text, font, size, width| text_band(root, text, font, size, spec.graph_text(), width),
+            &mut |text, font, size, width| {
+                text_band(root, text, font, size, spec.graph_text(), width)
+            },
             &mut |_| Ok(title_height),
         )?)
     } else {
@@ -555,7 +557,9 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
                     frames,
                     &edges,
                     Some(root_width),
-                    &mut |text, font, size, width| text_band(root, text, font, size, spec.graph_text(), width),
+                    &mut |text, font, size, width| {
+                        text_band(root, text, font, size, spec.graph_text(), width)
+                    },
                     &mut |_| Ok(title_height),
                 )?)
             }
@@ -1691,7 +1695,9 @@ pub fn figure_layout<DB: DrawingBackend>(
             &layout,
             &plans,
             None,
-            &mut |text, font, size, width| text_band(probe, text, font, size, spec.graph_text(), width),
+            &mut |text, font, size, width| {
+                text_band(probe, text, font, size, spec.graph_text(), width)
+            },
             &mut |width| graph_title_band(spec, probe, width),
         )?;
         let natural = free.natural_size();
@@ -2766,12 +2772,7 @@ struct Grow {
 impl Grow {
     /// An axis of the given depth of ticks (`ticks_depth`) and title zone
     /// (`title_zone`), with its title font under the graph settings.
-    fn of(
-        axis: &AxisSpec,
-        graph: GraphText<'_>,
-        ticks_depth: u32,
-        title_zone: u32,
-    ) -> Self {
+    fn of(axis: &AxisSpec, graph: GraphText<'_>, ticks_depth: u32, title_zone: u32) -> Self {
         Self {
             ticks: grown_room(ticks_depth, graph.size(None, LABEL_SIZE), LABEL_SIZE),
             title: grown_room(
@@ -2824,21 +2825,17 @@ impl CellPlan {
         (plan.left_area(), plan.bottom_area())
     }
 
-    fn add(
-        &mut self,
-        spec: &PanelSpec,
-        (bar_bottom, bar_right): (u32, u32),
-        graph: GraphText<'_>,
-    ) {
-        let x_axis = |axis: &AxisSpec| {
-            Grow::of(axis, graph, X_TICKS_DEPTH, X_LABEL_AREA - X_TICKS_DEPTH)
-        };
-        let y_axis = |axis: &AxisSpec| {
-            Grow::of(axis, graph, Y_TICKS_DEPTH, Y_LABEL_AREA - Y_TICKS_DEPTH)
-        };
+    fn add(&mut self, spec: &PanelSpec, (bar_bottom, bar_right): (u32, u32), graph: GraphText<'_>) {
+        let x_axis =
+            |axis: &AxisSpec| Grow::of(axis, graph, X_TICKS_DEPTH, X_LABEL_AREA - X_TICKS_DEPTH);
+        let y_axis =
+            |axis: &AxisSpec| Grow::of(axis, graph, Y_TICKS_DEPTH, Y_LABEL_AREA - Y_TICKS_DEPTH);
         self.grow_bottom = self.grow_bottom.max(x_axis(&spec.bottom));
         self.grow_left = self.grow_left.max(y_axis(&spec.left));
-        self.grow_top = self.grow_top.max(x_axis(&spec.top)).max(x_axis(&spec.bottom));
+        self.grow_top = self
+            .grow_top
+            .max(x_axis(&spec.top))
+            .max(x_axis(&spec.bottom));
         self.grow_right = self
             .grow_right
             .max(y_axis(&spec.right))
@@ -4128,7 +4125,8 @@ fn draw_panel<DB: DrawingBackend>(
                 center: usable_anchor(bar.anchor).and_then(|anchor| projection.pixel(anchor)),
             },
             &{
-                let (small, tick) = crate::color_bar::label_styles(&spec.legend.font, graph, bar_ink);
+                let (small, tick) =
+                    crate::color_bar::label_styles(&spec.legend.font, graph, bar_ink);
                 crate::color_bar::BarStyles {
                     rich: font_style(
                         &spec.legend.font,
@@ -4255,7 +4253,9 @@ fn draw_panel<DB: DrawingBackend>(
         } else {
             chart.plotting_area().map_coordinate(&point)
         };
-        if let Some(drawn_annotation) = draw_annotation(canvas, annotation, index, pixel, ink, graph)? {
+        if let Some(drawn_annotation) =
+            draw_annotation(canvas, annotation, index, pixel, ink, graph)?
+        {
             drawn.annotations.push(drawn_annotation);
         }
     }

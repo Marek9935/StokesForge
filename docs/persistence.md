@@ -344,6 +344,22 @@ to the bounding box). Witness `tests/witnesses/v1/project.stf` regenerated with
 a page; the old-record case is in `schema.rs`, the hostile case in
 `b13_hostile_free_frames...`.
 
+## Graph font and text scale (#545)
+
+`PlotSpecRecord` gained `text_font` (string, empty = the embedded default) and
+`text_scale` (`Option<f64>`, a multiplier, absent = 100 %), both
+`#[serde(default, skip_serializing_if = …)]`, and `AnnotationSpecRecord` gained
+`follows_graph_size` (bool, `#[serde(default, skip_serializing_if = "Not::not")]`):
+a free text created since #545 follows the axis-title size times the scale, while
+every text read from an older file reads `false` and keeps its stored `size`. A
+graph without them writes the same bytes as before, so **`FORMAT_VERSION` did
+not move**; `tests/witnesses/v1` was regenerated with non-default values and the
+previous witness is kept as `v1-before-text-settings` (it reads back with no font,
+no scale and texts that do not follow the graph). `PlotSpec::graph_text()` reads
+them (a non-finite scale is 100 %, others are clamped to 25 to 400 %). An older
+version that re-saves the file drops them without a message. The hostile case is
+in `b13_spec_bounds`.
+
 ## Regular Grid: the empty space around the grid (#505)
 
 `PlotSpecRecord` gained `grid_slack` (`Option<GridSlackRecord>`: `left`, `top`,
