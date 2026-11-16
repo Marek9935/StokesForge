@@ -234,12 +234,13 @@ t = pyst.create_column(pyst.info(y)['parent'], column_type='mixed')
 pyst.set_values(t, [1., 'texte', None, 2.])
 pyst.set_column_meta(t, long_name='#fonction_inconnue[x] $alpha$')
 pyst.plot(t, graph=g)
+pyst.plot(y, graph=g, plot_type='line_scatter', symbol_every=3)
 "#
         ),
     );
     let spec = graph_spec(&b);
     let panel = spec.panels.first().unwrap();
-    assert_eq!(panel.series.len(), 7);
+    assert_eq!(panel.series.len(), 8);
     for (s, kind) in panel.series.iter().zip([
         PlotType::Line,
         PlotType::Scatter,
@@ -252,6 +253,12 @@ pyst.plot(t, graph=g)
     }
     assert_eq!(panel.series[5].y_error, Some(b.y));
     assert_eq!(panel.series[4].histogram_bins.get(), 12);
+    assert_eq!(panel.series[7].symbol.every.get(), 3, "symbol_every (#547)");
+    assert_eq!(
+        panel.series[0].symbol.every.get(),
+        1,
+        "default: every point"
+    );
     assert!(
         panel.series[6].name.is_empty(),
         "the automatic name stays literal and follows the renaming"
@@ -311,7 +318,7 @@ fn refusals_change_neither_graph_nor_history() {
     run(
         &b,
         r#"
-for opts in ({'plot_type':'inconnu'}, {'color':'red'}, {'color':['#ff0000','red']}, {'symbol':'o'}, {'line_style':'--'}, {'line_width':float('nan')}, {'symbol_size':0}, {'histogram_bins':0}, {'histogram_bins':65537}, {'x_scale':'symlog'}, {'x_from':1.}, {'x_from':2.,'x_to':2.}, {'y_scale':'log','y_from':2.,'y_to':0.}, {'y_error':pyst.root()}, {'unknown':1}, {'parent':pyst.root()}, {'name':'Autre'}):
+for opts in ({'plot_type':'inconnu'}, {'color':'red'}, {'color':['#ff0000','red']}, {'symbol':'o'}, {'line_style':'--'}, {'line_width':float('nan')}, {'symbol_size':0}, {'histogram_bins':0}, {'symbol_every':0}, {'symbol_every':-2}, {'histogram_bins':65537}, {'x_scale':'symlog'}, {'x_from':1.}, {'x_from':2.,'x_to':2.}, {'y_scale':'log','y_from':2.,'y_to':0.}, {'y_error':pyst.root()}, {'unknown':1}, {'parent':pyst.root()}, {'name':'Autre'}):
     try: pyst.plot(y, graph=g, **opts)
     except pyst.InvalidValueError: pass
     else: raise AssertionError('invalid option accepted')

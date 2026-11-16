@@ -543,7 +543,12 @@ pub fn analysis_curve(
     {
         line.style = stokesforge_plot::LineStyle::Solid;
     }
+    // Data row of every point, non-finite ones included, so the symbol
+    // density counts rows (#547).
+    let mut start = 0usize;
     for run in points.split(|(x, y)| !x.is_finite() || !y.is_finite()) {
+        let first_row = start;
+        start += run.len() + 1;
         // Bars and histograms: the analysis works on the raw Y measurements,
         // the preview links them while keeping the style of the source stroke.
         if spec.plot_type.draws_line() || !spec.plot_type.draws_symbols() {
@@ -554,6 +559,9 @@ pub fn analysis_curve(
                 .iter()
                 .map(|(x, y)| (x.round() as i32, y.round() as i32))
                 .collect();
+            let rows: Vec<usize> = (first_row..first_row + run.len()).collect();
+            let pixels =
+                stokesforge_render::series::thin_symbols(&pixels, &rows, spec.symbol.every);
             let _ = stokesforge_render::paint::symbols(&area, &pixels, &spec.symbol, false);
         }
     }

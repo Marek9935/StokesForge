@@ -1801,3 +1801,33 @@ fn a_typed_series_name_names_another_column() {
     assert!(document.contains("Fluorescence"), "{document}");
     assert!(!document.contains("#col"));
 }
+
+/// #547: the symbol density thins the symbols the same way on screen and in
+/// SVG (one helper in the shared rendering, no backend of its own).
+#[test]
+fn the_two_backends_thin_the_symbols_the_same_way() {
+    let circles = |every: u32| {
+        let mut fixture = minimal();
+        let panel = fixture.spec.panels.get_mut(0).expect("a panel");
+        panel.series[0].plot_type = PlotType::LineScatter;
+        panel.series[0].symbol.every = stokesforge_plot::SymbolEvery::new(every).unwrap();
+        let (primitives, _) = agree(
+            fixture.project.tree(),
+            &fixture.spec,
+            SIZE,
+            &format!("symbols every {every}"),
+        );
+        primitives
+            .iter()
+            .filter(|p| matches!(p, Primitive::Circle(..)))
+            .count()
+    };
+    let (all, third) = (circles(1), circles(3));
+    // 64 rows: rows 0, 3, ..., 63 carry a symbol, 22 of them; a symbol is
+    // two circles (fill and outline).
+    assert_eq!(
+        all - third,
+        2 * (64 - 22),
+        "{all} circles at 1, {third} at 3"
+    );
+}

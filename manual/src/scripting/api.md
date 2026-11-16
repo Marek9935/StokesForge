@@ -318,6 +318,7 @@ The options are:
 | `axis` | `"left"` or `"right"`: which Y axis the series uses |
 | `x_error`, `y_error` | Handle of an error column (one series only) |
 | `histogram_bins` | Number of bins, from 1 to 65536 |
+| `symbol_every` | One symbol every N points (positive integer, default 1 = every point) |
 
 An unknown option, an invalid range or a wrong target raises `InvalidValueError`.
 

@@ -224,9 +224,9 @@ What you select in the list chooses the page on the right: a curve opens its **c
 - **Show series** and **Show in legend**.
 - **Y axis**: **Left** or **Right**. **Right** draws the series against the right axis of the layer and shows that axis; going back to **Left** does not hide it. The field is grayed out on a layer drawn on top, which has a single Y axis. The data cursor does not read series on the right axis.
 - **Line**: **Color**, **Line style** and **Line width (pt)**. Line styles are **None**, **Solid**, **Dashed**, **Dotted** and **Dash-dot**.
-- **Symbol**: **Shape**, **Size (pt)** and **Symbol color**. Shapes are **None**, **Circle**, **Square**, **Triangle**, **Diamond**, **Plus (+)** and **Cross (×)**.
+- **Symbol**: **Shape**, **Size (pt)**, **Symbol every** and **Symbol color**. Shapes are **None**, **Circle**, **Square**, **Triangle**, **Diamond**, **Plus (+)** and **Cross (×)**. **Symbol every** draws a symbol on only one point out of this many, starting with the first; 1, the default, draws them all. Rows are counted, so an empty cell does not shift the later symbols, and the line still passes through every point. The row is grayed out, with the reason, while the shape is **None**. The section appears only for the plot types that draw symbols (**Scatter**, **Line + Symbol** and **Line + Error Bars**); the values you set are kept when you switch to another type and back.
 
-The line and symbol of the curve page apply to this curve only. Its colors are grayed out, with the reason, while the color bar of the layer gives them.
+The line and symbol of the curve page apply to this curve only. On a group page, the **Symbol** section appears when at least one member draws symbols, and its changes reach only the members that draw them. Its colors are grayed out, with the reason, while the color bar of the layer gives them.
 
 Select a curve in the list and click **Move Up** or **Move Down** under it to change the drawing order. The shortcuts are <kbd>Ctrl</kbd>+<kbd>↑</kbd> and <kbd>Ctrl</kbd>+<kbd>↓</kbd>.
 

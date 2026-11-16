@@ -5,6 +5,8 @@
 //! renderer translates on its own — the translation table lives in the renderer,
 //! never in this crate.
 
+use std::num::NonZeroU32;
+
 /// Line style of a curve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum LineStyle {
@@ -89,6 +91,44 @@ impl Default for LineSpec {
     }
 }
 
+/// Symbol density: one symbol every N data rows, never zero ("illegal states
+/// cannot be written"). 1 = a symbol on every row. No upper cap: a value
+/// above the row count draws only the first symbol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SymbolEvery(NonZeroU32);
+
+impl SymbolEvery {
+    /// Every row (the default).
+    pub const ONE: Self = Self(NonZeroU32::MIN);
+
+    /// `None` if `value` is 0.
+    pub fn new(value: u32) -> Option<Self> {
+        NonZeroU32::new(value).map(Self)
+    }
+
+    /// Lenient read of a stored value: 0 reads as 1 (invariant 10).
+    pub fn from_stored(value: u32) -> Self {
+        Self::new(value).unwrap_or(Self::ONE)
+    }
+
+    /// The carried value.
+    pub fn get(self) -> u32 {
+        self.0.get()
+    }
+}
+
+impl Default for SymbolEvery {
+    fn default() -> Self {
+        Self::ONE
+    }
+}
+
+impl std::fmt::Display for SymbolEvery {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.0, f)
+    }
+}
+
 /// Marker of a point. [`SymbolShape::None`] = no marker.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SymbolSpec {
@@ -101,6 +141,8 @@ pub struct SymbolSpec {
     /// Outline of the marker. The empty string means "the same color as the
     /// fill" — a renderer never has to guess an absent value.
     pub edge_color: String,
+    /// One symbol every N data rows, starting with the first (1 = all).
+    pub every: SymbolEvery,
 }
 
 impl SymbolSpec {
@@ -130,6 +172,7 @@ impl Default for SymbolSpec {
             size: 7.0,
             color: DEFAULT_PALETTE[0].to_string(),
             edge_color: String::new(),
+            every: SymbolEvery::ONE,
         }
     }
 }

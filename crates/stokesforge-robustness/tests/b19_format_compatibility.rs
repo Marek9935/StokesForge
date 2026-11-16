@@ -495,6 +495,8 @@ fn b19_an_unknown_plot_type_does_not_lose_the_data() {
     match graph.kind() {
         NodeKind::Graph { spec, .. } => {
             let series = &spec.panels[0].series[0];
+            // #547: this old symbol record has no `every` field: it reads 1.
+            assert_eq!(series.symbol.every.get(), 1, "additive field default");
             match &series.plot_type {
                 stokesforge_plot::PlotType::Unknown(raw) => {
                     assert_eq!(raw.name, "Violin", "the plot type name must survive");

@@ -952,6 +952,8 @@ plot-series-line-width = Line width (pt)
 plot-series-symbol-section = Symbol
 plot-series-symbol-shape = Shape
 plot-series-symbol-size = Size (pt)
+plot-series-symbol-every = Symbol every
+    .hint = Draw a symbol on only one point out of this many, starting with the first. 1 draws them all
 plot-series-symbol-color = Symbol color
 
 # Series window and groups (#177–#179)
@@ -2097,6 +2099,7 @@ disabled-visibility-empty = Nothing to show or hide
 disabled-axis-blocked = A layer above already draws this axis
 disabled-axis-on-overlay = Not available on a layer drawn on top
 disabled-axis-own-scale-off = Tick Own scale to give this layer its own scale
+disabled-symbol-every-no-shape = Choose a shape first: with no shape, no symbol is drawn
 disabled-axis-side-base-x = The X axis of Layer { $layer } is drawn here. This layer's X axis is on the { $tab } tab
 disabled-axis-side-base-y = The Y axis of Layer { $layer } is drawn here. This layer's Y axis is on the { $tab } tab
 disabled-axis-side-mirror = Layer { $layer } shows its mirror axis here. Untick Show mirror axis on its { $tab } tab to free this side

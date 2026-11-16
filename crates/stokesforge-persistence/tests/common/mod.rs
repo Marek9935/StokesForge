@@ -183,6 +183,7 @@ pub fn non_trivial_spec(
             size: 9.0,
             color: "#445566".to_string(),
             edge_color: "#000000".to_string(),
+            every: stokesforge_plot::SymbolEvery::new(3).unwrap(),
         },
         axis: SeriesAxis::Right,
         visible: false,
