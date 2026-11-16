@@ -849,7 +849,7 @@ plot-general-background = Background
 plot-general-text-color = Text color
 plot-general-axes-color = Axes color
 plot-general-reset-parts = Reset Parts to Graph Settings
-    .hint = Clear the own colors of the titles, axes, legend and free texts, so they follow the graph again. Curves are not changed
+    .hint = Clear the own colors, fonts and sizes of the titles, axes, legend and free texts, so they follow the graph again. The graph settings and the curves are not changed
 plot-general-own-colors-note = { $count ->
     [one] { $count } part has its own color
    *[other] { $count } parts have their own color
@@ -2111,7 +2111,7 @@ number-presets = Common values
 ## Reasons for graying out (#226): a grayed-out item says why and what to do
 
 disabled-object-gone = This item no longer exists
-disabled-reset-parts = No part has its own color
+disabled-reset-parts = No part has its own color, font or size
 disabled-move-first = Already first
 disabled-move-last = Already last
 disabled-visibility-empty = Nothing to show or hide

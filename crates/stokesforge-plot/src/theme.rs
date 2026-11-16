@@ -105,13 +105,73 @@ impl PlotSpec {
         }
     }
 
-    /// « Reset Parts to Graph Settings » (#550): empties the own text and axes
-    /// colors of every part, so they follow the graph colors again. Never
-    /// touches the series, the graph title's own color, the backgrounds, the
-    /// legend frame or the tick mark colors.
+    /// Puts the family and the size of a text back to Auto (the box width and
+    /// the alignment stay).
+    fn clear_font(font: &mut crate::TextFont) {
+        font.family.clear();
+        font.size = None;
+    }
+
+    /// Empties the own font family and size of every text that follows the
+    /// graph font and the text scale (#545): the graph title, each layer title,
+    /// axis title, tick label size, legend text and free text. A free text
+    /// follows the graph size again.
+    fn clear_part_fonts_and_sizes(&mut self) {
+        Self::clear_font(&mut self.title_font);
+        for panel in self.panels.iter_mut() {
+            Self::clear_font(&mut panel.title_font);
+            Self::clear_font(&mut panel.legend.font);
+            for side in SIDES {
+                let axis = panel.axis_mut(side);
+                Self::clear_font(&mut axis.title_font);
+                axis.tick_label_size = None;
+            }
+            for annotation in &mut panel.annotations {
+                annotation.font.clear();
+                annotation.follows_graph_size = true;
+            }
+        }
+    }
+
+    /// « Reset Parts to Graph Settings » (#550, #545): empties the own text and
+    /// axes colors of every part and puts every hand-set font family and size
+    /// back to Auto, so they follow the graph again. Never touches the graph
+    /// settings themselves (Font, Text scale, Text color, Axes color), the
+    /// series, the graph title's own color, the backgrounds, the legend frame
+    /// or the tick mark colors.
     pub fn reset_parts_to_graph(&mut self) {
         self.clear_part_text_colors();
         self.clear_part_axes_colors();
+        self.clear_part_fonts_and_sizes();
+    }
+
+    /// How many parts have their own font family or size (the graph title
+    /// included, a part counted once). Same field set as
+    /// [`PlotSpec::reset_parts_to_graph`].
+    pub fn parts_with_own_font_or_size(&self) -> usize {
+        let own =
+            |font: &crate::TextFont| usize::from(!font.family.is_empty() || font.size.is_some());
+        own(&self.title_font)
+            + self
+                .panels
+                .iter()
+                .map(|panel| {
+                    own(&panel.title_font)
+                        + own(&panel.legend.font)
+                        + SIDES
+                            .iter()
+                            .map(|&side| {
+                                let axis = panel.axis(side);
+                                own(&axis.title_font) + usize::from(axis.tick_label_size.is_some())
+                            })
+                            .sum::<usize>()
+                        + panel
+                            .annotations
+                            .iter()
+                            .map(|a| usize::from(!a.font.is_empty() || !a.follows_graph_size))
+                            .sum::<usize>()
+                })
+                .sum::<usize>()
     }
 
     /// How many parts have their own text color (the graph title, which has
@@ -290,6 +350,61 @@ mod tests {
         assert_eq!(
             spec, expected,
             "series, title color, backgrounds, frame, marks and graph colors survive"
+        );
+    }
+
+    /// A graph with a hand-set font or size on every kind of part, and graph
+    /// settings and a series colour that the reset must keep (#545).
+    fn spec_with_own_fonts_and_sizes() -> PlotSpec {
+        let mut spec = spec_with_own_colors();
+        spec.text_font = "Fira Sans".into();
+        spec.text_scale = Some(1.5);
+        spec.title_font.size = Some(30.0);
+        let first = spec.panels.get_mut(0).unwrap();
+        first.title_font.family = "Libertinus Sans".into();
+        first.left.title_font.size = Some(22.0);
+        first.bottom.tick_label_size = Some(9.0);
+        first.legend.font.family = "Libertinus Serif".into();
+        first.annotations[0].font = "Libertinus Mono".into();
+        first.annotations[0].size = 40.0;
+        first.annotations[0].follows_graph_size = false;
+        spec
+    }
+
+    #[test]
+    fn resetting_the_parts_puts_hand_set_fonts_and_sizes_back_to_auto() {
+        let mut spec = spec_with_own_fonts_and_sizes();
+        assert_eq!(spec.parts_with_own_font_or_size(), 6);
+        spec.reset_parts_to_graph();
+        assert_eq!(spec.parts_with_own_font_or_size(), 0);
+        let first = &spec.panels.as_slice()[0];
+        assert_eq!(first.left.title_font.size, None);
+        assert_eq!(first.bottom.tick_label_size, None);
+        assert_eq!(first.legend.font.family, "");
+        assert!(first.annotations[0].follows_graph_size);
+        assert_eq!(first.annotations[0].font, "");
+        assert_eq!(spec.title_font.size, None);
+        assert_eq!(first.title_font.family, "");
+        // The graph settings and the curves stay.
+        assert_eq!(spec.text_font, "Fira Sans");
+        assert_eq!(spec.text_scale, Some(1.5));
+        assert_eq!(spec.text_color, "#123456");
+        assert_eq!(first.series[0].line.color, "#0000ff");
+    }
+
+    #[test]
+    fn a_hand_set_size_alone_counts_as_a_part_of_its_own() {
+        let mut spec = two_panel_spec();
+        assert_eq!(spec.parts_with_own_font_or_size(), 0);
+        spec.panels.get_mut(1).unwrap().bottom.tick_label_size = Some(12.0);
+        assert_eq!(spec.parts_with_own_font_or_size(), 1);
+        assert_eq!(
+            (
+                spec.parts_with_own_text_color(),
+                spec.parts_with_own_axes_color()
+            ),
+            (0, 0),
+            "no own colour"
         );
     }
 }

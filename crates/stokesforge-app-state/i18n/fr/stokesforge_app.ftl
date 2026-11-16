@@ -848,7 +848,7 @@ plot-general-background = Fond
 plot-general-text-color = Couleur du texte
 plot-general-axes-color = Couleur des axes
 plot-general-reset-parts = Réinitialiser les parties aux réglages du graphe
-    .hint = Efface les couleurs propres des titres, axes, légende et textes libres, qui suivent de nouveau le graphe. Les courbes ne changent pas
+    .hint = Efface les couleurs, polices et tailles propres des titres, axes, légende et textes libres, qui suivent de nouveau le graphe. Les réglages du graphe et les courbes ne changent pas
 plot-general-own-colors-note = { $count ->
     [one] { $count } partie a sa propre couleur
    *[other] { $count } parties ont leur propre couleur
@@ -2110,7 +2110,7 @@ number-presets = Valeurs courantes
 ## Raisons de grisage (#226) : un élément grisé dit pourquoi et quoi faire
 
 disabled-object-gone = Cet élément n'existe plus
-disabled-reset-parts = Aucune partie n'a sa propre couleur
+disabled-reset-parts = Aucune partie n'a sa propre couleur, police ou taille
 disabled-move-first = Déjà en premier
 disabled-move-last = Déjà en dernier
 disabled-visibility-empty = Rien à afficher ou masquer

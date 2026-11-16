@@ -658,8 +658,14 @@ fn global_color_rows(form: &mut Form<'_>, spec: &mut PlotSpec, env: &mut PickerE
     }
     commit |= axes_committed;
     own_colors_note(form, spec.parts_with_own_axes_color());
-    // « Reset Parts to Graph Settings » (#550): greyed when no part has its own
-    // color. It only clears colors for now; #545 adds fonts and sizes.
+    commit
+}
+
+/// « Reset Parts to Graph Settings » (#550, #545): one button for the colors,
+/// fonts and sizes of the parts, under the Font and Text scale rows. Greyed
+/// when no part has its own color, font or size. It never touches the graph
+/// settings, the curves or the backgrounds.
+fn reset_parts_button(form: &mut Form<'_>, spec: &mut PlotSpec) -> bool {
     let any_own = reset_parts_enabled(spec);
     let clicked = form.field(|ui| {
         ui.add_enabled(any_own, egui::Button::new(tr!("plot-general-reset-parts")))
@@ -669,9 +675,8 @@ fn global_color_rows(form: &mut Form<'_>, spec: &mut PlotSpec, env: &mut PickerE
     });
     if clicked {
         spec.reset_parts_to_graph();
-        commit = true;
     }
-    commit
+    clicked
 }
 
 /// The families the font list offers: « Graph font » (the embedded default),
@@ -754,9 +759,13 @@ fn text_size_row(
     })
 }
 
-/// Whether « Reset Parts to Graph Settings » has something to reset.
+/// Whether « Reset Parts to Graph Settings » has something to reset: a part
+/// with its own color, font or size.
 fn reset_parts_enabled(spec: &PlotSpec) -> bool {
-    spec.parts_with_own_text_color() + spec.parts_with_own_axes_color() > 0
+    spec.parts_with_own_text_color()
+        + spec.parts_with_own_axes_color()
+        + spec.parts_with_own_font_or_size()
+        > 0
 }
 
 /// The grey note under a global color row (#550): how many parts keep their
@@ -812,6 +821,7 @@ fn graph_settings_page(
         );
         commit |= global_color_rows(form, spec, env);
         commit |= global_text_rows(form, spec);
+        commit |= reset_parts_button(form, spec);
         form.note(tr!("plot-general-dark-note"));
         commit |= form.checkbox(
             &mut spec.stale_warning,
@@ -3856,6 +3866,52 @@ mod tests {
         assert_eq!(harness.model(), original, "one undo step");
     }
 
+    /// #545: « Reset Parts to Graph Settings » puts a hand-set tick label size,
+    /// axis title size, legend font and free text size back to Auto, keeps the
+    /// graph Font, Text scale and the series colours, and is one undo step.
+    /// Witness: a field the reset forgets, a graph setting it clears, a button
+    /// greyed when only a size is set, or a second Ctrl+Z needed.
+    #[test]
+    fn the_reset_button_puts_sizes_and_fonts_back_to_auto_in_one_undo_step() {
+        let context = test_support::context();
+        let mut harness = harness(|spec| {
+            spec.text_font = "Fira Sans".into();
+            spec.text_scale = Some(1.5);
+            let panel = first_panel(spec);
+            panel.left.title_font.size = Some(22.0);
+            panel.bottom.tick_label_size = Some(9.0);
+            panel.legend.font.family = "Libertinus Serif".into();
+            panel
+                .annotations
+                .push(stokesforge_plot::AnnotationSpec::new("t", 0.0, 0.0));
+            panel.annotations[0].size = 40.0;
+            panel.annotations[0].follows_graph_size = false;
+        });
+        let original = harness.model();
+        assert_eq!(original.parts_with_own_text_color(), 0, "sizes only");
+        harness.open(PlotSettingsTab::Graph, None);
+        click_label(
+            &context,
+            &mut harness.state,
+            &tr!("plot-general-reset-parts"),
+        );
+        harness.state.close_plot_settings();
+        let model = harness.model();
+        let panel = &model.panels.as_slice()[0];
+        assert_eq!(panel.left.title_font.size, None);
+        assert_eq!(panel.bottom.tick_label_size, None);
+        assert_eq!(panel.legend.font.family, "");
+        assert!(panel.annotations[0].follows_graph_size);
+        assert_eq!(model.text_font, "Fira Sans");
+        assert_eq!(model.text_scale, Some(1.5));
+        assert_eq!(
+            panel.series[0].line.color,
+            original.panels.as_slice()[0].series[0].line.color
+        );
+        harness.state.dispatch(Action::Undo);
+        assert_eq!(harness.model(), original, "one undo step");
+    }
+
     /// #407: a width below what the axes need is brought back to that minimum
     /// and the field says why; the minimum, shown rounded up, typed back is
     /// accepted without a bubble. Witness: the plain `field-clamped-min`
@@ -6768,6 +6824,11 @@ mod tests {
             let note = tr!("plot-general-own-colors-note", count = count);
             assert!(is_painted(&painted, &note), "{note:?} missing");
         }
+        let painted = texts(&image(&context, Vec::new(), |ui| {
+            form(ui, "trial", |form| {
+                super::reset_parts_button(form, &mut spec)
+            });
+        }));
         assert!(is_painted(&painted, &tr!("plot-general-reset-parts")));
         let mut plain = PlotSpec::empty("Figure").with_panels(PanelSpec::at(0, 0));
         assert!(!super::reset_parts_enabled(&plain), "nothing to reset");
@@ -6776,6 +6837,11 @@ mod tests {
             !super::reset_parts_enabled(&plain),
             "a graph color is not a part's"
         );
+        // A hand-set size alone, with no own color, enables the button (#545).
+        first_panel(&mut plain).left.tick_label_size = Some(9.0);
+        assert!(super::reset_parts_enabled(&plain));
+        first_panel(&mut plain).left.tick_label_size = None;
+        assert!(!super::reset_parts_enabled(&plain));
         first_panel(&mut plain)
             .annotations
             .push(stokesforge_plot::AnnotationSpec::new("t", 0.0, 0.0));
