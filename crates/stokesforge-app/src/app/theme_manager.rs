@@ -70,7 +70,18 @@ impl ThemeTab {
             .iter()
             .find(|(source, _)| *source == self.selected)
             .map(|(_, buttons)| buttons.clone())
-            .expect("the selection is a listed theme")
+            // The selection is always a listed theme (`ThemeTab::read`); a
+            // theme that vanished anyway leaves everything greyed, saying so.
+            .unwrap_or_else(|| {
+                let gone = || Some(tr!("error-theme-unknown"));
+                ThemeButtons {
+                    rename: gone(),
+                    update: gone(),
+                    reset: gone(),
+                    delete: gone(),
+                    use_for_new: gone(),
+                }
+            })
     }
 
     /// The selection the page ended with (to give back to the state).
