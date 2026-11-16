@@ -513,10 +513,13 @@ are literal Typst text in that family like the colour-bar numbers.
 (`edge_reserves`, tick count, `text_band`, `Grow`, the drawing all read the same
 `GraphText`). The axis areas grow with the resolved sizes (`CellPlan::grow_*`,
 `grown_room`: today's tick depth and title zone times the ratio above the
-built-in size, **never shrunk**), so the frame keeps its size and the figure
+built-in size, never shrunk by a hand-set size), so the frame keeps its size and the figure
 grows around it; at the built-in sizes every band is today's constant, to the
-pixel. The hit test widens the axis-title band by the same growth
-(`AxisArea::title_grow`).
+pixel. Only a **graph scale** under 100 % shrinks the default bands
+(`BandShrink`: tick depth, title zone and area times the scale, the growth rule
+then measured against the scaled built-in size), so small text keeps its axis
+title close to the ticks; at 100 % and above nothing moves. The hit test moves
+the axis-title band by the same growth or loss (`AxisArea::title_grow`, signed).
 
 ## `stokesforge-render-egui` — the screen
 

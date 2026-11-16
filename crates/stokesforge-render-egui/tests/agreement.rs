@@ -1855,6 +1855,7 @@ fn the_backends_agree_with_a_text_scale_and_a_graph_font() {
         ("graph font", "Libertinus Sans", None),
         ("scale 150 % and graph font", "Libertinus Sans", Some(1.5)),
         ("scale 60 %", "", Some(0.6)),
+        ("scale 25 %", "", Some(0.25)),
     ] {
         let mut spec = base.clone();
         spec.text_font = font.to_string();

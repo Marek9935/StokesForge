@@ -316,9 +316,10 @@ pub struct AxisArea {
     /// area: 0 in general, a multiple of `size` for the axis of a
     /// superimposed layer stacked behind the axes of older layers (#168).
     pub offset: u32,
-    /// Pixels the title zone gained from larger text (#545), 0 at the built-in
-    /// sizes: the hit test widens the title band by as much.
-    pub title_grow: u32,
+    /// Pixels the title zone gained from larger text (#545) or lost to a graph
+    /// scale under 100 %, 0 at the built-in sizes: the hit test moves the title
+    /// band by as much.
+    pub title_grow: i32,
 }
 
 /// The tick areas of a panel.
@@ -2758,6 +2759,36 @@ struct CellPlan {
     grow_left: Grow,
     grow_top: Grow,
     grow_right: Grow,
+    /// Factor of the default bands under a graph scale below 100 % (#545).
+    shrink: BandShrink,
+}
+
+/// The factor the default axis bands are scaled by: the graph scale when it
+/// is below 100 %, else 1 (a band never grows from the scale alone, and a
+/// hand-set size never shrinks it). The default is 1.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct BandShrink(f64);
+
+impl Default for BandShrink {
+    fn default() -> Self {
+        Self(1.0)
+    }
+}
+
+impl BandShrink {
+    fn of(graph: GraphText<'_>) -> Self {
+        Self(graph.scale.clamp(GraphText::SCALE_RANGE.0, 1.0))
+    }
+
+    /// A built-in band depth, scaled (exact at 1).
+    fn band(self, base: u32) -> u32 {
+        (f64::from(base) * self.0).round() as u32
+    }
+
+    /// A built-in text size, scaled and kept in the size range.
+    fn text(self, built_in: f64) -> f64 {
+        (built_in * self.0).max(stokesforge_plot::TextFont::SIZE_RANGE.0.min(built_in))
+    }
 }
 
 /// What an axis area gains from larger text (#545): `ticks` for the tick
@@ -2772,13 +2803,23 @@ struct Grow {
 impl Grow {
     /// An axis of the given depth of ticks (`ticks_depth`) and title zone
     /// (`title_zone`), with its title font under the graph settings.
-    fn of(axis: &AxisSpec, graph: GraphText<'_>, ticks_depth: u32, title_zone: u32) -> Self {
+    fn of(
+        axis: &AxisSpec,
+        graph: GraphText<'_>,
+        shrink: BandShrink,
+        ticks_depth: u32,
+        title_zone: u32,
+    ) -> Self {
         Self {
-            ticks: grown_room(ticks_depth, graph.size(None, LABEL_SIZE), LABEL_SIZE),
+            ticks: grown_room(
+                shrink.band(ticks_depth),
+                graph.size(None, LABEL_SIZE),
+                shrink.text(LABEL_SIZE),
+            ),
             title: grown_room(
-                title_zone,
+                shrink.band(title_zone),
                 axis.title_font.resolved_size(graph, AXIS_DESC_SIZE),
-                AXIS_DESC_SIZE,
+                shrink.text(AXIS_DESC_SIZE),
             ),
         }
     }
@@ -2796,25 +2837,33 @@ impl Grow {
 }
 
 impl CellPlan {
+    /// Change of the title band of the hit test against the built-in one: the
+    /// growth of the title zone, less what a graph scale under 100 % took off
+    /// the default band.
+    fn title_delta(&self, grow: Grow) -> i32 {
+        let lost = f64::from(crate::hit::AXIS_TITLE_BAND as u32) * (1.0 - self.shrink.0);
+        grow.title as i32 - lost.round() as i32
+    }
+
     /// Height of the bottom axis area: today's [`X_LABEL_AREA`] plus the
     /// growth of the text (#545).
     fn bottom_area(&self) -> u32 {
-        X_LABEL_AREA + self.grow_bottom.total()
+        self.shrink.band(X_LABEL_AREA) + self.grow_bottom.total()
     }
 
     /// Width of the left axis area (same rule).
     fn left_area(&self) -> u32 {
-        Y_LABEL_AREA + self.grow_left.total()
+        self.shrink.band(Y_LABEL_AREA) + self.grow_left.total()
     }
 
     /// Height of one top axis band (same rule).
     fn top_unit(&self) -> u32 {
-        X_LABEL_AREA + self.grow_top.total()
+        self.shrink.band(X_LABEL_AREA) + self.grow_top.total()
     }
 
     /// Width of one right axis band (same rule).
     fn right_unit(&self) -> u32 {
-        Y_LABEL_AREA + self.grow_right.total()
+        self.shrink.band(Y_LABEL_AREA) + self.grow_right.total()
     }
 
     /// The axis areas `(left, bottom)` of a default layer under the graph
@@ -2826,10 +2875,26 @@ impl CellPlan {
     }
 
     fn add(&mut self, spec: &PanelSpec, (bar_bottom, bar_right): (u32, u32), graph: GraphText<'_>) {
-        let x_axis =
-            |axis: &AxisSpec| Grow::of(axis, graph, X_TICKS_DEPTH, X_LABEL_AREA - X_TICKS_DEPTH);
-        let y_axis =
-            |axis: &AxisSpec| Grow::of(axis, graph, Y_TICKS_DEPTH, Y_LABEL_AREA - Y_TICKS_DEPTH);
+        self.shrink = BandShrink::of(graph);
+        let shrink = self.shrink;
+        let x_axis = |axis: &AxisSpec| {
+            Grow::of(
+                axis,
+                graph,
+                shrink,
+                X_TICKS_DEPTH,
+                X_LABEL_AREA - X_TICKS_DEPTH,
+            )
+        };
+        let y_axis = |axis: &AxisSpec| {
+            Grow::of(
+                axis,
+                graph,
+                shrink,
+                Y_TICKS_DEPTH,
+                Y_LABEL_AREA - Y_TICKS_DEPTH,
+            )
+        };
         self.grow_bottom = self.grow_bottom.max(x_axis(&spec.bottom));
         self.grow_left = self.grow_left.max(y_axis(&spec.left));
         self.grow_top = self
@@ -2887,7 +2952,7 @@ impl CellPlan {
     fn tuck_bottom(&self, area: u32) -> u32 {
         if self.bar_bottom > 0 && self.bottom && !self.bottom_title {
             self.bottom_area()
-                .saturating_sub(X_TICKS_DEPTH + self.grow_bottom.ticks)
+                .saturating_sub(self.shrink.band(X_TICKS_DEPTH) + self.grow_bottom.ticks)
                 .min(area)
         } else {
             0
@@ -2898,7 +2963,7 @@ impl CellPlan {
     fn tuck_right(&self, area: u32) -> u32 {
         if self.bar_right > 0 && self.right && !self.right_title && area == self.right_unit() {
             self.right_unit()
-                .saturating_sub(Y_TICKS_DEPTH + self.grow_right.ticks)
+                .saturating_sub(self.shrink.band(Y_TICKS_DEPTH) + self.grow_right.ticks)
                 .min(area)
         } else {
             0
@@ -3803,7 +3868,7 @@ fn draw_panel<DB: DrawingBackend>(
                     && !spec.bottom.display_label().is_empty()
                     && bottom_anchor.is_none(),
                 offset: 0,
-                title_grow: plan.grow_bottom.title,
+                title_grow: plan.title_delta(plan.grow_bottom),
             },
             left: AxisArea {
                 size: y_area,
@@ -3812,11 +3877,11 @@ fn draw_panel<DB: DrawingBackend>(
                     && !spec.left.display_label().is_empty()
                     && left_anchor.is_none(),
                 offset: 0,
-                title_grow: plan.grow_left.title,
+                title_grow: plan.title_delta(plan.grow_left),
             },
             right: AxisArea {
                 size: right_area,
-                title_grow: plan.grow_right.title,
+                title_grow: plan.title_delta(plan.grow_right),
                 offset: if overlay.is_some() { right_offset } else { 0 },
                 titled: match overlay {
                     Some(_) => {
@@ -3833,7 +3898,7 @@ fn draw_panel<DB: DrawingBackend>(
             },
             top: AxisArea {
                 size: top_area,
-                title_grow: plan.grow_top.title,
+                title_grow: plan.title_delta(plan.grow_top),
                 offset: if overlay.is_some() { top_offset } else { 0 },
                 titled: spec.bottom.title_visible
                     && !spec.bottom.display_label().is_empty()

@@ -313,7 +313,7 @@ fn axis_line_at(
 /// Axis or axis title, depending on the click depth in the area.
 fn axis_part(panel: usize, side: AxisSide, depth: f64, area: AxisArea) -> PlotComponent {
     let size = area.size as f64;
-    let band = (AXIS_TITLE_BAND + f64::from(area.title_grow)).min(size / 2.0);
+    let band = (AXIS_TITLE_BAND + f64::from(area.title_grow)).clamp(0.0, size / 2.0);
     if area.titled && depth > size - band {
         PlotComponent::AxisTitle { panel, side }
     } else {

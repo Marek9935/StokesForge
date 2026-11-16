@@ -1798,13 +1798,37 @@ fn a_text_scale_grows_the_axis_bands_and_keeps_the_frame() {
     assert!(big.size.0 > plain.size.0 && big.size.1 > plain.size.1);
 }
 
-/// A smaller scale keeps today's bands (they grow, never shrink).
+/// A scale under 100 % shrinks the default bands with the text, so the axis
+/// title stays close to the ticks (#545); 100 % is today's figure. Witness:
+/// keeping the fixed constants fails the first assert; shrinking from a
+/// hand-set size (rather than the scale) fails the last.
 #[test]
-fn a_smaller_text_scale_keeps_the_bands() {
+fn a_smaller_text_scale_shrinks_the_default_bands() {
+    let plain = layout_of(&scaled_frame(None));
+    let small = layout_of(&scaled_frame(Some(0.25)));
+    // 52 and 64 at 25 %: 13 and 16.
+    assert_eq!(plain.row_gutters[0].1 - small.row_gutters[0].1, 52 - 13);
     assert_eq!(
-        layout_of(&scaled_frame(Some(0.5))),
-        layout_of(&scaled_frame(None))
+        plain.column_gutters[0].0 - small.column_gutters[0].0,
+        64 - 16
     );
+    assert_eq!(small.frame_widths, plain.frame_widths, "the frame stays");
+    // The title zone shrinks in proportion: the band is not shrunk by more
+    // than the scale.
+    let half = layout_of(&scaled_frame(Some(0.5)));
+    assert_eq!(plain.row_gutters[0].1 - half.row_gutters[0].1, 26);
+    // A hand-set small title at 100 % leaves the bands alone.
+    let mut spec = scaled_frame(None);
+    let mut panel = spec.panels[0].clone();
+    panel.bottom.title_font.size = Some(9.0);
+    spec = spec.with_panels(Panels::new(vec![panel]));
+    assert_eq!(layout_of(&spec), plain);
+    // A title larger than the scaled default still grows its zone.
+    let mut spec = scaled_frame(Some(0.5));
+    let mut panel = spec.panels[0].clone();
+    panel.bottom.title_font.size = Some(16.0);
+    spec = spec.with_panels(Panels::new(vec![panel]));
+    assert!(layout_of(&spec).row_gutters[0].1 > half.row_gutters[0].1);
 }
 
 /// A hand-set axis title size widens the band like the scale does, and only
