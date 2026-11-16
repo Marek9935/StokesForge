@@ -15,7 +15,9 @@ use stokesforge_import::origin::{
     read_project, OriginBook, OriginColumn, OriginDesignation, OriginProject,
 };
 
+use crate::planner::{plan_tables, same_x_values, PlanColumn, PlanTable};
 use crate::{ImportFailure, ImportFailureCause};
+use stokesforge_import::FilesLayout;
 
 /// `true` for a `.opj` or `.opju` extension, whatever its case.
 pub fn is_origin_path(path: &Path) -> bool {
@@ -64,11 +66,12 @@ pub fn read_origin_file(path: &Path) -> Result<OriginProject, ImportFailure> {
     read_project(&bytes).map_err(|err| fail(ImportFailureCause::Origin(err)))
 }
 
-/// Which sheets are ticked: per book, per sheet.
-pub type OriginSelection = Vec<Vec<bool>>;
+/// Which columns are ticked: per book, per sheet, per column.
+pub type OriginSelection = Vec<Vec<Vec<bool>>>;
 
 /// Per book, the sheets named `Data` (ASCII case-insensitive); a book with no
-/// such sheet ticks every sheet that has at least one column.
+/// such sheet ticks every sheet that has at least one column. A ticked sheet
+/// has all its columns ticked.
 pub fn default_origin_selection(project: &OriginProject) -> OriginSelection {
     project
         .books
@@ -81,11 +84,12 @@ pub fn default_origin_selection(project: &OriginProject) -> OriginSelection {
             book.sheets
                 .iter()
                 .map(|sheet| {
-                    if has_data {
+                    let ticked = if has_data {
                         sheet.name.eq_ignore_ascii_case("Data")
                     } else {
                         !sheet.columns.is_empty()
-                    }
+                    };
+                    vec![ticked; sheet.columns.len()]
                 })
                 .collect()
         })
@@ -114,61 +118,284 @@ pub fn origin_book_name(book: &OriginBook) -> &str {
     non_blank(first_line, &book.short_name)
 }
 
+/// Where the workbooks of an Origin import go: the "Where" of the classic
+/// import, without "Active Workbook" (#537).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OriginWhere {
+    /// One workbook per Origin workbook (what the import has always done).
+    #[default]
+    PerOriginWorkbook,
+    /// A single new workbook for everything.
+    NewWorkbook,
+}
+
+/// One Origin column to copy: file (rank among the sources), book, sheet and
+/// column ranks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OriginColumnRef {
+    pub file: usize,
+    pub book: usize,
+    pub sheet: usize,
+    pub column: usize,
+    /// Another column of the same new sheet, from another Origin sheet, has the
+    /// same name: the Origin sheet name goes in this column's Comments.
+    pub tag_sheet: bool,
+}
+
+/// An Origin sheet, as the plan names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OriginSheetRef {
+    pub file: usize,
+    pub book: usize,
+    pub sheet: usize,
+}
+
 /// A sheet to create.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OriginSheetPlan {
-    /// Index of the sheet in its book.
+    /// Index of the (first) Origin sheet in its book.
     pub sheet: usize,
     pub name: String,
+    /// The columns it receives, in order.
+    pub columns: Vec<OriginColumnRef>,
 }
 
 /// A workbook to create, with the sheets to fill.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OriginBookPlan {
-    /// Index of the book in the project.
+    /// Index of the file among the sources (always 0 for one project).
+    pub file: usize,
+    /// Index of the (first) book in the project.
     pub book: usize,
+    /// Empty: the model gives the automatic name.
     pub name: String,
     pub sheets: Vec<OriginSheetPlan>,
 }
 
-/// The books and sheets to create for `selection`, in file order. A book with
-/// no ticked sheet is omitted; a selection shorter than the project counts
-/// as unticked.
+/// What [`plan_origin_layout`] says.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct OriginLayoutPlan {
+    pub books: Vec<OriginBookPlan>,
+    /// Shared X only: the Origin sheets that keep an X of their own because its
+    /// values differ from the first X (data: the window phrases it).
+    pub own_x: Vec<OriginSheetRef>,
+}
+
+/// One Origin project and its ticks, for [`plan_origin_layout`].
+#[derive(Debug, Clone, Copy)]
+pub struct OriginSource<'a> {
+    pub project: &'a OriginProject,
+    pub selection: &'a OriginSelection,
+    /// The file name without its extension: names the workbook when it is the
+    /// only source of a [`OriginWhere::NewWorkbook`].
+    pub file_stem: &'a str,
+}
+
+fn is_ticked(selection: &OriginSelection, book: usize, sheet: usize, column: usize) -> bool {
+    selection
+        .get(book)
+        .and_then(|b| b.get(sheet))
+        .and_then(|s| s.get(column))
+        .copied()
+        .unwrap_or(false)
+}
+
+/// The name that decides "same column" in the all-sheets gesture and in the
+/// Comments rule: the long name, else the short name.
+pub fn origin_column_key(column: &OriginColumn) -> &str {
+    non_blank(&column.long_name, &column.short_name)
+}
+
+/// The books and sheets to create for the ticked columns, laid out like the
+/// classic import: where (`where_`) and how the Origin sheets (one table each)
+/// share worksheets (`layout`). A sheet with no ticked column is no table. In
+/// a shared-X layout the first X stays and an equal later X is dropped
+/// ([`crate::planner::same_x_values`]).
+pub fn plan_origin_layout(
+    sources: &[OriginSource<'_>],
+    where_: OriginWhere,
+    layout: FilesLayout,
+) -> OriginLayoutPlan {
+    let mut tables: Vec<(OriginSheetRef, PlanTable)> = Vec::new();
+    for (file, source) in sources.iter().enumerate() {
+        for (book, origin_book) in source.project.books.iter().enumerate() {
+            for (sheet, origin_sheet) in origin_book.sheets.iter().enumerate() {
+                let columns: Vec<PlanColumn> = origin_sheet
+                    .columns
+                    .iter()
+                    .enumerate()
+                    .map(|(column, c)| PlanColumn {
+                        is_x: c.designation == OriginDesignation::X,
+                        kept: is_ticked(source.selection, book, sheet, column),
+                    })
+                    .collect();
+                if columns.iter().any(|c| c.kept) {
+                    tables.push((
+                        OriginSheetRef { file, book, sheet },
+                        PlanTable {
+                            name: origin_sheet.name.clone(),
+                            columns,
+                            readable: true,
+                        },
+                    ));
+                }
+            }
+        }
+    }
+    // The groups of tables that become workbooks.
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    match where_ {
+        OriginWhere::NewWorkbook => {
+            if !tables.is_empty() {
+                groups.push((0..tables.len()).collect());
+            }
+        }
+        OriginWhere::PerOriginWorkbook => {
+            for (index, (at, _)) in tables.iter().enumerate() {
+                match groups.last_mut() {
+                    Some(group)
+                        if tables[group[0]].0.file == at.file
+                            && tables[group[0]].0.book == at.book =>
+                    {
+                        group.push(index);
+                    }
+                    _ => groups.push(vec![index]),
+                }
+            }
+        }
+    }
+    let column_of = |at: OriginSheetRef, column: usize| {
+        &sources[at.file].project.books[at.book].sheets[at.sheet].columns[column]
+    };
+    let mut out = OriginLayoutPlan::default();
+    for group in groups {
+        let members: Vec<PlanTable> = group.iter().map(|&i| tables[i].1.clone()).collect();
+        let at = |item: usize| tables[group[item]].0;
+        let plans = plan_tables(&members, layout, &|a, b| {
+            same_x_values(
+                &column_of(at(a.item), a.column).values,
+                &column_of(at(b.item), b.column).values,
+            )
+        });
+        let first = at(0);
+        let name = match where_ {
+            OriginWhere::PerOriginWorkbook => {
+                origin_book_name(&sources[first.file].project.books[first.book]).to_string()
+            }
+            OriginWhere::NewWorkbook if sources.len() == 1 => sources[0].file_stem.to_string(),
+            OriginWhere::NewWorkbook => String::new(),
+        };
+        let sheets = plans
+            .iter()
+            .map(|plan| {
+                let mut columns: Vec<OriginColumnRef> = plan
+                    .columns
+                    .iter()
+                    .map(|planned| {
+                        let from = at(planned.item);
+                        OriginColumnRef {
+                            file: from.file,
+                            book: from.book,
+                            sheet: from.sheet,
+                            column: planned.column,
+                            tag_sheet: false,
+                        }
+                    })
+                    .collect();
+                // The same long name from several Origin sheets side by side.
+                let sheet_of = |c: &OriginColumnRef| (c.file, c.book, c.sheet);
+                let tagged: Vec<bool> = columns
+                    .iter()
+                    .map(|c| {
+                        let key = origin_column_key(column_of(
+                            OriginSheetRef {
+                                file: c.file,
+                                book: c.book,
+                                sheet: c.sheet,
+                            },
+                            c.column,
+                        ));
+                        columns.iter().any(|other| {
+                            sheet_of(other) != sheet_of(c)
+                                && origin_column_key(column_of(
+                                    OriginSheetRef {
+                                        file: other.file,
+                                        book: other.book,
+                                        sheet: other.sheet,
+                                    },
+                                    other.column,
+                                )) == key
+                        })
+                    })
+                    .collect();
+                for (column, tag) in columns.iter_mut().zip(tagged) {
+                    column.tag_sheet = tag;
+                }
+                OriginSheetPlan {
+                    sheet: at(plan.items[0]).sheet,
+                    name: plan.name.clone(),
+                    columns,
+                }
+            })
+            .collect();
+        for plan in &plans {
+            for &item in &plan.own_x {
+                let sheet = at(item);
+                if !out.own_x.contains(&sheet) {
+                    out.own_x.push(sheet);
+                }
+            }
+        }
+        out.books.push(OriginBookPlan {
+            file: first.file,
+            book: first.book,
+            name,
+            sheets,
+        });
+    }
+    out
+}
+
+/// The books and sheets to create for `selection`, one workbook per Origin
+/// workbook and one sheet per Origin sheet, in file order. A book with no
+/// ticked column is omitted; a selection shorter than the project counts as
+/// unticked. The default of every consumer (CLI, `pyst`).
 pub fn plan_origin_import(
     project: &OriginProject,
     selection: &OriginSelection,
 ) -> Vec<OriginBookPlan> {
-    project
-        .books
-        .iter()
-        .enumerate()
-        .filter_map(|(book_index, book)| {
-            let ticks = selection.get(book_index);
-            let sheets: Vec<OriginSheetPlan> = book
-                .sheets
-                .iter()
-                .enumerate()
-                .filter(|(sheet_index, _)| {
-                    ticks.is_some_and(|t| t.get(*sheet_index).copied().unwrap_or(false))
-                })
-                .map(|(sheet, origin)| OriginSheetPlan {
-                    sheet,
-                    name: origin.name.clone(),
-                })
-                .collect();
-            (!sheets.is_empty()).then(|| OriginBookPlan {
-                book: book_index,
-                name: origin_book_name(book).to_string(),
-                sheets,
-            })
-        })
-        .collect()
+    plan_origin_layout(
+        &[OriginSource {
+            project,
+            selection,
+            file_stem: "",
+        }],
+        OriginWhere::PerOriginWorkbook,
+        FilesLayout::SheetPerFile,
+    )
+    .books
 }
 
 /// Builds the model column for an Origin column: numeric, or mixed as soon as
 /// a cell is text; long name, unit, comment, role and the book's Horiba
 /// information as file metadata. No import source.
 pub fn make_origin_column(book: &OriginBook, column: &OriginColumn) -> Column {
+    make_origin_column_in(book, column, None)
+}
+
+/// [`make_origin_column`], for a column of a combined sheet: with
+/// `sheet_name`, the Origin sheet name goes in the Comments (before the
+/// column's own comment, when it has one).
+pub fn make_origin_column_in(
+    book: &OriginBook,
+    column: &OriginColumn,
+    sheet_name: Option<&str>,
+) -> Column {
+    let comment = match sheet_name {
+        Some(sheet) if column.comment.trim().is_empty() => sheet.to_string(),
+        Some(sheet) => format!("{sheet}: {}", column.comment),
+        None => column.comment.clone(),
+    };
     let mut built = if column.has_text() {
         let cells: Vec<MixedCell> = column
             .values
@@ -195,7 +422,7 @@ pub fn make_origin_column(book: &OriginBook, column: &OriginColumn) -> Column {
     built.set_meta(ColumnMeta {
         long_name: non_blank(&column.long_name, &column.short_name).to_string(),
         unit: column.unit.clone(),
-        comment: column.comment.clone(),
+        comment,
         file_metadata: book
             .info
             .iter()
@@ -350,7 +577,10 @@ mod tests {
         ]);
         assert_eq!(
             default_origin_selection(&project),
-            vec![vec![false, true, false], vec![true, false, true]]
+            vec![
+                vec![vec![false], vec![true], vec![]],
+                vec![vec![true], vec![], vec![true]]
+            ]
         );
     }
 
@@ -367,20 +597,34 @@ mod tests {
             )
         };
         let project = read(vec![one("A"), one("B"), one("C")]);
-        let plan = plan_origin_import(&project, &vec![vec![false, true], vec![false, false]]);
+        let plan = plan_origin_import(
+            &project,
+            &vec![
+                vec![vec![false], vec![true]],
+                vec![vec![false], vec![false]],
+            ],
+        );
         assert_eq!(
             plan,
             [OriginBookPlan {
+                file: 0,
                 book: 0,
                 name: "A".into(),
                 sheets: vec![OriginSheetPlan {
                     sheet: 1,
-                    name: "T".into()
+                    name: "T".into(),
+                    columns: vec![OriginColumnRef {
+                        file: 0,
+                        book: 0,
+                        sheet: 1,
+                        column: 0,
+                        tag_sheet: false
+                    }],
                 }],
             }]
         );
         // Shorter rows and a missing row count as unticked.
-        assert!(plan_origin_import(&project, &vec![vec![true]]).len() == 1);
+        assert!(plan_origin_import(&project, &vec![vec![vec![true]]]).len() == 1);
         assert!(plan_origin_import(&project, &Vec::new()).is_empty());
     }
 
@@ -465,5 +709,269 @@ mod tests {
         assert!(!is_origin_file(&write("empty.dat", b"")));
         assert!(!is_origin_file(&write("short.dat", b"CPY")));
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn named(short: &str, long: &str, d: OriginDesignation, v: &[f64]) -> synthetic::Column {
+        let mut c = synthetic::Column::numbers(short, d, v);
+        c.long_name = long.into();
+        c
+    }
+
+    fn xy_sheet(name: &str, x: &[f64], long: &str) -> synthetic::Sheet {
+        sheet(
+            name,
+            vec![
+                named("X", "Time", OriginDesignation::X, x),
+                named("Y", long, OriginDesignation::Y, &[7.0, 8.0]),
+            ],
+        )
+    }
+
+    fn all_ticked(project: &OriginProject) -> OriginSelection {
+        project
+            .books
+            .iter()
+            .map(|b| {
+                b.sheets
+                    .iter()
+                    .map(|s| vec![true; s.columns.len()])
+                    .collect()
+            })
+            .collect()
+    }
+
+    fn refs(sheet: &OriginSheetPlan) -> Vec<(usize, usize, usize)> {
+        sheet
+            .columns
+            .iter()
+            .map(|c| (c.book, c.sheet, c.column))
+            .collect()
+    }
+
+    #[test]
+    fn the_default_layout_is_what_the_import_always_did() {
+        let project = read(vec![
+            book(
+                "A",
+                "Long",
+                vec![
+                    xy_sheet("Note", &[1.0, 2.0], "n"),
+                    xy_sheet("Data", &[1.0, 2.0], "d"),
+                ],
+            ),
+            book("B", "", vec![xy_sheet("One", &[1.0, 2.0], "o")]),
+        ]);
+        let selection = default_origin_selection(&project);
+        let source = OriginSource {
+            project: &project,
+            selection: &selection,
+            file_stem: "f",
+        };
+        let plan = plan_origin_layout(
+            &[source],
+            OriginWhere::PerOriginWorkbook,
+            FilesLayout::SheetPerFile,
+        );
+        assert_eq!(plan.books, plan_origin_import(&project, &selection));
+        assert!(plan.own_x.is_empty());
+        let names: Vec<(&str, Vec<&str>)> = plan
+            .books
+            .iter()
+            .map(|b| {
+                (
+                    b.name.as_str(),
+                    b.sheets.iter().map(|s| s.name.as_str()).collect(),
+                )
+            })
+            .collect();
+        assert_eq!(names, [("Long", vec!["Data"]), ("B", vec!["One"])]);
+        assert_eq!(refs(&plan.books[0].sheets[0]), [(0, 1, 0), (0, 1, 1)]);
+    }
+
+    #[test]
+    fn per_workbook_with_a_one_sheet_layout_gives_one_combined_sheet_per_workbook() {
+        let project = read(vec![
+            book(
+                "A",
+                "",
+                vec![
+                    xy_sheet("First", &[1.0, 2.0], "a"),
+                    xy_sheet("Second", &[1.0, 2.0], "b"),
+                ],
+            ),
+            book("B", "", vec![xy_sheet("Third", &[5.0, 6.0], "c")]),
+        ]);
+        let selection = all_ticked(&project);
+        let source = OriginSource {
+            project: &project,
+            selection: &selection,
+            file_stem: "f",
+        };
+        for layout in [FilesLayout::SideBySide, FilesLayout::SharedX] {
+            let plan = plan_origin_layout(&[source], OriginWhere::PerOriginWorkbook, layout);
+            assert_eq!(plan.books.len(), 2, "{layout:?}");
+            assert_eq!(plan.books[0].sheets.len(), 1);
+            assert_eq!(plan.books[0].sheets[0].name, "First", "first sheet's name");
+            assert_eq!(plan.books[1].sheets[0].name, "Third");
+        }
+    }
+
+    #[test]
+    fn a_new_workbook_holds_everything_and_is_named_after_a_single_file() {
+        let project = read(vec![
+            book("A", "", vec![xy_sheet("First", &[1.0, 2.0], "a")]),
+            book("B", "", vec![xy_sheet("Second", &[1.0, 2.0], "b")]),
+        ]);
+        let selection = all_ticked(&project);
+        let source = OriginSource {
+            project: &project,
+            selection: &selection,
+            file_stem: "kinetics",
+        };
+        let one = plan_origin_layout(
+            &[source],
+            OriginWhere::NewWorkbook,
+            FilesLayout::SheetPerFile,
+        );
+        assert_eq!(one.books.len(), 1);
+        assert_eq!(one.books[0].name, "kinetics");
+        assert_eq!(one.books[0].sheets.len(), 2);
+        let two = plan_origin_layout(
+            &[source, source],
+            OriginWhere::NewWorkbook,
+            FilesLayout::SheetPerFile,
+        );
+        assert_eq!(two.books.len(), 1);
+        assert_eq!(two.books[0].name, "", "several files: automatic name");
+        assert_eq!(two.books[0].sheets.len(), 4);
+    }
+
+    #[test]
+    fn shared_x_drops_an_equal_x_and_keeps_and_reports_a_different_one() {
+        let project = read(vec![book(
+            "A",
+            "",
+            vec![
+                xy_sheet("One", &[1.0, 2.0], "a"),
+                xy_sheet("Two", &[1.0, 2.0], "b"),
+                xy_sheet("Three", &[1.0, 3.0], "c"),
+            ],
+        )]);
+        let selection = all_ticked(&project);
+        let source = OriginSource {
+            project: &project,
+            selection: &selection,
+            file_stem: "f",
+        };
+        let plan = plan_origin_layout(
+            &[source],
+            OriginWhere::PerOriginWorkbook,
+            FilesLayout::SharedX,
+        );
+        let sheet = &plan.books[0].sheets[0];
+        assert_eq!(
+            refs(sheet),
+            [(0, 0, 0), (0, 0, 1), (0, 1, 1), (0, 2, 0), (0, 2, 1)],
+            "X0 Y0 Y1 X2 Y2"
+        );
+        assert_eq!(
+            plan.own_x,
+            [OriginSheetRef {
+                file: 0,
+                book: 0,
+                sheet: 2
+            }]
+        );
+    }
+
+    #[test]
+    fn shared_x_compares_a_second_x_of_the_same_sheet() {
+        let mut columns = vec![
+            named("X1", "Time", OriginDesignation::X, &[1.0, 2.0]),
+            named("Y1", "a", OriginDesignation::Y, &[7.0, 8.0]),
+            named("X2", "Time", OriginDesignation::X, &[1.0, 2.0]),
+            named("Y2", "b", OriginDesignation::Y, &[7.0, 8.0]),
+        ];
+        let project = read(vec![book("A", "", vec![sheet("S", columns.clone())])]);
+        let selection = all_ticked(&project);
+        let plan_of = |project: &OriginProject, selection: &OriginSelection| {
+            plan_origin_layout(
+                &[OriginSource {
+                    project,
+                    selection,
+                    file_stem: "f",
+                }],
+                OriginWhere::PerOriginWorkbook,
+                FilesLayout::SharedX,
+            )
+        };
+        let plan = plan_of(&project, &selection);
+        assert_eq!(
+            refs(&plan.books[0].sheets[0]),
+            [(0, 0, 0), (0, 0, 1), (0, 0, 3)]
+        );
+        columns[2] = named("X2", "Time", OriginDesignation::X, &[1.0, 9.0]);
+        let project = read(vec![book("A", "", vec![sheet("S", columns)])]);
+        let plan = plan_of(&project, &all_ticked(&project));
+        assert_eq!(plan.books[0].sheets[0].columns.len(), 4);
+        assert_eq!(plan.own_x.len(), 1);
+    }
+
+    #[test]
+    fn unticked_columns_are_absent_and_a_y_without_its_x_is_allowed() {
+        let project = read(vec![book(
+            "A",
+            "",
+            vec![
+                xy_sheet("One", &[1.0, 2.0], "a"),
+                xy_sheet("Two", &[1.0, 2.0], "b"),
+            ],
+        )]);
+        // Only the Y of the first sheet; nothing of the second.
+        let selection = vec![vec![vec![false, true], vec![false, false]]];
+        let plan = plan_origin_import(&project, &selection);
+        assert_eq!(plan.len(), 1);
+        assert_eq!(
+            plan[0].sheets.len(),
+            1,
+            "a sheet with nothing ticked is no table"
+        );
+        assert_eq!(refs(&plan[0].sheets[0]), [(0, 0, 1)]);
+    }
+
+    #[test]
+    fn the_same_long_name_from_two_sheets_side_by_side_gets_the_sheet_name_in_comments() {
+        let project = read(vec![book(
+            "A",
+            "",
+            vec![
+                xy_sheet("Run1", &[1.0, 2.0], "Signal"),
+                xy_sheet("Run2", &[1.0, 2.0], "Signal"),
+                xy_sheet("Run3", &[1.0, 2.0], "Other"),
+            ],
+        )]);
+        let selection = all_ticked(&project);
+        let plan = plan_origin_layout(
+            &[OriginSource {
+                project: &project,
+                selection: &selection,
+                file_stem: "f",
+            }],
+            OriginWhere::NewWorkbook,
+            FilesLayout::SideBySide,
+        );
+        let tagged: Vec<(usize, usize)> = plan.books[0].sheets[0]
+            .columns
+            .iter()
+            .filter(|c| c.tag_sheet)
+            .map(|c| (c.sheet, c.column))
+            .collect();
+        // The three X are all "Time" (sheets differ): tagged too; Y of Run3 is not.
+        assert_eq!(tagged, [(0, 0), (0, 1), (1, 0), (1, 1), (2, 0)]);
+        let book = &project.books[0];
+        let built = make_origin_column_in(book, &book.sheets[0].columns[1], Some("Run1"));
+        assert_eq!(built.meta().comment, "Run1");
+        let plain = make_origin_column_in(book, &book.sheets[0].columns[1], None);
+        assert_eq!(plain.meta().comment, "");
     }
 }

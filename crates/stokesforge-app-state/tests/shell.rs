@@ -19079,6 +19079,507 @@ mod origin_import {
             .any(|message| message.text == tr!("status-origin-drop-refused")));
     }
 
+    // -- Column selection, layouts and folder (#537) --------------------------
+
+    use stokesforge_app_state::state::{ImportFolder, OriginTick, OriginWhere};
+    use stokesforge_import::FilesLayout;
+
+    fn wide_book(sheets: Vec<synthetic::Sheet>) -> Vec<synthetic::Book> {
+        vec![book("A", "Run", sheets)]
+    }
+
+    fn long(mut c: synthetic::Column, name: &str) -> synthetic::Column {
+        c.long_name = name.into();
+        c
+    }
+
+    fn child_folder(state: &AppState, name: &str) -> NodeId {
+        let tree = state.tree();
+        tree.walk_all()
+            .into_iter()
+            .find(|id| {
+                tree.node(*id)
+                    .is_some_and(|n| n.kind().is_folder() && n.name() == name)
+            })
+            .unwrap_or_else(|| panic!("folder {name}"))
+    }
+
+    fn children_names(state: &AppState, id: NodeId) -> Vec<String> {
+        let tree = state.tree();
+        tree.node(id)
+            .unwrap()
+            .children()
+            .iter()
+            .map(|c| tree.node(*c).unwrap().name().to_string())
+            .collect()
+    }
+
+    fn column_count(state: &AppState, book: &str, sheet_index: usize) -> usize {
+        let book = book_named(state.tree(), book);
+        let sheets = state.worksheets_of(book);
+        state.visible_columns(sheets[sheet_index].0).len()
+    }
+
+    #[test]
+    fn an_unticked_column_is_absent_and_the_boxes_show_three_states() {
+        use OriginDesignation::{X, Y};
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let opj = dir.path().join("cols.opj");
+        write_opj(
+            &opj,
+            wide_book(vec![sheet(
+                "Data",
+                vec![
+                    column("X", X, &[1.0, 2.0]),
+                    column("A", Y, &[3.0, 4.0]),
+                    column("B", Y, &[5.0, 6.0]),
+                ],
+            )]),
+        );
+        drop_paths(&mut state, vec![opj]);
+        let tick = |state: &AppState| {
+            let view = &state.origin_import_files()[0].books[0];
+            (view.tick, view.sheets[0].tick)
+        };
+        assert_eq!(tick(&state), (OriginTick::All, OriginTick::All));
+
+        state.dispatch(Action::ToggleOriginColumn {
+            file: 0,
+            book: 0,
+            sheet: 0,
+            column: 2,
+        });
+        assert_eq!(tick(&state), (OriginTick::Some, OriginTick::Some));
+        let sheet_view = state.origin_import_files()[0].books[0].sheets[0].clone();
+        assert!(sheet_view.ticked, "something of it is ticked");
+        assert_eq!(
+            sheet_view
+                .column_list
+                .iter()
+                .map(|c| c.ticked)
+                .collect::<Vec<_>>(),
+            [true, true, false]
+        );
+        state.dispatch(Action::ImportOrigin);
+        assert_eq!(column_count(&state, "Run", 0), 2, "B is absent");
+
+        // A partly ticked sheet is ticked whole by its box, then emptied.
+        drop_paths(&mut state, vec![dir.path().join("cols.opj")]);
+        state.dispatch(Action::ToggleOriginColumn {
+            file: 0,
+            book: 0,
+            sheet: 0,
+            column: 0,
+        });
+        state.dispatch(Action::ToggleOriginSheet {
+            file: 0,
+            book: 0,
+            sheet: 0,
+        });
+        assert_eq!(tick(&state).1, OriginTick::All);
+        state.dispatch(Action::ToggleOriginSheet {
+            file: 0,
+            book: 0,
+            sheet: 0,
+        });
+        assert_eq!(tick(&state), (OriginTick::None, OriginTick::None));
+    }
+
+    #[test]
+    fn a_range_and_a_same_name_toggle_set_the_columns_and_nothing_kept_blocks_import() {
+        use OriginDesignation::{X, Y};
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let opj = dir.path().join("range.opj");
+        let sheet_of = |name: &str| {
+            sheet(
+                name,
+                vec![
+                    column("X", X, &[1.0, 2.0]),
+                    long(column("a", Y, &[1.0, 2.0]), "Signal"),
+                    column("Sig", Y, &[1.0, 2.0]),
+                    long(column("d", Y, &[1.0, 2.0]), "Other"),
+                ],
+            )
+        };
+        write_opj(&opj, wide_book(vec![sheet_of("Data"), sheet_of("Data2")]));
+        drop_paths(&mut state, vec![opj]);
+        let column_ticks = |state: &AppState, sheet: usize| -> Vec<bool> {
+            state.origin_import_files()[0].books[0].sheets[sheet]
+                .column_list
+                .iter()
+                .map(|c| c.ticked)
+                .collect()
+        };
+        // The default ticks the Data sheet only.
+        assert_eq!(column_ticks(&state, 1), [false; 4]);
+        state.dispatch(Action::CheckNoOriginSheets);
+        // Shift+click between two columns, in either order.
+        state.dispatch(Action::SetOriginColumnRange {
+            file: 0,
+            book: 0,
+            sheet: 0,
+            from: 2,
+            to: 1,
+            ticked: true,
+        });
+        assert_eq!(column_ticks(&state, 0), [false, true, true, false]);
+        assert_eq!(column_ticks(&state, 1), [false; 4], "one sheet only");
+        // "Check this column in all sheets": by long name...
+        state.dispatch(Action::SetOriginColumnInAllSheets {
+            file: 0,
+            book: 0,
+            sheet: 0,
+            column: 1,
+            ticked: true,
+        });
+        assert_eq!(column_ticks(&state, 1), [false, true, false, false]);
+        // ...else by short name.
+        state.dispatch(Action::SetOriginColumnInAllSheets {
+            file: 0,
+            book: 0,
+            sheet: 0,
+            column: 3,
+            ticked: true,
+        });
+        assert_eq!(column_ticks(&state, 1), [false, true, false, true]);
+        state.dispatch(Action::SetOriginColumnInAllSheets {
+            file: 0,
+            book: 0,
+            sheet: 0,
+            column: 1,
+            ticked: false,
+        });
+        assert_eq!(column_ticks(&state, 0), [false, false, true, true]);
+        assert_eq!(column_ticks(&state, 1), [false, false, false, true]);
+
+        // Nothing kept at all: Import is blocked with a reason.
+        state.dispatch(Action::CheckNoOriginSheets);
+        assert_eq!(
+            state.origin_import_blocker(),
+            Some(tr!("disabled-origin-import-nothing-ticked"))
+        );
+        let before = state.tree().clone();
+        state.dispatch(Action::ImportOrigin);
+        assert!(state.origin_import_open());
+        assert!(same_tree(&state, &before));
+        // A Y kept without its X is allowed; a sheet with no tick is not counted.
+        state.dispatch(Action::ToggleOriginColumn {
+            file: 0,
+            book: 0,
+            sheet: 0,
+            column: 3,
+        });
+        assert_eq!(state.origin_import_blocker(), None);
+        assert_eq!(
+            state.origin_import_summary(),
+            Some(tr!("origin-import-summary", books = 1, sheets = 1))
+        );
+        state.dispatch(Action::ImportOrigin);
+        assert_eq!(column_count(&state, "Run", 0), 1);
+    }
+
+    fn xy_data(name: &str, x: &[f64]) -> synthetic::Sheet {
+        sheet(
+            name,
+            vec![
+                column("X", OriginDesignation::X, x),
+                long(column("Y", OriginDesignation::Y, &[7.0, 8.0]), "Signal"),
+            ],
+        )
+    }
+
+    #[test]
+    fn layouts_follow_the_classic_ones_and_a_different_x_raises_the_orange_line() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let opj = dir.path().join("kin.opj");
+        write_opj(
+            &opj,
+            vec![
+                book(
+                    "A",
+                    "One",
+                    vec![xy_data("S1", &[1.0, 2.0]), xy_data("S2", &[1.0, 2.0])],
+                ),
+                book("B", "Two", vec![xy_data("S3", &[1.0, 5.0])]),
+            ],
+        );
+        drop_paths(&mut state, vec![opj]);
+        state.dispatch(Action::CheckAllOriginSheets);
+        assert_eq!(
+            state.origin_import_where(),
+            Some(OriginWhere::PerOriginWorkbook)
+        );
+        assert_eq!(
+            state.origin_import_layout(),
+            Some(FilesLayout::SheetPerFile)
+        );
+        assert_eq!(state.origin_import_x_warning(), None);
+
+        // Per Origin workbook + one sheet: one combined sheet per workbook.
+        state.dispatch(Action::SetOriginLayout(FilesLayout::SideBySide));
+        assert_eq!(
+            state.origin_import_summary(),
+            Some(tr!("origin-import-summary", books = 2, sheets = 2))
+        );
+        // One new workbook, shared X: named after the Origin file.
+        state.dispatch(Action::SetOriginWhere(OriginWhere::NewWorkbook));
+        state.dispatch(Action::SetOriginLayout(FilesLayout::SharedX));
+        assert_eq!(
+            state.origin_import_summary(),
+            Some(tr!("origin-import-summary", books = 1, sheets = 1))
+        );
+        // S3's X differs from the first one: the orange line names its sheet.
+        assert_eq!(
+            state.origin_import_x_warning(),
+            Some(tr!("origin-import-own-x", names = "S3"))
+        );
+        state.dispatch(Action::ImportOrigin);
+        let book = book_named(state.tree(), "kin");
+        let sheets = state.worksheets_of(book);
+        assert_eq!(sheets.len(), 1);
+        assert_eq!(sheets[0].1, "S1", "named after its first sheet");
+        // X0 Y0 Y1 X2 Y2, the Ys with the same long name carry their sheet.
+        let columns = state.visible_columns(sheets[0].0);
+        assert_eq!(columns.len(), 5);
+        let roles: Vec<ColumnRole> = columns
+            .iter()
+            .map(|c| state.column_meta(c.0).role)
+            .collect();
+        assert_eq!(
+            roles,
+            [
+                ColumnRole::X,
+                ColumnRole::Y,
+                ColumnRole::Y,
+                ColumnRole::X,
+                ColumnRole::Y
+            ]
+        );
+        let comments: Vec<String> = columns
+            .iter()
+            .map(|c| state.column_meta(c.0).comment.clone())
+            .collect();
+        assert_eq!(comments, ["S1", "S1", "S2", "S3", "S3"]);
+        assert!(state.column_meta(columns[1].0).import_source.is_none());
+        state.dispatch(Action::Undo);
+    }
+
+    #[test]
+    fn the_default_origin_import_is_unchanged_and_marks_no_raw_data_sheet() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let opj = standard_opj(dir.path(), "kinetics.opj");
+        drop_paths(&mut state, vec![opj]);
+        state.dispatch(Action::ImportOrigin);
+        let content = imported_content(&state);
+        let kinetics = content.iter().find(|(n, _)| n == "Kinetics").unwrap();
+        assert_eq!(kinetics.1[0].0, "Sheet1");
+        assert_eq!(root_names(&state).len(), 3);
+        let book = book_named(state.tree(), "Kinetics");
+        let sheet_name = state.worksheets_of(book)[0].1.clone();
+        assert_ne!(
+            sheet_name,
+            tr!("import-sheet-raw-data"),
+            "no Raw Data for Origin"
+        );
+    }
+
+    #[test]
+    fn the_default_folder_is_the_project_manager_selection() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let root = state.tree().root();
+        state.dispatch(Action::AddFolder { parent: root });
+        let folder = child_folder(&state, "Folder1");
+        let opj = standard_opj(dir.path(), "kinetics.opj");
+
+        drop_paths(&mut state, vec![opj.clone()]);
+        assert_eq!(state.import_folder(), Some(&ImportFolder::Existing(root)));
+        state.dispatch(Action::CancelOriginImport);
+
+        state.set_project_manager_selection(vec![folder]);
+        drop_paths(&mut state, vec![opj]);
+        assert_eq!(state.import_folder(), Some(&ImportFolder::Existing(folder)));
+        let choices = state.import_folder_choices();
+        assert_eq!(
+            choices.iter().map(|c| (c.id, c.depth)).collect::<Vec<_>>(),
+            [(root, 0), (folder, 1)]
+        );
+        assert_eq!(choices[0].label, tr!("import-folder-root"));
+        assert_eq!(choices[1].label, "Folder1");
+    }
+
+    #[test]
+    fn a_chosen_folder_receives_the_workbooks_and_one_undo_removes_them() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let root = state.tree().root();
+        state.dispatch(Action::AddFolder { parent: root });
+        let folder = child_folder(&state, "Folder1");
+        let opj = standard_opj(dir.path(), "kinetics.opj");
+        drop_paths(&mut state, vec![opj]);
+        let root_before = children_names(&state, root);
+        let tree_before = state.tree().clone();
+        state.dispatch(Action::SetImportFolder(ImportFolder::Existing(folder)));
+
+        state.dispatch(Action::ImportOrigin);
+
+        assert_eq!(children_names(&state, root), root_before, "root unchanged");
+        assert_eq!(children_names(&state, folder).len(), 2);
+        assert!(children_names(&state, folder).contains(&"Kinetics".to_string()));
+        no_red_message_ever(&state);
+        state.dispatch(Action::Undo);
+        assert!(same_tree(&state, &tree_before), "one undo removes all");
+    }
+
+    #[test]
+    fn a_new_folder_is_made_inside_the_same_undo_entry() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let root = state.tree().root();
+        let opj = standard_opj(dir.path(), "kinetics.opj");
+        drop_paths(&mut state, vec![opj]);
+        let tree_before = state.tree().clone();
+        let probe = history_len_probe(&state);
+        // A blank name blocks Import, a taken one too.
+        let new = |name: &str| ImportFolder::New {
+            parent: root,
+            name: name.to_string(),
+        };
+        state.dispatch(Action::SetImportFolder(new("  ")));
+        assert_eq!(
+            state.origin_import_blocker(),
+            Some(tr!("disabled-import-folder-name-empty"))
+        );
+        state.dispatch(Action::SetImportFolder(new("book1")));
+        assert_eq!(
+            state.origin_import_blocker(),
+            Some(tr!("disabled-import-folder-name-taken"))
+        );
+        state.dispatch(Action::SetImportFolder(new("Results")));
+        assert_eq!(state.origin_import_blocker(), None);
+        assert!(
+            same_tree(&state, &tree_before),
+            "nothing is created before Import runs"
+        );
+
+        state.dispatch(Action::ImportOrigin);
+
+        let results = child_folder(&state, "Results");
+        assert_eq!(children_names(&state, results).len(), 2);
+        assert_eq!(state.tree().node(results).unwrap().parent(), Some(root));
+        state.dispatch(Action::Undo);
+        assert!(
+            same_tree(&state, &tree_before),
+            "folder and books in one entry"
+        );
+        assert_eq!(history_len_probe(&state), probe, "no second entry left");
+    }
+
+    #[test]
+    fn a_folder_deleted_before_import_means_the_root_and_a_message_says_so() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let root = state.tree().root();
+        state.dispatch(Action::AddFolder { parent: root });
+        let folder = child_folder(&state, "Folder1");
+        let opj = standard_opj(dir.path(), "kinetics.opj");
+        drop_paths(&mut state, vec![opj]);
+        state.dispatch(Action::SetImportFolder(ImportFolder::Existing(folder)));
+        // The folder goes while the window is open (a script, an undo).
+        state.dispatch(Action::DeleteObjects(vec![folder]));
+        assert!(
+            state.origin_import_open(),
+            "the chooser survived the deletion"
+        );
+
+        state.dispatch(Action::ImportOrigin);
+
+        assert!(root_names(&state).contains(&"Kinetics".to_string()));
+        let gone = tr!("status-import-folder-gone");
+        assert!(state.status_history().any(|m| m.text == gone));
+        assert_eq!(state.status().unwrap().text, gone);
+    }
+
+    #[test]
+    fn reopening_the_last_origin_import_restores_layout_folder_and_ticks() {
+        use OriginDesignation::{X, Y};
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let root = state.tree().root();
+        let opj = dir.path().join("re.opj");
+        write_opj(
+            &opj,
+            wide_book(vec![sheet(
+                "Data",
+                vec![
+                    column("X", X, &[1.0, 2.0]),
+                    column("A", Y, &[3.0, 4.0]),
+                    column("B", Y, &[5.0, 6.0]),
+                ],
+            )]),
+        );
+        drop_paths(&mut state, vec![opj]);
+        state.dispatch(Action::ToggleOriginColumn {
+            file: 0,
+            book: 0,
+            sheet: 0,
+            column: 1,
+        });
+        state.dispatch(Action::SetOriginWhere(OriginWhere::NewWorkbook));
+        state.dispatch(Action::SetOriginLayout(FilesLayout::SideBySide));
+        let new_folder = ImportFolder::New {
+            parent: root,
+            name: "Fresh".into(),
+        };
+        state.dispatch(Action::SetImportFolder(new_folder.clone()));
+        let ticked = ticks(&state);
+        let columns = state.origin_import_files()[0].books[0].sheets[0]
+            .column_list
+            .clone();
+        state.dispatch(Action::ImportOrigin);
+        assert!(state
+            .tree()
+            .walk_all()
+            .into_iter()
+            .any(|id| state.tree().node(id).is_some_and(|n| n.name() == "Fresh")));
+
+        state.dispatch(Action::ReopenLastImport);
+
+        assert_eq!(state.origin_import_where(), Some(OriginWhere::NewWorkbook));
+        assert_eq!(state.origin_import_layout(), Some(FilesLayout::SideBySide));
+        assert_eq!(
+            state.import_folder(),
+            Some(&new_folder),
+            "undone: still to create"
+        );
+        assert_eq!(ticks(&state), ticked);
+        assert_eq!(
+            state.origin_import_files()[0].books[0].sheets[0].column_list,
+            columns
+        );
+        assert!(
+            !state
+                .tree()
+                .walk_all()
+                .into_iter()
+                .any(|id| state.tree().node(id).is_some_and(|n| n.name() == "Fresh")),
+            "the folder went with the undone import"
+        );
+    }
+
     /// Timing (#536), measurement only: with a real private Origin file, the
     /// time from the drop to the ready chooser, the default import (revision
     /// delta, total), and the undo. Prints counts and durations only. The
@@ -20478,4 +20979,312 @@ fn applying_a_theme_to_two_graphs_is_one_undo_step() {
         .all(|spec| spec.background == "#1e1e1e"));
     state.dispatch(Action::Undo);
     assert_eq!(specs(&state), before);
+}
+
+/// #537: an import reports the workbooks it created by id, not by counting the
+/// root's children. Here they sit in a folder, not at the root. Witness:
+/// computing the ids from the root's children again finds none of them.
+#[test]
+fn an_import_reports_the_workbooks_it_created_inside_a_folder_and_one_undo_removes_them() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let root = state.tree().root();
+    state.dispatch(Action::AddFolder { parent: root });
+    let folder = *state.tree().node(root).unwrap().children().last().unwrap();
+    let _ = state.take_created_books();
+    let root_before = state.tree().node(root).unwrap().children().to_vec();
+
+    state.import_empty_books_for_test(folder, &["First", "Second"]);
+
+    let created = state.take_created_books();
+    let in_folder = state.tree().node(folder).unwrap().children().to_vec();
+    assert_eq!(created.len(), 2);
+    assert_eq!(created, in_folder, "ids, in creation order");
+    assert_eq!(
+        state.tree().node(root).unwrap().children(),
+        root_before.as_slice(),
+        "nothing new at the root"
+    );
+    assert!(state.take_created_books().is_empty(), "taken once");
+
+    state.dispatch(Action::Undo);
+    assert!(state.tree().node(folder).unwrap().children().is_empty());
+}
+
+/// #537: a project whose root already holds workbooks reports only the new
+/// ones. Witness: returning every root workbook includes the demo's.
+#[test]
+fn an_import_into_a_project_with_workbooks_reports_only_the_new_ones() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let root = state.tree().root();
+    let existing = state.tree().node(root).unwrap().children().to_vec();
+    assert!(!existing.is_empty());
+    let _ = state.take_created_books();
+    let paths: Vec<PathBuf> = ["a.csv", "b.csv"]
+        .iter()
+        .map(|name| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, "1,10\n2,20\n").unwrap();
+            path
+        })
+        .collect();
+
+    state.dispatch(Action::ImportFiles {
+        destination: ImportDestination::NewBookPerFile,
+        recipe: stokesforge_import::ImportRecipe::new("Untitled"),
+        paths,
+    });
+
+    let created = state.take_created_books();
+    let children = state.tree().node(root).unwrap().children().to_vec();
+    assert_eq!(created.len(), 2);
+    assert_eq!(
+        created,
+        children[existing.len()..],
+        "only the new, in order"
+    );
+    assert!(created.iter().all(|id| !existing.contains(id)));
+}
+
+// -- The folder and the shared X of the classic import (#537) --------------
+
+mod classic_folder {
+    use super::*;
+    use stokesforge_app_state::state::ImportFolder;
+    use stokesforge_app_state::tr;
+    use stokesforge_import::FilesLayout;
+
+    fn root_children(state: &AppState) -> Vec<NodeId> {
+        let tree = state.tree();
+        tree.node(tree.root()).unwrap().children().to_vec()
+    }
+
+    fn folder_id(state: &AppState, name: &str) -> NodeId {
+        let tree = state.tree();
+        tree.walk_all()
+            .into_iter()
+            .find(|id| {
+                tree.node(*id)
+                    .is_some_and(|n| n.kind().is_folder() && n.name() == name)
+            })
+            .unwrap_or_else(|| panic!("folder {name}"))
+    }
+
+    /// Runs a finished import through the server thread's three steps.
+    fn apply_by_the_tick(state: &mut AppState) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let mut run = loop {
+            if let Some(run) = state.server_tick(std::time::Instant::now()).import {
+                break run;
+            }
+            assert!(std::time::Instant::now() < deadline, "import too long");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        run.execute();
+        assert!(state.import_apply_finish(run));
+    }
+
+    fn two_files(dir: &Path) -> Vec<PathBuf> {
+        vec![
+            write_csv(dir, "one.csv", "1,10\n2,20\n"),
+            write_csv(dir, "two.csv", "1,11\n2,21\n"),
+        ]
+    }
+
+    #[test]
+    fn the_window_opens_on_the_project_manager_folder_and_lists_the_folders() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let root = state.tree().root();
+        state.dispatch(Action::AddFolder { parent: root });
+        let folder = folder_id(&state, "Folder1");
+
+        state.open_import(None::<NodeId>);
+        assert_eq!(
+            state.import_state().unwrap().folder,
+            ImportFolder::Existing(root)
+        );
+        state.cancel_import();
+        state.set_project_manager_selection(vec![folder]);
+        state.open_import(None::<NodeId>);
+        assert_eq!(
+            state.import_state().unwrap().folder,
+            ImportFolder::Existing(folder)
+        );
+        assert_eq!(state.import_folder_choices().len(), 2);
+    }
+
+    #[test]
+    fn a_chosen_folder_receives_the_workbooks_through_the_server_path_in_one_undo() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let root = state.tree().root();
+        state.dispatch(Action::AddFolder { parent: root });
+        let folder = folder_id(&state, "Folder1");
+        let tree_before = state.tree().clone();
+        let root_before = root_children(&state);
+        state.open_import(None::<NodeId>);
+        state.add_import_paths(two_files(dir.path()));
+        state.import_state_mut().unwrap().destination = ImportDestination::NewBookPerFile;
+        state.dispatch(Action::SetImportFolder(ImportFolder::Existing(folder)));
+        let action = state.import_finish().unwrap();
+        state.dispatch(action);
+        apply_by_the_tick(&mut state);
+
+        assert_eq!(root_children(&state), root_before, "root unchanged");
+        let kids = state.tree().node(folder).unwrap().children().to_vec();
+        assert_eq!(kids.len(), 2, "both workbooks are in the folder");
+        assert_eq!(state.take_books_to_open().len(), 2);
+        state.dispatch(Action::Undo);
+        assert!(**state.tree() == *tree_before, "one undo removes all");
+    }
+
+    #[test]
+    fn a_new_folder_is_made_in_the_same_entry_and_a_gone_one_means_the_root() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let root = state.tree().root();
+        let tree_before = state.tree().clone();
+        state.open_import(None::<NodeId>);
+        state.add_import_paths(two_files(dir.path()));
+        state.import_state_mut().unwrap().destination = ImportDestination::NewBookPerFile;
+        state.dispatch(Action::SetImportFolder(ImportFolder::New {
+            parent: root,
+            name: "Series".into(),
+        }));
+        let action = state.import_finish().unwrap();
+        state.dispatch(action);
+        apply_by_the_tick(&mut state);
+        let series = folder_id(&state, "Series");
+        assert_eq!(state.tree().node(series).unwrap().children().len(), 2);
+        state.dispatch(Action::Undo);
+        assert!(
+            **state.tree() == *tree_before,
+            "folder and books, one entry"
+        );
+
+        // A folder deleted while the window was open: the root, and a message.
+        state.dispatch(Action::AddFolder { parent: root });
+        let folder = folder_id(&state, "Folder1");
+        state.open_import(None::<NodeId>);
+        state.add_import_paths(two_files(dir.path()));
+        state.import_state_mut().unwrap().destination = ImportDestination::NewBookPerFile;
+        state.dispatch(Action::SetImportFolder(ImportFolder::Existing(folder)));
+        state.dispatch(Action::DeleteObjects(vec![folder]));
+        let action = state.import_finish().unwrap();
+        state.dispatch(action);
+        apply_by_the_tick(&mut state);
+        let names: Vec<String> = root_children(&state)
+            .iter()
+            .map(|id| state.tree().node(*id).unwrap().name().to_string())
+            .collect();
+        assert!(names.contains(&"one".to_string()), "{names:?}");
+        let gone = tr!("status-import-folder-gone");
+        assert!(state.status_history().any(|m| m.text == gone));
+    }
+
+    /// An import with no window to choose goes where a new window would: into
+    /// the Project Manager folder, the root when none is selected (#537 R6).
+    #[test]
+    fn an_import_without_a_window_goes_into_the_project_manager_folder() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let root = state.tree().root();
+        state.dispatch(Action::AddFolder { parent: root });
+        let folder = folder_id(&state, "Folder1");
+        let files = two_files(dir.path());
+        let import = |state: &mut AppState| {
+            state.dispatch(Action::ImportFiles {
+                destination: ImportDestination::NewBookPerFile,
+                recipe: stokesforge_import::ImportRecipe::new("Untitled"),
+                paths: files.clone(),
+            });
+        };
+        state.set_project_manager_selection(vec![folder]);
+        import(&mut state);
+        assert_eq!(
+            state.tree().node(folder).unwrap().children().len(),
+            2,
+            "both workbooks are in the selected folder"
+        );
+        state.set_project_manager_selection(Vec::new());
+        let before = root_children(&state).len();
+        import(&mut state);
+        assert_eq!(root_children(&state).len(), before + 2, "root otherwise");
+        assert_eq!(state.tree().node(folder).unwrap().children().len(), 2);
+    }
+
+    #[test]
+    fn reopening_the_last_import_restores_its_folder() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let root = state.tree().root();
+        state.open_import(None::<NodeId>);
+        state.add_import_paths(two_files(dir.path()));
+        let new = ImportFolder::New {
+            parent: root,
+            name: "Series".into(),
+        };
+        state.dispatch(Action::SetImportFolder(new.clone()));
+        let action = state.import_finish().unwrap();
+        state.dispatch(action);
+        wait_import(&mut state);
+
+        state.dispatch(Action::ReopenLastImport);
+        assert_eq!(
+            state.import_state().unwrap().folder,
+            new,
+            "undone: to create again"
+        );
+    }
+
+    fn shared_x_import(dir: &Path, second: &str) -> (Session, AppState) {
+        let (session, mut state) = start_demo(dir);
+        let book = book_named(state.tree(), "Book1");
+        let a = write_csv(dir, "spec_a.csv", "1,10\n2,20\n");
+        let b = write_csv(dir, "spec_b.csv", second);
+        import_with(
+            &mut state,
+            book,
+            stokesforge_import::ImportMode::NewSheet,
+            FilesLayout::SharedX,
+            vec![a, b],
+        );
+        (session, state)
+    }
+
+    #[test]
+    fn a_shared_x_with_different_values_stays_and_is_said_after_the_import() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, state) = shared_x_import(dir.path(), "1,11\n3,21\n");
+        let sheet = sheet_named(state.tree(), "spec_a");
+        assert_eq!(
+            state.visible_columns(sheet).len(),
+            4,
+            "X Y X Y: the second X stays"
+        );
+        let warning = tr!("status-import-own-x", names = "spec_b");
+        assert!(state.status_history().any(|m| m.text == warning));
+        assert!(!state.status().unwrap().is_error());
+    }
+
+    #[test]
+    fn a_shared_x_with_equal_values_is_dropped_without_a_warning() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, state) = shared_x_import(dir.path(), "1,11\n2,21\n");
+        let sheet = sheet_named(state.tree(), "spec_a");
+        assert_eq!(state.visible_columns(sheet).len(), 3);
+        assert!(!state
+            .status_history()
+            .any(|m| m.text.contains("keep an X of their own")));
+    }
 }
