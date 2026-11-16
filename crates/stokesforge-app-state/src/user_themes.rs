@@ -79,7 +79,7 @@ pub const PINNED_BUILTINS: usize = 2;
 
 /// A theme designated independently of where it is stored (module
 /// documentation, « Identity »).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ThemeRef {
     /// A built-in, by its index in the catalogue
     /// ([`crate::builtin_themes::KEYS`]: Light `0`, Dark `1`, then the others).

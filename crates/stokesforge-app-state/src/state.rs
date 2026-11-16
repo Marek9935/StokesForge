@@ -95,6 +95,7 @@ mod import_grid;
 mod import_template;
 mod import_tocheck;
 mod server;
+mod theme_gestures;
 pub use import_advanced::{
     apply_advanced, AdvancedChange, AdvancedRow, AdvancedSetting, ADVANCED_SETTINGS,
 };
@@ -1220,6 +1221,48 @@ pub enum Action {
         /// A graph with fewer layers than the theme gets empty layers up to
         /// the theme's count; off, only its existing layers are styled.
         add_missing_layers: bool,
+    },
+    /// Copy Theme (#541): the style of `graph` goes to the app's own theme
+    /// clipboard (Ctrl+C still copies the graph itself).
+    CopyTheme {
+        /// The graph whose style is copied.
+        graph: NodeId,
+    },
+    /// Paste Theme (#541): the Style and Size families of the copied theme go
+    /// to the graphs among `graphs`, one undo step, no window. Nothing happens
+    /// when no theme was copied.
+    PasteTheme {
+        /// The target graphs (anything else is skipped).
+        graphs: Vec<NodeId>,
+    },
+    /// Opens the Apply Theme window on the graphs among `graphs` (#541).
+    OpenApplyTheme {
+        /// The target graphs (anything else is skipped; none: nothing opens).
+        graphs: Vec<NodeId>,
+    },
+    /// Closes the Apply Theme window without applying (Cancel, Esc).
+    CloseApplyTheme,
+    /// Apply in the Apply Theme window (#541): one undo step, the use of the
+    /// theme counted, the window closed.
+    ConfirmApplyTheme,
+    /// Opens the Save Theme As window on `graph` (#541).
+    OpenSaveTheme {
+        /// The graph whose style will be saved.
+        graph: NodeId,
+    },
+    /// Closes the Save Theme As window without saving.
+    CloseSaveTheme,
+    /// Save Theme As (#541): the style of `graph` under `name`, in the user's
+    /// library on this machine (`Mine`, not undoable) or in the project
+    /// (`Project`, one undo step). A refused name says why and nothing is
+    /// saved.
+    SaveThemeAs {
+        /// The graph whose style is captured.
+        graph: NodeId,
+        /// Name of the theme.
+        name: String,
+        /// Where it is saved.
+        target: crate::theme_window::ThemeTarget,
     },
     /// Saves the style of `graph` as a new theme of the project (#540): one
     /// undo step ([`Command::SetProjectThemes`]). The data is stripped
@@ -3511,6 +3554,13 @@ pub struct AppState {
     /// The user's graph themes, kept on this machine (#539, see
     /// [`crate::user_themes`]).
     user_themes: UserThemes,
+    /// The theme Copy Theme put aside (#541): the app's own clipboard, never the
+    /// system one. Session memory, outside the history.
+    theme_clipboard: Option<stokesforge_plot::GraphTheme>,
+    /// The Apply Theme window (#541), while it is open.
+    apply_theme_window: Option<crate::theme_window::ApplyThemeWindow>,
+    /// The Save Theme As window (#541), while it is open.
+    save_theme_window: Option<crate::theme_window::SaveThemeWindow>,
     /// Current grid selection of each displayed sheet — pure UI
     /// state, never in the history (see the head doc of
     /// [`crate::selection`]). Missing key = no selection in this
@@ -3771,6 +3821,9 @@ impl AppState {
             user_themes: UserThemes::load_from(
                 preferences_folder.map(|folder| folder.join(crate::user_themes::FILE_NAME)),
             ),
+            theme_clipboard: None,
+            apply_theme_window: None,
+            save_theme_window: None,
             selection: std::collections::HashMap::new(),
             header_editing: None,
             formula_refusal_memo: std::cell::RefCell::new(None),
@@ -4134,6 +4187,8 @@ impl AppState {
             || self.origin_import_open()
             || self.plot_settings.is_some()
             || self.analysis.is_some()
+            || self.apply_theme_window.is_some()
+            || self.save_theme_window.is_some()
     }
 
     /// The remembered size and position of each kind of dialog (S-F8).
@@ -6859,6 +6914,18 @@ impl AppState {
                 graphs,
                 add_missing_layers,
             } => self.apply_theme(&theme, families, &graphs, add_missing_layers),
+            Action::CopyTheme { graph } => self.copy_theme(graph),
+            Action::PasteTheme { graphs } => self.paste_theme(&graphs),
+            Action::OpenApplyTheme { graphs } => self.open_apply_theme(&graphs),
+            Action::CloseApplyTheme => self.apply_theme_window = None,
+            Action::ConfirmApplyTheme => self.confirm_apply_theme(),
+            Action::OpenSaveTheme { graph } => self.open_save_theme(graph),
+            Action::CloseSaveTheme => self.save_theme_window = None,
+            Action::SaveThemeAs {
+                graph,
+                name,
+                target,
+            } => self.save_theme_as(graph, name, target),
             Action::OpenPlotSettings { graph, tab, axis } => {
                 self.open_plot_settings(graph, tab, axis);
             }
