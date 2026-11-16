@@ -1226,3 +1226,47 @@ fn a_corner_legend_with_two_columns_stays_inside_the_plot_area() {
         let _ = frame;
     }
 }
+
+/// The drawn geometry of a LineScatter series of `ys` with symbol density
+/// `every` (#547); the abscissa is the row index.
+fn thinned_series(ys: Vec<f64>, every: u32) -> stokesforge_render::series_selection::DrawnSeries {
+    use stokesforge_plot::{PlotType, SymbolEvery};
+    let xs: Vec<f64> = (0..ys.len()).map(|i| i as f64).collect();
+    let drawn = geometry(&[("X", xs), ("Y", ys)], |ids| {
+        let mut series = SeriesSpec::new_xy(ids[0], ids[1]);
+        series.plot_type = PlotType::LineScatter;
+        series.symbol.every = SymbolEvery::new(every).expect("non-zero");
+        one_panel(series, |_| {})
+    });
+    drawn.panels[0].series_geometry[0].clone()
+}
+
+#[test]
+fn a_symbol_density_thins_the_symbols_and_not_the_line() {
+    let ys: Vec<f64> = (0..10).map(|i| f64::from(i * i)).collect();
+    let all = thinned_series(ys.clone(), 1);
+    let thin = thinned_series(ys, 3);
+    assert_eq!(all.points.len(), 10, "density 1: every point");
+    assert_eq!(thin.points.len(), 4, "rows 0, 3, 6, 9");
+    let expected: Vec<_> = [0, 3, 6, 9].iter().map(|&i| all.points[i]).collect();
+    assert_eq!(thin.points, expected, "the same pixels as density 1");
+    assert_eq!(thin.paths, all.paths, "the line goes through every point");
+}
+
+#[test]
+fn a_density_larger_than_the_rows_draws_only_the_first_symbol() {
+    let thin = thinned_series(vec![1.0, 2.0, 3.0], 50);
+    let all = thinned_series(vec![1.0, 2.0, 3.0], 1);
+    assert_eq!(thin.points, vec![all.points[0]]);
+}
+
+#[test]
+fn an_empty_row_counts_and_does_not_shift_the_later_symbols() {
+    let ys = vec![1.0, f64::NAN, 3.0, 4.0, 5.0, 6.0];
+    let thin = thinned_series(ys.clone(), 2);
+    let all = thinned_series(ys, 1);
+    assert_eq!(all.points.len(), 5);
+    // Rows 0, 2, 4 carry a symbol: points 0, 1, 3 of the plotted ones.
+    let expected = vec![all.points[0], all.points[1], all.points[3]];
+    assert_eq!(thin.points, expected);
+}

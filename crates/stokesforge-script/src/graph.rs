@@ -94,6 +94,7 @@ pub(crate) const PLOT_OPTIONS: &[&str] = &[
     "x_error",
     "y_error",
     "histogram_bins",
+    "symbol_every",
 ];
 
 /// Creates a native graph and returns its handle; graph= adds to the first panel.
@@ -107,6 +108,7 @@ pub(crate) const PLOT_OPTIONS: &[&str] = &[
 /// (#RRGGBB or #RRGGBBAA; a list gives one color per series, a string applies
 /// to all), line_style (none, solid, dash, dot, dash_dot), line_width,
 /// symbol (none, circle, square, triangle, diamond, plus, cross), symbol_size,
+/// symbol_every (one symbol every N points, positive integer, default 1),
 /// label, title, x_title, y_title, x_scale/y_scale (linear, log), x_from/x_to and
 /// y_from/y_to (both together; from > to draws the axis reversed), axis (left,
 /// right), x_error/y_error (handles; without them, each y takes the first
@@ -244,6 +246,10 @@ pub(crate) fn plot(
                     }
                     request.references.push(target(&handle));
                     if key == "x_error" { request.series.x_error = Some(handle.id); } else { request.series.y_error = Some(handle.id); }
+                }
+                "symbol_every" => {
+                    let count = value.extract::<u32>().map_err(|_| invalid("symbol_every must be a positive integer"))?;
+                    request.series.symbol.every = stokesforge_plot::SymbolEvery::new(count).ok_or_else(|| invalid("symbol_every must be a positive integer"))?;
                 }
                 "histogram_bins" => {
                     let count = value.extract::<u32>().map_err(|_| invalid("histogram_bins must be a positive integer"))?;

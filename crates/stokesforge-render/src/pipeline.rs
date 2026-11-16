@@ -4319,7 +4319,11 @@ fn paint_series<DB: DrawingBackend>(
             }
             Ok((0, geometry))
         }
-        Geometry::Curve { points, whiskers } => {
+        Geometry::Curve {
+            points,
+            rows,
+            whiskers,
+        } => {
             // Decimating a series with whiskers would dissociate the error
             // bars from their points; decimating a scatter without a line
             // makes no sense either, LTTB reasoning along a path.
@@ -4371,7 +4375,18 @@ fn paint_series<DB: DrawingBackend>(
             if spec.plot_type.draws_symbols()
                 && spec.symbol.shape != stokesforge_plot::SymbolShape::None
             {
-                let mapped: Vec<_> = drawn_points.iter().map(|point| map(*point)).collect();
+                // Density 1 keeps the decimated points, as before (#547);
+                // above 1 the symbols are picked by data row among all the
+                // points, so a decimated curve keeps the same symbols.
+                let every = spec.symbol.every;
+                let thinned;
+                let symbol_points: &[(f64, f64)] = if every == stokesforge_plot::SymbolEvery::ONE {
+                    drawn_points
+                } else {
+                    thinned = series::thin_symbols(points, rows, every);
+                    &thinned
+                };
+                let mapped: Vec<_> = symbol_points.iter().map(|point| map(*point)).collect();
                 paint::symbols(screen, &mapped, &symbol, series.stale)?;
                 geometry.points = mapped
                     .into_iter()
@@ -5006,6 +5021,7 @@ mod tests {
     fn x_error_bars_and_bar_edges_enter_the_horizontal_extent() {
         let curve = Geometry::Curve {
             points: vec![(0.0, 1.0), (2.0, 1.0)],
+            rows: vec![0, 1],
             whiskers: vec![((1.0, 1.0), (3.0, 1.0))],
         };
         assert_eq!(series::x_extent(&curve), Some((0.0, 3.0)));

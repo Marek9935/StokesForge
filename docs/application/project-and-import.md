@@ -135,14 +135,43 @@ added to the open wizard (Add Files…, a drop) is taken out of its files, read 
 the background and announced by a status message; a wizard left with no file is
 closed, a wizard that still holds text files stays and the chooser shows when it
 closes. While the chooser is open a drop adds `.opj`/`.opju` files to it and refuses the
-other files with a message. `Action::ImportOrigin` creates one workbook per
-ticked book and one sheet per ticked sheet in one `MacroKind::Import` group (one
+other files with a message. The ticks are per column (#537; sheet and book boxes
+show `OriginTick` all/none/some; actions `ToggleOriginColumn`,
+`SetOriginColumnRange` for Shift+click, `SetOriginColumnInAllSheets` by long name
+else short name, `ToggleOriginSheet`, `SetOriginBookTicked`, Check All/None); a
+sheet with no ticked column is no table. The chooser also holds the classic layouts
+(`SetOriginWhere`: one workbook per Origin workbook, or one new workbook named
+after the file when there is one file; `SetOriginLayout`: one sheet per Origin
+sheet, side by side, shared X) and a **folder**: one Origin sheet is one "file" of
+`stokesforge_importer::plan_origin_layout`, which goes through the same
+`plan_tables` as the text import. Same long names side by side carry the Origin
+sheet name in their Comments. Shared X (both imports): only the first X stays; a
+later X with the same values (same length, relative 1e-9, NaN equals NaN) is
+dropped, a different one stays; `origin_import_x_warning` is the orange line
+before Import, and the text import says it after (`status-import-own-x`) because
+its previews read only part of the files. The folder (`ImportFolder`, both
+windows, `Action::SetImportFolder`, default `creation_folder`): an existing
+folder, or a new one made inside the same Import entry when Import runs; a folder
+gone by then means the root and `status-import-folder-gone` says so. Imports with no window (menu, drop, recent files)
+go to the Project Manager folder (the same default as the window). `Action::ImportOrigin` creates the planned workbooks and
+sheets in one `MacroKind::Import` group (one
 history entry, one undo); a name the model would refuse (invalid, or already a
 sibling's, case aside) is not sent: the object keeps its automatic name and
 nothing is said. Origin columns have no import source, so Refresh from Source
 stays greyed for them. `OriginFileView::partial` (from `OriginProject::partial`, an `.opju` read as far as it goes) makes the chooser print the `origin-import-partial` orange note under that file name (S-R18), and, after the import, an orange status line (`status-import-origin-partial`). Sheets left without a name by a partial read are `Sheet1`, `Sheet2`… (set by `assemble`). Reopen Last Import after an Origin import undoes it (if
-still on top) and reopens the chooser on the same parsed files and ticks; the
+still on top) and reopens the chooser on the same parsed files, ticks, layouts and
+folder (the Import window gets its folder back the same way); the
 most recent import, text or Origin, decides between wizard and chooser.
+
+Interface (#537): the two windows paint their `To:` and `Folder:` menus with one
+module, `stokesforge-app/src/app/import_to.rs`
+(destinations, the three sheet layouts, the folder list with "New Folder…" and
+its name field); each window applies the pick to its own state (the Import
+window writes its import state and dispatches `SetImportFolder`, the chooser
+pushes `SetOriginWhere`, `SetOriginLayout`, `SetImportFolder`). The chooser lists
+the columns of an open sheet (`OriginSheetView::column_list`), paints only the
+rows on screen (a file can hold a thousand columns, no cap), and keeps the last
+clicked column of each sheet in egui memory for the Shift+click range.
 
 The same gesture is wired in the detached windows: on a workbook, the
 destination stays that workbook; on a graph, a note, a matrix or the

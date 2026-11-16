@@ -312,6 +312,7 @@ fn symbol_spec(color: &str, shape: SymbolShape, size: f64) -> SymbolSpec {
         size,
         color: color.to_string(),
         edge_color: String::new(),
+        every: stokesforge_plot::SymbolEvery::ONE,
     }
 }
 

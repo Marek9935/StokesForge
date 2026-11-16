@@ -169,6 +169,7 @@ mod graph_text_edit;
 mod graph_window;
 mod grid;
 pub(crate) mod hover_help;
+mod import_to;
 mod import_wizard;
 mod inplace_edit;
 mod keyboard_shortcuts_window;
@@ -611,16 +612,9 @@ impl StokesForgeApp {
         }
     }
 
-    /// Opens as windows the workbooks added at the root since it
-    /// had `before` children (import into new workbooks).
-    fn open_new_workbooks_after(&mut self, before: usize) {
-        let root = self.state.tree().root();
-        let new_books: Vec<NodeId> = self
-            .state
-            .tree()
-            .node(root)
-            .map(|node| node.children().iter().skip(before).copied().collect())
-            .unwrap_or_default();
+    /// Opens as windows the workbooks an import created (import into new
+    /// workbooks), found by their ids and not by counting a folder's children.
+    fn open_new_workbooks(&mut self, new_books: Vec<NodeId>) {
         for book in new_books {
             if self.state.tree().node(book).is_some_and(|node| {
                 matches!(
@@ -1360,14 +1354,11 @@ impl StokesForgeApp {
             self.open_tab(Tab::Book(book));
         }
         if !self.server_running() && self.state.import_progress().is_some() {
-            let root = self.state.tree().root();
-            let before = self
-                .state
-                .tree()
-                .node(root)
-                .map_or(0, |node| node.children().len());
+            // Ids left by an earlier gesture were opened by it already.
+            drop(self.state.take_created_books());
             if self.state.poll_import() {
-                self.open_new_workbooks_after(before);
+                let created = self.state.take_created_books();
+                self.open_new_workbooks(created);
             }
         }
         let imported = self.state.take_imported_paths();
@@ -1903,21 +1894,14 @@ impl StokesForgeApp {
         };
         // The Origin chooser creates its workbooks in one go, like an
         // immediate text import (#490): they open the same way.
-        let new_import_books_after = if matches!(
+        let opens_import_books = matches!(
             action,
             Action::ImportFiles {
                 destination: ImportDestination::NewBookPerFile | ImportDestination::NewBookForAll,
                 ..
             } | Action::ImportOrigin
-        ) {
-            let root = self.state.tree().root();
-            self.state
-                .tree()
-                .node(root)
-                .map(|node| node.children().len())
-        } else {
-            None
-        };
+        );
+        drop(self.state.take_created_books());
         let revision_before = self.state.revision();
         let epoch_before = self.state.snapshot().epoch;
         // Save can continue a New Project or an Open… (#229).
@@ -2105,8 +2089,9 @@ impl StokesForgeApp {
                 }
             }
         }
-        if let Some(before) = new_import_books_after {
-            self.open_new_workbooks_after(before);
+        if opens_import_books {
+            let created = self.state.take_created_books();
+            self.open_new_workbooks(created);
         }
         if let Some(parent) = plotted_from {
             // `self.state.revision()` moved only if `AddGraph` was

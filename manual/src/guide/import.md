@@ -64,7 +64,7 @@ The window has two halves.
 
 Above them, one tab per file. With many files, the strip stays usable: filter the files by name, move with **Previous file** and **Next file**, and the tabs that do not fit are folded in a "+ n more" button. A tab says **Ready** or **Refused**.
 
-At the bottom, two menus and two buttons: **To:** (where the data goes), **Template:** (which template is used), **Cancel** and **Import**. **Import** is never greyed out because of a doubt: when points are left to check, the footer says "n points not checked", and you import anyway if you accept them.
+At the bottom, three menus and two buttons: **To:** (where the data goes), **Folder:** (which folder of the project receives the new workbooks), **Template:** (which template is used), **Cancel** and **Import**. **Import** is never greyed out because of a doubt: when points are left to check, the footer says "n points not checked", and you import anyway if you accept them.
 
 ### What was found
 
@@ -139,6 +139,10 @@ With **Active Workbook**, **In active workbook** adds four modes: **New sheet** 
 
 When you import more than one file, **Multiple files** offers **One sheet per file** (default), **One sheet, side by side (X Y X Y…)** and **One sheet, X of first file shared**. Use the second or third to plot several spectra from one sheet.
 
+In the two sheet layouts that share an X, only the first X is kept. A later X whose values are the same (same number of values, same values) is dropped. An X whose values differ stays, to the left of its own Y columns, and the status bar says so after the import ("These files keep an X of their own, its values differ from the first X: …"), because the Import window reads only the start of the files.
+
+The **Folder:** menu lists the folders of the project, indented, with **Project** (the root) first. It starts on the folder selected in the Project Manager (the root when none is). **New Folder…** adds a name field: the folder is created with the import, in the same step of the history, inside the folder that was chosen. **Import** is greyed out, and says why, while that name is empty or already used. The menu is greyed out when the destination is **Active Workbook**, which keeps its own place. If the chosen folder was deleted before you click **Import**, the new workbooks go to the root and the status bar says so. An import with no window (a drop that needs no check) goes to the same folder, the one selected in the Project Manager.
+
 With **One Workbook per File** and **One sheet per file**, or a single file imported into **New Workbook**, each workbook takes the title of the file (else its name) and holds one sheet called **Raw Data**. The sheet keeps that name as long as no value of an imported column changes. As soon as you type or paste a value, clear a cell, add, delete or sort rows, change the type of a column, change an x′ value, put a formula on an imported column or delete one, the sheet renames itself **Sheet1** (or **Sheet2** if that name is taken), in the same step: **Undo** gives back **Raw Data** and the old value. Editing a header (**Long Name**, **Units**, **Comments**), a role or a display format, moving columns or adding a calculated column beside the data does not count. A sheet you renamed yourself is never renamed again, and **Refresh from Source** keeps the current name. The other destinations name the sheet after the title or the file.
 
 The whole import is a single entry in the history: one **Undo** removes it.
@@ -201,16 +205,38 @@ An `.opj` or `.opju` never goes through the text import. StokesForge recognises 
 
 <img src="../images/import-origin-chooser.png" alt="The Import from Origin window on a small project: the file name, one workbook with its check box, its two sheets with their numbers of columns and rows, the line saying what will be created, and the buttons Check All, Check None, Cancel and Import." width="640">
 
-The window lists each file, then each Origin workbook of the file, then the sheets of each workbook, with the number of columns and rows of each sheet. Several files dropped together are listed together.
+The window lists each file, then each Origin workbook of the file, then the sheets of each workbook, with the number of columns and rows of each sheet. Several files dropped together are listed together. Above the list, **To:** and **Folder:** are the menus of the **Import** window.
 
-- Check the sheets you want. A check box on a workbook checks or unchecks all its sheets; it shows a dash when only some are checked.
-- By default, the sheet called `Data` is checked in each workbook. When a workbook has no `Data` sheet, all its sheets that have columns are checked.
+**To:**
+
+| Entry | What it does |
+| --- | --- |
+| **One Workbook per Origin Workbook** | Each Origin workbook becomes its own workbook (default). |
+| **New Workbook** | Everything goes into one new workbook, named after the Origin file. |
+
+There is no **Active Workbook** here. Under **Origin sheets**, three layouts say how the checked sheets share worksheets:
+
+- **One sheet per Origin sheet** (default): each Origin sheet becomes a sheet.
+- **One sheet, side by side (X Y X Y…)**: the columns of the sheets are put next to each other in one sheet.
+- **One sheet, X of first Origin sheet shared**: one sheet with the X of the first sheet and every Y next to it.
+
+With **One Workbook per Origin Workbook** and a one-sheet layout, each Origin workbook gets one combined sheet, named after its first sheet; with **New Workbook**, the combined sheet is named after its first sheet too. The columns you did not check are left out. Disregard, label and error columns are placed like Y columns, and a Y without its X is allowed. When two columns with the same long name end up side by side, the Origin sheet name is added to their comments.
+
+In a shared-X layout, only the first X is kept. A later X with the same values is dropped. An X whose values differ stays to the left of its own Y columns, and an orange line above the buttons says so before you import: "These sheets keep an X of their own, its values differ from the first X: …".
+
+**Folder:** lists the folders of the project and **New Folder…**, as in the **Import** window. It starts on the folder selected in the Project Manager.
+
+- Check the columns you want. Click the arrow of a sheet to see its columns: each row shows a check box, the role of the column (X, Y…), its long name (its short name when there is none) and its unit. Sheets are closed by default.
+- Click a column to check or uncheck it. **Shift+click** checks or unchecks all the columns between the last column you clicked in that sheet and this one.
+- Right-click a column and choose **Check “Name” in All Sheets** or **Uncheck “Name” in All Sheets** to act on the columns that have the same long name in every sheet of the file.
+- A check box on a sheet or a workbook checks or unchecks all its columns; it shows a dash when only some are checked.
+- By default, the sheet called `Data` is checked in each workbook, with all its columns. When a workbook has no `Data` sheet, all its sheets that have columns are checked.
 - A sheet with no column is greyed out: there is nothing to import.
-- **Check All** checks every sheet that has columns. **Check None** unchecks everything.
+- **Check All** checks every column of every sheet. **Check None** unchecks everything.
 - The line under the list says what Import will create, for example "To create: 3 sheets in 2 workbooks".
-- **Import** is greyed out while nothing is checked, and says why. **Cancel** closes the window and creates nothing.
+- **Import** is greyed out while nothing is checked, or while the name of a new folder is empty or already used, and says why. **Cancel** closes the window and creates nothing.
 
-**Import** creates one workbook for each Origin workbook that has a checked sheet, named after its Origin long name (its short name when there is no long name), with one sheet for each checked sheet. If a name is already used or not allowed, the workbook or sheet keeps its automatic name. The new workbooks open in the workspace, and the whole import is a single step in the history: one **Undo** removes it.
+**Import** creates the workbooks and sheets of the chosen layout in the chosen folder, named after the Origin long names (the short name when there is none). If a name is already used or not allowed, the workbook or sheet keeps its automatic name. The new workbooks open in the workspace, and the whole import is a single step in the history: one **Undo** removes the workbooks and the new folder.
 
 ### What is kept
 
@@ -221,7 +247,7 @@ These columns do not remember a source file, so **Refresh from Source** does not
 
 ### Reopen the last import
 
-**File ▸ Import ▸ Reopen Last Import…** brings the **Import from Origin** window back on the same files, with the same sheets checked, so you can change your choice and import again. If the import is still the last thing you did, StokesForge undoes it first.
+**File ▸ Import ▸ Reopen Last Import…** brings the **Import from Origin** window back on the same files, with the same columns checked, the same layout and the same folder, so you can change your choice and import again. If the import is still the last thing you did, StokesForge undoes it first.
 
 ### When a file cannot be read completely
 
@@ -229,7 +255,7 @@ Some `.opju` files use a part of the format StokesForge does not read yet. If on
 
 ### From the command line and scripts
 
-`stokesforge-cli import` and `pyst.import_file` read an `.opj` or `.opju` without a window: they import the `Data` sheets of each workbook (all the sheets that have columns when a workbook has no `Data` sheet), one workbook per Origin workbook.
+`stokesforge-cli import` and `pyst.import_file` read an `.opj` or `.opju` without a window: they import the `Data` sheets of each workbook (all the sheets that have columns when a workbook has no `Data` sheet), one workbook per Origin workbook, at the root of the project, with one sheet per Origin sheet.
 
 ## Common problems
 

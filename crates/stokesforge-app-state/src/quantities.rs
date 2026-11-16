@@ -143,6 +143,10 @@ impl Quantity {
 /// A free value: abscissa, ordinate, axis bound, fit parameter.
 pub const FREE: Quantity = Quantity::real(0.1, 1.0, 8);
 
+/// One symbol every n data rows (#547): 1 draws them all, no upper cap
+/// beyond the whole numbers the file can hold.
+pub const SYMBOL_EVERY: Quantity = Quantity::whole(1.0).between(1.0, u32::MAX as f64);
+
 /// Minor ticks between two major ticks (#344): 1 to 9, or Auto.
 pub const MINOR_TICK_COUNT: Quantity = Quantity::whole(4.0)
     .between(1.0, 9.0)

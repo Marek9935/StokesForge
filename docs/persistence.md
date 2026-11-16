@@ -269,6 +269,17 @@ file again loses the field (CHANGELOG). The same field is in
 `not_automatic`, the names of the old templates kept but not applied by
 themselves (F1 of #488), absent in an older file and ignored by an older app.
 
+## Symbol density: additive field (#547)
+
+`SymbolSpecRecord` gained `every` (`u32`, one symbol every N data rows),
+`#[serde(default = "default_symbol_every")]` returning **1** (a plain
+`#[serde(default)]` would read 0). A file without it reads 1, every point as
+before, so **`FORMAT_VERSION` did not move**. The model type `SymbolEvery` is
+never zero: a hostile 0 in a file reads as 1, no panic (invariant 10); there is
+no upper cap. An older version that opens and re-saves the file drops the field
+without a message. Witness `tests/witnesses/v1/project.stf` regenerated with a
+non-default value.
+
 ## Frame sizes: additive fields (#394)
 
 `PlotSpecRecord` gained `frame_widths` and `frame_heights` (`Vec<f64>`, points;
