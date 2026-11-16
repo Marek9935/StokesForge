@@ -78,7 +78,7 @@ The wheel scrolls the sheet. <kbd>Ctrl</kbd>+wheel does nothing special here.
 | Click | A cell | Selects the cell. |
 | <kbd>Ctrl</kbd>+click | A cell | Adds the cell to the selection, or removes it. |
 | <kbd>Shift</kbd>+click | A cell | Extends the last rectangle to this cell. |
-| Drag | Cells | Selects a rectangle. |
+| Drag | Cells | Selects a rectangle. Hold the button with the pointer at an edge of the sheet and the sheet keeps scrolling; the farther you push past the edge, the faster. |
 | <kbd>Ctrl</kbd>+drag | Cells | Adds a rectangle. The earlier ones stay selected. |
 | Double-click | A cell or a header field | Edits it in place. |
 | Right-click | A cell, a header field or a row number | If it is outside the selection, selects it first. Opens the menu for the selection. |
@@ -91,11 +91,11 @@ The wheel scrolls the sheet. <kbd>Ctrl</kbd>+wheel does nothing special here.
 | <kbd>Ctrl</kbd>+click | A column letter | Adds the column to the selection, or removes it. |
 | <kbd>Shift</kbd>+click | A column letter | Extends the selection to this column. |
 | <kbd>Ctrl</kbd>+drag | Column letters | Adds a range of columns. |
-| Drag | Column letters | Selects the columns you cross. |
+| Drag | Column letters | Selects the columns you cross. At the left or right edge the sheet scrolls sideways. |
 | Drag | The left or right edge of the selected columns, under the row of letters | Drops them on a graph to plot them. |
 | Drag | The top or bottom edge of selected rows, when the sheet shows the x' row | Drops them on a graph to plot the rows. |
 | Click | A row number | Selects the row. |
-| <kbd>Shift</kbd>+click, drag | Row numbers | Selects a range of rows. |
+| <kbd>Shift</kbd>+click, drag | Row numbers | Selects a range of rows. At the top or bottom edge the sheet scrolls up or down. |
 | Click | The corner box **#** | Selects the whole sheet. |
 | Double-click | A header field | Edits it in place. |
 | Right-click | A column letter | Opens the column menu: **Plot**, **Add Column**, copy and paste, **Type**, **Role**, **Move**, **Reset Width**, **Clear**, **Delete**. |

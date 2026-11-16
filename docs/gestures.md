@@ -128,17 +128,22 @@ Ctrl + wheel is not taken.
 | Click | cell | selects the cell |
 | Ctrl + click | cell | adds or removes the cell |
 | Shift + click | cell | extends the last rectangle |
-| Drag | cell | rectangle selection |
+| Drag | cell | rectangle selection; **past an edge of the grid it keeps scrolling** (#535, below the table) |
 | Ctrl + drag | cell | adds a rectangle, the previous ones stay |
 | Double-click | cell or header field | in-place editing |
 | Click, Ctrl, Shift, drag | column letter | selects, toggles, extends or adds columns (same modifiers) |
 | Click, Shift + click, drag | row number | selects the rows |
 | Click | corner box "#" | selects all |
 | Drag | left or right edge of a column selection, under the row of letters (or top or bottom edge of a block of rows, if the sheet has an x' row) | drops a plot on a graph |
+| Drag past the edge | from a cell | **the grid scrolls on both axes** (all four edges) while the button stays down and the selection keeps extending to the cell at the edge (#535). Header rows and column letters are the top edge, row numbers the left edge: the selection stays a cell rectangle |
+| Drag past the edge | from a column letter or a header field | scrolls horizontally only |
+| Drag past the edge | from a row number | scrolls vertically only; header-row labels do not scroll |
 | Right-click | cell, header, letter, row | if outside the selection, replaces it with the target; opens the selection menu |
 | Right-click › Reset Width | column letter (or Workbook › Columns) | resets the selected columns to the default width (54); not undoable, disabled without a stored width (#330) |
 | Right-click › Reset Column Widths | sheet tab (or Workbook › Sheet) | resets all the columns of the sheet, and the row-number gutter, to their default width (#330) |
 | Right-click › Move ▸ | column letter (or Workbook › Columns) | moves the selected columns within their sheet: to the start, to the end, or one place left or right each (the gap between non-contiguous columns stays); a single Ctrl+Z; no drag (dragging on the letters already selects) |
+
+**Drag past the edge (#535).** As in a spreadsheet, the pointer is never held or locked during a selection drag: it may leave the grid and even the window, and the system cursor is untouched. The signed distance of the pointer past an edge of the grid viewport (0 inside) sets the scroll **speed** on that axis (`stokesforge_app_state::grid_autoscroll`: `SPEED_PER_PUSH` points per second per point of distance, capped at `MAX_SPEED`, times the frame time, at most `MAX_FRAME_TIME`): the further past the edge, the faster, and the grid keeps scrolling with the hand still. Back over the grid the scroll stops and the hovered cell extends the selection as in a plain drag. Axes follow the zone the drag started in (a cell: both; a letter or header field: horizontal; a row number: vertical). Past the last row or column nothing is added. A click never scrolls, nor a drag of columns or rows onto a graph, a text drag in a cell editor or a column resize.
 
 ## The trees: Object Manager and Project Manager
 

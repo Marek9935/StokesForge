@@ -1295,6 +1295,27 @@ Column virtualization (the table holds the visible window and two spacers) and t
 | a click on a partly visible column does not scroll | `a_click_does_not_scroll_the_grid` (follow not conditioned on a key: red) |
 | the least scroll that shows a range | `follow_offset_scrolls_just_enough` |
 
+## Drag past the edge (#535)
+
+A selection drag that reaches an edge of the grid keeps scrolling; the push past the edge sets the speed; the pointer is never held. The grid tests use `wide_bench(1000, false)` with `bench.step = Some(0.1)` (each frame 0.1 s after the previous one: `stable_dt` follows only after a frame that asked for a repaint) and read what is painted (first painted letter, cursor, selection kind, the viewport commands of the frame). The cursor-lock guard stays untouched: the grid test builds the command names apart (`concat!`). Each witness named below was seen red by mutation; `a_column_resize_does_not_scroll`, `a_detached_viewport_autoscrolls_too`, `an_absolute_pointer_is_never_locked` (probe ignored) and the `all_four_edges_scroll` left edge have no mutation run.
+
+| Rule | Witness |
+|---|---|
+| speed: inside the edges 0, signed by the side, grows with the push, capped, proportional to the frame time (bounded), not finite gives 0 | `grid_autoscroll::tests::*` (constant speed: red) |
+| `column_at` is the inverse of `column_x_range` (gutter, spacing, past the end, NaN, no column) | `column_at_is_the_inverse_of_column_x_range` |
+| a cell press then the pointer past the right edge, no more event: the grid scrolls and the cursor goes past the last column that was visible | `a_cell_drag_past_the_right_edge_scrolls_the_grid_with_the_hand_still` (`grid_autoscroll` call removed: red) |
+| a bigger push scrolls further | `a_bigger_push_scrolls_further` (constant speed: red) |
+| a repaint is asked while an offset can move, not at the end of the sheet | `the_autoscroll_repaints_only_while_an_offset_can_move` (`request_repaint` removed: red; `has_room` ignored: red) |
+| past the bottom the rectangle grows, a far cell is selected; all four edges scroll | `a_cell_drag_past_the_bottom_grows_the_rectangle`, `all_four_edges_scroll` |
+| a letter drag selects columns and scrolls sideways only; a row-number drag selects rows, scrolls up and down only, stops at the last row, pushes no action | `a_letter_drag_scrolls_horizontally_only`, `a_row_number_drag_scrolls_vertically_only_and_stops_at_the_last_row` (vertical scroll for every zone: red for the letter drag) |
+| an upward cell drag over the header rows and letters scrolls up and stays a cell rectangle (no jump to row 0, no whole columns) | `an_upward_cell_drag_over_the_header_scrolls_up_and_stays_a_cell_rectangle` (`cell_drag_marked` dropped from the header widgets: red) |
+| an editor text drag, a drag of columns onto a graph, and the pointer after the release never scroll | `the_other_gestures_and_the_release_do_not_scroll` (button state ignored: red; `grid_drag_in_progress` ignored: red) |
+| a column resize does not scroll | `a_column_resize_does_not_scroll` |
+| a detached window scrolls the same | `a_detached_viewport_autoscrolls_too` |
+| the pointer past the edge, even outside the window, keeps scrolling | `a_pointer_outside_the_window_still_scrolls` |
+| coming back over the grid stops the scroll and the hovered cell extends the selection | `coming_back_inside_stops_the_scroll_and_hover_selects` (push never 0 inside: red) |
+| the grid never sends a grab, a cursor position or an icon change | `the_grid_never_holds_or_changes_the_cursor` (stray icon set: red; stray grab command: red) |
+
 ## Moving columns (#319)
 
 Submenu `Move ▸` (First · Left · Right · Last). Each rule has its witness, checked by mutation.
