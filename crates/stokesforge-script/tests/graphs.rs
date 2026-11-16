@@ -119,6 +119,18 @@ fn exact_spec_stable_export_and_style_witness() {
     panel.bottom.range_min = Some(1.);
     panel.bottom.range_max = Some(10.);
     panel.left.label = "$I$".into();
+    // A new graph writes its automatic ranges once (#529): 1 % below and 5 %
+    // above the data 2..8.
+    let left = graph_spec(&b).panels[0].left.clone();
+    assert!(!left.auto_range, "frozen at creation");
+    let (low, high) = (left.range_min.unwrap(), left.range_max.unwrap());
+    assert!(
+        (low - 1.94).abs() < 1e-9 && (high - 8.3).abs() < 1e-9,
+        "{low} {high}"
+    );
+    panel.left.auto_range = false;
+    panel.left.range_min = left.range_min;
+    panel.left.range_max = left.range_max;
     // A new graph has no legend frame (#507, D6).
     panel.legend.frame = false;
     // A graph created by a script is explicit (#394): the frames of the

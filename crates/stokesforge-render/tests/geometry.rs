@@ -160,19 +160,19 @@ fn the_framing_follows_the_data_with_a_margin() {
         &[("X", vec![0.0, 1.0, 2.0]), ("Y", vec![10.0, 20.0, 30.0])],
         |ids| one_panel(SeriesSpec::new_xy(ids[0], ids[1]), |_| {}),
     );
-    // 5% margin on both sides.
+    // #529: X edge to edge, Y 1 % below and 5 % above.
     assert!(
-        (drawn.x_range().0 - -0.1).abs() < 1e-9,
+        (drawn.x_range().0 - 0.0).abs() < 1e-9,
         "{:?}",
         drawn.x_range()
     );
     assert!(
-        (drawn.x_range().1 - 2.1).abs() < 1e-9,
+        (drawn.x_range().1 - 2.0).abs() < 1e-9,
         "{:?}",
         drawn.x_range()
     );
     assert!(
-        (drawn.y_range().0 - 9.0).abs() < 1e-9,
+        (drawn.y_range().0 - 9.8).abs() < 1e-9,
         "{:?}",
         drawn.y_range()
     );
@@ -182,6 +182,30 @@ fn the_framing_follows_the_data_with_a_margin() {
         drawn.y_range()
     );
     assert_eq!(drawn.drawn_series, 1);
+}
+
+/// #269, #529: the analysis preview frames linear data like the graph does.
+#[test]
+fn the_analysis_preview_frames_like_the_graph() {
+    use stokesforge_plot::AxisSpec;
+    use stokesforge_render::{axis_frame, AutoMargins, AxisRole};
+    let xs = vec![0.0, 1.0, 2.0];
+    let ys = vec![10.0, 20.0, 30.0];
+    let drawn = geometry(&[("X", xs.clone()), ("Y", ys.clone())], |ids| {
+        one_panel(SeriesSpec::new_xy(ids[0], ids[1]), |_| {})
+    });
+    let axis = AxisSpec::default();
+    let m = AutoMargins::default();
+    let x = axis_frame(&xs, &axis, AxisRole::Horizontal, m);
+    let y = axis_frame(&ys, &axis, AxisRole::Vertical, m);
+    for (got, want) in [
+        (drawn.x_range().0, x.0),
+        (drawn.x_range().1, x.1),
+        (drawn.y_range().0, y.0),
+        (drawn.y_range().1, y.1),
+    ] {
+        assert!((got - want).abs() < 1e-9, "{got} vs {want}");
+    }
 }
 
 #[test]
@@ -255,9 +279,9 @@ fn a_mixed_column_draws_only_its_numeric_cells() {
          as rows, they do not shift the index of the following ones"
     );
     // And the framing comes only from the two numbers: neither "n/a" nor the
-    // empty cell produced a point (5% margin on both sides of
-    // [10, 30]).
-    assert!((a.y_range().0 - 9.0).abs() < 1e-9, "{:?}", a.y_range());
+    // empty cell produced a point (1 % below and 5 % above
+    // [10, 30], #529).
+    assert!((a.y_range().0 - 9.8).abs() < 1e-9, "{:?}", a.y_range());
     assert!((a.y_range().1 - 31.0).abs() < 1e-9, "{:?}", a.y_range());
 }
 
@@ -785,13 +809,36 @@ fn an_overlaid_layer_shares_the_plot_area_and_keeps_its_scale() {
     );
 }
 
-/// #174: the scales of an overlaid layer are joined to those of the covered
-/// layer — same axis fractions for the ticks, hence the top 0 facing the
-/// bottom 0 — while enclosing its own data.
+/// #529 (form 529-5, which replaced the #174 alignment): an overlaid layer's
+/// own axis takes its own tight automatic range, never the covered layer's
+/// ticks. Data 0..1 over a base 4..6 with the default margins (1 % below,
+/// 5 % above) frames -0.01..1.05.
 #[test]
-fn the_scales_of_an_overlaid_layer_are_joined_to_those_of_the_covered_layer() {
+fn an_overlaid_layers_own_axis_takes_its_own_tight_range() {
     use stokesforge_plot::{OverlaySpec, Panels};
-    use stokesforge_render::scale::{linear_key_points, DEFAULT_LABELS};
+    let columns = [
+        ("X", vec![0.0, 1.0, 2.0]),
+        ("Y", vec![4.0, 5.0, 6.0]),
+        ("Y2", vec![0.0, 0.5, 1.0]),
+    ];
+    let drawn = geometry(&columns, |ids: &[NodeId]| {
+        let mut base = PanelSpec::at(0, 0);
+        base.series.push(SeriesSpec::new_xy(ids[0], ids[1]));
+        let mut top = PanelSpec::overlay_on(&base, OverlaySpec::new(false, true));
+        top.series.push(SeriesSpec::new_xy(ids[0], ids[2]));
+        PlotSpec::empty("Test").with_panels(Panels::new(vec![base, top]))
+    });
+    let own = drawn.panels[1].y_range;
+    assert!((own.0 + 0.01).abs() < 1e-9, "{own:?}");
+    assert!((own.1 - 1.05).abs() < 1e-9, "{own:?}");
+}
+
+/// The ticks of an overlaid layer's own axis are the ones of its own range,
+/// not those of the covered layer's: bases 0..800 and 0..120 do not share
+/// their tick fractions.
+#[test]
+fn the_ticks_of_an_overlaid_layers_own_axes_are_its_own() {
+    use stokesforge_plot::{OverlaySpec, Panels};
     let columns = [
         ("X", vec![0.0, 400.0, 800.0]),
         ("Y", vec![0.0, 5.0, 10.0]),
@@ -806,23 +853,19 @@ fn the_scales_of_an_overlaid_layer_are_joined_to_those_of_the_covered_layer() {
         PlotSpec::empty("Test").with_panels(Panels::new(vec![base, top]))
     });
     let (base, top) = (&drawn.panels[0], &drawn.panels[1]);
-    let fractions = |range: (f64, f64)| -> Vec<f64> {
-        linear_key_points(range, DEFAULT_LABELS)
-            .iter()
-            .map(|t| (t - range.0) / (range.1 - range.0))
-            .collect()
-    };
-    for (own, other, data) in [
-        (base.x_range, top.x_range, (0.0, 120.0)),
-        (base.y_range, top.y_range, (0.0, 0.9)),
-    ] {
-        let (a, b) = (fractions(own), fractions(other));
-        assert_eq!(a.len(), b.len(), "{own:?} / {other:?}");
-        for (x, y) in a.iter().zip(&b) {
-            assert!((x - y).abs() < 1e-6, "{own:?} / {other:?}");
-        }
-        assert!(other.0 <= data.0 && other.1 >= data.1, "{other:?}");
-    }
+    // Own extent plus the default margins only.
+    assert!(
+        top.x_range.0 >= -1.3 && top.x_range.1 <= 126.1,
+        "{:?}",
+        top.x_range
+    );
+    assert!(
+        top.y_range.0 >= -0.02 && top.y_range.1 <= 0.96,
+        "{:?}",
+        top.y_range
+    );
+    assert_ne!(top.x_range, base.x_range);
+    assert_ne!(top.y_range, base.y_range);
 }
 
 /// #172: the legend of the ordinary layer also lists the curves of the

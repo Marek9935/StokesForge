@@ -65,13 +65,25 @@ fn main() -> anyhow::Result<()> {
         demo_forced,
         &preferences,
     );
-    let (session, path, report) = session_for_startup(&startup.source, preferences.load_limits())?;
+    // #529: an old file's Auto axes are written at opening, as `File > Open` does.
+    let frozen = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let normaliser: stokesforge_session::LoadNormaliser = {
+        let frozen = std::sync::Arc::clone(&frozen);
+        let margins = preferences.auto_margins();
+        Box::new(move |project| {
+            let count = stokesforge_app_state::frame_sizes::freeze_loaded_graphs(project, margins);
+            frozen.store(count, std::sync::atomic::Ordering::Relaxed);
+        })
+    };
+    let (session, path, report) =
+        session_for_startup_with(&startup.source, preferences.load_limits(), Some(normaliser))?;
     let from_file = matches!(startup.source, StartupSource::Load(_));
     let mut state = AppState::new(session.handle(), path.display().to_string())
         .context("first snapshot of the project")?;
     if let Some(report) = &report {
         state.mark_loaded(report);
     }
+    state.mark_ranges_written(frozen.load(std::sync::atomic::Ordering::Relaxed));
     // Backup copies of vanished processes (#317): only the root window offers
     // them.
     state.scan_recovery();
@@ -173,12 +185,22 @@ fn configure_window_backend(_builder: &mut eframe::EventLoopBuilder<eframe::User
 /// is passed to `mark_loaded` so that what was discarded is told (#309).
 /// Without argument, the in-memory demo has no path, so a `demo.stf` in the
 /// current folder is neither read nor overwritten (#315).
+#[cfg(test)]
 fn session_for_startup(
     source: &StartupSource,
     max_limits: stokesforge_app_state::preferences::LoadLimits,
 ) -> anyhow::Result<(Session, PathBuf, Option<LoadReport>)> {
+    session_for_startup_with(source, max_limits, None)
+}
+
+/// [`session_for_startup`], with what runs over a file that is loaded (#529).
+fn session_for_startup_with(
+    source: &StartupSource,
+    max_limits: stokesforge_app_state::preferences::LoadLimits,
+    normaliser: Option<stokesforge_session::LoadNormaliser>,
+) -> anyhow::Result<(Session, PathBuf, Option<LoadReport>)> {
     match source {
-        StartupSource::Load(path) => load_session(path, max_limits),
+        StartupSource::Load(path) => load_session(path, max_limits, normaliser),
         StartupSource::DemoMemory(target) => Ok((demo_session()?, target.clone(), None)),
         StartupSource::Empty(target) => {
             let project = Project::new(stokesforge_session::NEW_PROJECT_NAME)?;
@@ -210,12 +232,13 @@ fn session_for_startup(
 fn load_session(
     path: &std::path::Path,
     max_limits: stokesforge_app_state::preferences::LoadLimits,
+    normaliser: Option<stokesforge_session::LoadNormaliser>,
 ) -> anyhow::Result<(Session, PathBuf, Option<LoadReport>)> {
     let session =
         Session::spawn(Project::new("Loading")?, None).context("starting the session thread")?;
     let (_, report) = session
         .handle()
-        .load_with_limits(path, max_limits)
+        .load_normalised(path, max_limits, normaliser)
         .with_context(|| format!("loading {}", path.display()))?;
     Ok((session, path.to_path_buf(), Some(report)))
 }

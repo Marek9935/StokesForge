@@ -1202,6 +1202,23 @@ pub enum Action {
         /// New description of the graph.
         spec: PlotSpec,
     },
+    /// Applies the checked `families` of `theme` to every graph of `graphs`
+    /// as **one** undo step: one [`Command::SetPlotSpec`] per graph that
+    /// changes, inside one `ApplyTheme` macro (#538). A node that is not a
+    /// graph is skipped, a graph the theme would not change adds nothing, and
+    /// no history entry is made when no graph changes.
+    ApplyTheme {
+        /// The theme to apply (a snapshot: editing a theme later changes no
+        /// graph).
+        theme: stokesforge_plot::GraphTheme,
+        /// Families to copy.
+        families: stokesforge_plot::ThemeFamilies,
+        /// Target graphs.
+        graphs: Vec<NodeId>,
+        /// A graph with fewer layers than the theme gets empty layers up to
+        /// the theme's count; off, only its existing layers are styled.
+        add_missing_layers: bool,
+    },
     /// Opens (or brings to the wanted tab) the properties window of the
     /// graph `graph` — right-click on a graph component, or the
     /// "Graph" menu. `axis` chooses the axis shown by the "Axes" tab
@@ -1306,6 +1323,9 @@ pub enum Action {
     /// New graphs write their numbers with a decimal comma (R9, #148); the
     /// graphs that exist keep their own setting.
     SetNewGraphDecimalComma(bool),
+    /// Margins of the automatic axis framing, a user preference (#529); the
+    /// application repaints the open graphs.
+    SetAutoMargins(stokesforge_render::AutoMargins),
     /// The « Text from » and custom template given to the legend of new
     /// graphs (#499, #502); the graphs that exist keep their own.
     SetNewGraphLegendText(stokesforge_plot::LegendText),
@@ -3899,6 +3919,16 @@ impl AppState {
         }
     }
 
+    /// #529: `count` graphs had their automatic axis ranges written while a
+    /// file was opened (outside the history): the project is modified, and the
+    /// orange line says so. Nothing when no axis was written.
+    pub fn mark_ranges_written(&mut self, count: usize) {
+        if count > 0 {
+            self.saved_revision = None;
+            self.warn(tr!("status-ranges-written", count = count));
+        }
+    }
+
     /// Records the geometry of content window `node` with the
     /// actor. This view setting does not go through the history: moving
     /// a window must not add a step to undo.
@@ -6427,7 +6457,12 @@ impl AppState {
                 panel,
                 columns,
                 plot_type,
-            } => self.add_series_to_graph(graph, panel, columns, plot_type),
+            } => {
+                let before = self.plot_spec(graph);
+                if self.add_series_to_graph(graph, panel, columns, plot_type) {
+                    self.widen_after_add(graph, before);
+                }
+            }
             Action::AddLayer {
                 graph,
                 panel,
@@ -6453,7 +6488,12 @@ impl AppState {
                 sheet,
                 rows,
                 axis,
-            } => self.add_rows_to_graph(graph, panel, sheet, rows, axis),
+            } => {
+                let before = self.plot_spec(graph);
+                if self.add_rows_to_graph(graph, panel, sheet, rows, axis) {
+                    self.widen_after_add(graph, before);
+                }
+            }
             Action::ConfirmRowDrop(choice) => self.confirm_row_drop(choice),
             Action::PlotRows {
                 sheet,
@@ -6729,6 +6769,12 @@ impl AppState {
             Action::SetPlotSpec { graph, spec } => {
                 self.execute(Command::SetPlotSpec { graph, spec })
             }
+            Action::ApplyTheme {
+                theme,
+                families,
+                graphs,
+                add_missing_layers,
+            } => self.apply_theme(&theme, families, &graphs, add_missing_layers),
             Action::OpenPlotSettings { graph, tab, axis } => {
                 self.open_plot_settings(graph, tab, axis);
             }
@@ -6969,6 +7015,14 @@ impl AppState {
                     .object_manager_preferences
                     .save_new_graph_decimal_comma(comma)
                 {
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
+                }
+            }
+            Action::SetAutoMargins(margins) => {
+                if let Err(error) = self.object_manager_preferences.save_auto_margins(margins) {
                     self.fail(tr!(
                         "error-preferences-not-saved",
                         cause = errors::io::error_message(&error)
@@ -8440,6 +8494,7 @@ impl AppState {
                 if let Some(current) = self.plot_spec(graph) {
                     crate::frame_sizes::fix_from(&self.snapshot.tree, &current, &mut spec);
                 }
+                self.freeze_auto_ranges(&mut spec);
                 Command::SetPlotSpec { graph, spec }
             }
             Command::EditPlotSpec {
@@ -8450,6 +8505,7 @@ impl AppState {
                 if let Some(current) = self.plot_spec(graph) {
                     crate::frame_sizes::fix_from(&self.snapshot.tree, &current, &mut spec);
                 }
+                self.freeze_auto_ranges(&mut spec);
                 Command::EditPlotSpec { graph, spec, kind }
             }
             Command::AddGraph {
@@ -8458,10 +8514,26 @@ impl AppState {
                 mut spec,
             } => {
                 crate::frame_sizes::fix_new(&self.snapshot.tree, &mut spec);
+                self.freeze_auto_ranges(&mut spec);
                 Command::AddGraph { parent, name, spec }
             }
             other => other,
         }
+    }
+
+    /// The one door of the automatic axis ranges (#529): a spec written by a
+    /// command carries, for every axis still on Auto that has data, the range
+    /// drawn now with the user's margins, so that a graph never moves
+    /// afterwards. The ranges ride in the very command of the gesture: no
+    /// history step of their own. The snapshot is read as it is (invariant
+    /// 11, #239): while a recalculation runs it may hold the old values of a
+    /// formula column, so nothing is frozen then and the axes stay Auto, to
+    /// freeze at the next command.
+    fn freeze_auto_ranges(&self, spec: &mut PlotSpec) {
+        if self.recalc_since.is_some() && self.handle.recalc_running().is_some() {
+            return;
+        }
+        crate::frame_sizes::freeze_ranges(&self.snapshot.tree, spec, self.auto_margins());
     }
 
     /// Waits [`RECALC_WAIT`] for the end of the recalculation that the command
@@ -8812,9 +8884,64 @@ impl AppState {
         self.object_manager_preferences.analysis_low_r2_dialog()
     }
 
+    /// Applies `families` of `theme` to `graphs` (#538): one history step. A
+    /// node that is not a graph, and a graph the application would not change,
+    /// add nothing; with no change at all nothing is pushed.
+    fn apply_theme(
+        &mut self,
+        theme: &stokesforge_plot::GraphTheme,
+        families: stokesforge_plot::ThemeFamilies,
+        graphs: &[NodeId],
+        add_missing_layers: bool,
+    ) {
+        let mut seen = std::collections::HashSet::new();
+        let changes: Vec<(NodeId, PlotSpec)> = graphs
+            .iter()
+            .filter(|graph| seen.insert(**graph))
+            .filter_map(|graph| {
+                let current = self.plot_spec(*graph)?;
+                let next = crate::theme_apply::themed_spec(
+                    &self.snapshot.tree,
+                    &current,
+                    theme,
+                    families,
+                    add_missing_layers,
+                );
+                (next != current).then_some((*graph, next))
+            })
+            .collect();
+        if changes.is_empty() {
+            return;
+        }
+        if let Err(err) = self.handle.begin_macro(MacroKind::ApplyTheme) {
+            self.fail(tr!(
+                "error-theme-undo-group",
+                cause = errors::session::error_message(&err)
+            ));
+            return;
+        }
+        for (graph, spec) in changes {
+            self.execute(Command::SetPlotSpec { graph, spec });
+        }
+        self.end_grouped_macro();
+    }
+
     /// Do **new** graphs write their numbers with a decimal comma (R9, #148)?
     pub fn new_graph_decimal_comma(&self) -> bool {
         self.object_manager_preferences.new_graph_decimal_comma()
+    }
+
+    /// The texts of a figure with the user's margins of the automatic axis
+    /// framing (#529): what every draw of the application (export, copy,
+    /// screen) is given, so that all of them agree (invariant 5).
+    pub fn figure_texts(&self) -> stokesforge_render::FigureTexts {
+        crate::figure_texts::figure_texts().with_margins(self.auto_margins())
+    }
+
+    /// Margins of the automatic axis framing (#529), in percent of the data
+    /// extent. A user preference, never in the project.
+    pub fn auto_margins(&self) -> stokesforge_render::AutoMargins {
+        self.object_manager_preferences.auto_margins()
     }
 
     /// « Text from » and custom template of the legend of new graphs (#499,
@@ -9030,7 +9157,7 @@ impl AppState {
             return;
         };
         // #501: the variables of the texts, before the resolution and the size.
-        let texts = crate::figure_texts::figure_texts();
+        let texts = self.figure_texts();
         let spec = &*stokesforge_render::bind_spec(&self.snapshot.tree, spec, &texts);
         let plot = stokesforge_core::resolve::resolve_spec(&self.snapshot.tree, spec);
         let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
@@ -9060,7 +9187,7 @@ impl AppState {
         use crate::preferences::CopyFormat;
         use stokesforge_render_svg::ExportFormat;
 
-        let texts = crate::figure_texts::figure_texts();
+        let texts = self.figure_texts();
         let spec = &*stokesforge_render::bind_spec(&self.snapshot.tree, spec, &texts);
         let plot = stokesforge_core::resolve::resolve_spec(&self.snapshot.tree, spec);
         let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
@@ -9161,7 +9288,18 @@ impl AppState {
     fn load(&mut self) -> bool {
         let path = PathBuf::from(&self.path);
         let limits = self.object_manager_preferences.load_limits();
-        match self.handle.load_with_limits(&path, limits) {
+        // #529: an old file's Auto axes are written once, with the user's
+        // margins, after the formulas were recalculated; no history.
+        let frozen = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let normaliser: stokesforge_session::LoadNormaliser = {
+            let frozen = std::sync::Arc::clone(&frozen);
+            let margins = self.auto_margins();
+            Box::new(move |project| {
+                let count = crate::frame_sizes::freeze_loaded_graphs(project, margins);
+                frozen.store(count, std::sync::atomic::Ordering::Relaxed);
+            })
+        };
+        match self.handle.load_normalised(&path, limits, Some(normaliser)) {
             Ok((_, report)) => {
                 // The identifiers of the file have nothing to do with those of
                 // the previous tree: the selection must be revalidated, which
@@ -9182,6 +9320,9 @@ impl AppState {
                 self.autosave_remove_slot();
                 self.autosave_mark_clean();
                 self.discarded_source = DiscardedSource::of(PathBuf::from(&self.path), &report);
+                // #529: modified only when an axis was written; a file with no
+                // Auto axis opens clean, with no message.
+                self.mark_ranges_written(frozen.load(std::sync::atomic::Ordering::Relaxed));
                 true
             }
             Err(err) => {
@@ -11977,18 +12118,75 @@ impl AppState {
         panel: usize,
         columns: Vec<NodeId>,
         plot_type: Option<PlotType>,
-    ) {
+    ) -> bool {
         if columns.is_empty() {
-            return;
+            return false;
         }
         let Some(mut spec) = current_plot_spec(&self.snapshot.tree, graph) else {
             self.fail(tr!("error-graph-gone"));
-            return;
+            return false;
         };
         match self.add_columns_to_spec(&mut spec, panel, &columns, plot_type) {
-            Ok(()) => self.execute(Command::SetPlotSpec { graph, spec }),
-            Err(message) => self.fail(message),
+            Ok(()) => {
+                self.execute(Command::SetPlotSpec { graph, spec });
+                true
+            }
+            Err(message) => {
+                self.fail(message);
+                false
+            }
         }
+    }
+
+    /// The second step of an add (#529, L5): the series just added goes
+    /// beyond the written ranges, so the exceeded sides widen at once, with the
+    /// margins, as a history entry of their own ([`PlotEditKind::WidenRanges`]).
+    /// The first Ctrl+Z restores the old ranges and keeps the series, the second
+    /// removes it. Nothing exceeded: no step, no message. Sent only after the
+    /// add is done and closed (never inside a macro: it would join the entry of
+    /// the add), and not while a recalculation runs: the values may be stale.
+    /// `pyst` adds a series without it.
+    pub(crate) fn widen_after_add(&mut self, graph: NodeId, before: Option<PlotSpec>) {
+        if self.gesture_failed()
+            || self.snapshot.history.in_macro
+            || (self.recalc_since.is_some() && self.handle.recalc_running().is_some())
+        {
+            return;
+        }
+        let Some(spec) = self.plot_spec(graph) else {
+            return;
+        };
+        let before = before.unwrap_or_else(|| spec.clone());
+        let Some(widened) =
+            crate::widen::widen_to_data(&self.snapshot.tree, &before, &spec, self.auto_margins())
+        else {
+            return;
+        };
+        self.execute(Command::EditPlotSpec {
+            graph,
+            spec: widened.spec,
+            kind: PlotEditKind::WidenRanges,
+        });
+        if self.gesture_failed() {
+            return;
+        }
+        use crate::widen::WidenedAxis;
+        let axes = widened
+            .axes
+            .iter()
+            .map(|axis| match axis {
+                WidenedAxis::X => tr!("widen-axis-x"),
+                WidenedAxis::Y => tr!("widen-axis-y"),
+                WidenedAxis::TopX => tr!("widen-axis-top-x"),
+                WidenedAxis::RightY => tr!("widen-axis-right-y"),
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.warn(tr!(
+            "status-axes-widened",
+            count = widened.axes.len(),
+            axes = axes
+        ));
     }
 
     /// The body of [`Self::add_series_to_graph`], on a spec: plans the series
@@ -12519,25 +12717,25 @@ impl AppState {
         sheet: NodeId,
         rows: Vec<usize>,
         axis: RowAxis,
-    ) {
+    ) -> bool {
         let Some(mut spec) = current_plot_spec(&self.snapshot.tree, graph) else {
             self.fail(tr!("error-graph-gone"));
-            return;
+            return false;
         };
         if spec.panels.get(panel).is_none() {
             self.fail(tr!("error-layer-gone"));
-            return;
+            return false;
         }
         let Some(&anchor) = x_prime_columns(&self.snapshot.tree, sheet).first() else {
             self.fail(crate::tr!("status-row-no-x-prime"));
-            return;
+            return false;
         };
         let row_count = self.row_count(sheet);
         let mut rows: Vec<usize> = rows.into_iter().filter(|row| *row < row_count).collect();
         rows.sort_unstable();
         rows.dedup();
         if rows.is_empty() {
-            return;
+            return false;
         }
         let axis = match axis {
             RowAxis::Ask if spec_has_x(&spec) => {
@@ -12547,7 +12745,7 @@ impl AppState {
                     sheet,
                     rows,
                 });
-                return;
+                return false;
             }
             RowAxis::Ask => RowAxis::Present,
             chosen => chosen,
@@ -12556,7 +12754,7 @@ impl AppState {
             RowAxis::New => {
                 let base = overlay_base(&spec, panel);
                 let Some(base_panel) = spec.panels.get(base).cloned() else {
-                    return;
+                    return false;
                 };
                 spec.panels
                     .push(PanelSpec::overlay_on(&base_panel, OverlaySpec::TOP_X));
@@ -12569,7 +12767,7 @@ impl AppState {
             .get(panel)
             .map_or(PlotType::Line, panel_plot_type);
         let Some(layer) = spec.panels.get_mut(target) else {
-            return;
+            return false;
         };
         let start = layer.series.len();
         layer.push_series_batch(row_series(
@@ -12581,6 +12779,7 @@ impl AppState {
         ));
         cell_sides::switch_off_mirrors_under_overlays(&mut spec);
         self.execute(Command::SetPlotSpec { graph, spec });
+        true
     }
 
     /// [`Action::PlotRows`]: a new graph, in the folder of the workbook of
@@ -12628,13 +12827,16 @@ impl AppState {
             return;
         };
         if let Some(axis) = choice.filter(|axis| *axis != RowAxis::Ask) {
-            self.add_rows_to_graph(
+            let before = self.plot_spec(pending.graph);
+            if self.add_rows_to_graph(
                 pending.graph,
                 pending.panel,
                 pending.sheet,
                 pending.rows,
                 axis,
-            );
+            ) {
+                self.widen_after_add(pending.graph, before);
+            }
         }
     }
 

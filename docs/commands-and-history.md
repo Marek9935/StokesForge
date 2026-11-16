@@ -297,7 +297,7 @@ legacy graph (no stored frame) is given the frames it is drawn with **in that
 same command**, never in a separate step and never at load: any
 `SetPlotSpec` / `EditPlotSpec` / `AddGraph` that goes through `AppState::execute`
 (or `bridge::set_graph_spec` for `pyst`) carries them, so Undo returns to the
-legacy file as it was. The mouse gestures of #394, #405 and #398 (cell boundary, figure edge, layer move) are gone (#426): `Action::SetFrameSizes`, `SetFigureOffsets`, `SetFreeFrame` and `PlotEditKind::PlaceFigure` no longer exist.
+legacy file as it was. The same door freezes the automatic axis ranges (#529): `AppState::freeze_auto_ranges` (`pyst`: `bridge::freeze_ranges`) writes the range drawn now, with the user's margins, into every Auto axis that has data (`stokesforge_render_svg::freeze_auto_ranges`), in the very command of the gesture and so in the same history step; it reads the snapshot, so it does nothing while a recalculation runs (a formula column would give stale values, invariant 11) and the axis freezes at the next command. **Two steps on an add (#529, L5)**: a series added to an existing graph (`AddSeriesToGraph`, `AddRowsToGraph` and its `ConfirmRowDrop`, an analysis result plotted on its graph) that takes the data beyond a written range is followed by a **second** `EditPlotSpec` (`PlotEditKind::WidenRanges`, « Widen Axis Ranges », `AppState::widen_after_add`, `stokesforge_app_state::widen`): only the exceeded side moves, to the automatic bound with the margins; the first Ctrl+Z gives the old ranges back and keeps the series, the second removes it. It is never inside the add's own command and never inside a macro: the analysis macro is closed first, otherwise the widening would join its entry. Nothing exceeded, no step and no message; `pyst` never widens. A new cell (`AddCell`) is framed fresh, so it has nothing to widen. **Load (#529, L4)**: `Request::Load` takes an opaque normaliser built by `AppState::load` (`frame_sizes::freeze_loaded_graphs`) that writes the Auto ranges of the loaded project once, with no history (invariants § 1); the project counts as modified only when a graph was written. The mouse gestures of #394, #405 and #398 (cell boundary, figure edge, layer move) are gone (#426): `Action::SetFrameSizes`, `SetFigureOffsets`, `SetFreeFrame` and `PlotEditKind::PlaceFigure` no longer exist.
 `Action::SetGridFrames` (#426) = the whole grid's frame sizes in ONE `EditPlotSpec` (`ResizeCell`, or `ResizeFigure` for an L corner, which adds or removes empty space, K1; `Action::FitLayoutToPage` is `FitLayout`).
 `Action::SetFreeLayout` (#426) = several frames of a free graph and its page in ONE `EditPlotSpec`: `PlotEditKind::ResizeFigure` ("Resize Figure") when the page size changes (against the stored page, or the figure as drawn when there is none), `ResizeLayer` when a frame size changes, else `MoveLayer`; nothing sent on the grid, for a missing layer or when nothing changes; one Undo gives back every frame and the page.
 "Figure size",
@@ -326,6 +326,16 @@ Manager; a drop between two rows is a `MoveObjects` group made of `SetFolderOrde
 `stokesforge-app-state::column_move::plan`, index counted **after removal**, a
 single `execute` with no macro for one column); an intermediate failure aborts
 the whole group. These labels stay data and are not recorded in the `.stf`.
+
+Applying a graph theme to N graphs is the group `MacroKind::ApplyTheme` (#538):
+`Action::ApplyTheme` computes, for each graph, the spec the theme gives
+(`stokesforge_app_state::theme_apply::themed_spec`), keeps the graphs whose spec
+really changes and sends one `Command::SetPlotSpec` per graph inside the group,
+so one Undo restores them all. Nothing changes, nothing is pushed (no empty
+group). `SetPlotSpec` already fixes the frames of a legacy graph and freezes the
+automatic ranges when it executes (`with_fixed_frames`): the theme code does not
+redo it. The group is closed in the same call, so it never stays open next to
+the Graph Properties macro (`begin_macro` refuses and the error is shown).
 
 What is inside the copy reads the copy (#391): after the node loop,
 `insert_copy` renumbers the series of copied graphs (x, y, errors), the formulas

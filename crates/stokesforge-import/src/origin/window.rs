@@ -91,6 +91,16 @@ fn read_layer(blocks: &mut Blocks, header: &[u8]) -> Result<Layer, OriginError> 
 }
 
 fn curve(header: &[u8], data: &[u8]) -> Curve {
+    curve_from(
+        header,
+        cstr(header, 0x12, usize::MAX),
+        &cstr(data, 0, data.len()),
+    )
+}
+
+/// A curve from its header (designation at 0x11), its short name and its
+/// text `LongName\r\nUnit[\r\nComment]`; shared with the `.opju` reader.
+pub(crate) fn curve_from(header: &[u8], short_name: String, text: &str) -> Curve {
     let designation = match header.get(0x11) {
         Some(3) => OriginDesignation::X,
         Some(0) => OriginDesignation::Y,
@@ -100,15 +110,13 @@ fn curve(header: &[u8], data: &[u8]) -> Curve {
         Some(4) => OriginDesignation::Label,
         _ => OriginDesignation::Disregard,
     };
-    // `LongName\r\nUnit[\r\nComment]`
-    let text = cstr(data, 0, data.len());
     let mut parts = text.split("\r\n");
     let long_name = parts.next().unwrap_or("").to_string();
     let unit = parts.next().unwrap_or("").to_string();
     let comment = parts.collect::<Vec<_>>().join("\r\n");
     Curve {
         designation,
-        short_name: cstr(header, 0x12, usize::MAX),
+        short_name,
         long_name,
         unit,
         comment,

@@ -7943,10 +7943,12 @@ fn dropping_rows_on_a_graph_with_x_asks_which_axis() {
     assert_eq!(state.pending_row_drop(), None);
     let spec = state.plot_spec(graph).unwrap();
     assert_eq!(spec.panels.len(), 2, "one more layer");
-    assert_eq!(
-        spec.panels[0], before.panels[0],
-        "the original layer is intact"
-    );
+    // The new layer shares the Y axis of the covered one (#529, L5): the row
+    // (Y 3..9) goes above the written range, so that axis, and only it, widened.
+    let mut base = spec.panels[0].clone();
+    assert!(base.left.range_max > before.panels[0].left.range_max);
+    base.left = before.panels[0].left.clone();
+    assert_eq!(base, before.panels[0], "the rest of the original layer");
     assert!(spec.panels[1]
         .overlay
         .is_some_and(|o| o.x_top && !o.y_right));
@@ -7954,9 +7956,20 @@ fn dropping_rows_on_a_graph_with_x_asks_which_axis() {
     assert_eq!(spec.panels[1].series[0].row, Some(2));
     state.dispatch(Action::Undo);
     assert_eq!(
+        state.plot_spec(graph).unwrap().panels.len(),
+        2,
+        "layer kept"
+    );
+    assert_eq!(
+        state.plot_spec(graph).unwrap().panels[0],
+        before.panels[0],
+        "the first step gives the ranges back"
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(
         state.plot_spec(graph).unwrap(),
         before,
-        "a single step, layer included"
+        "the second step takes the layer"
     );
 
     // Present axis: the series join the targeted layer, without a new layer.
@@ -7993,6 +8006,9 @@ fn a_new_overlay_axis_switches_the_displayed_mirror_off_in_the_same_undo_step() 
     assert_eq!(spec.panels.len(), 2);
     assert!(!spec.panels[0].top.mirror, "the overlay axis wins");
 
+    // The row also widened the shared Y (#529, L5): that is a step of its own,
+    // undone first; the next Undo gives the layer and the mirror back.
+    state.dispatch(Action::Undo);
     state.dispatch(Action::Undo);
     assert_eq!(state.plot_spec(graph).unwrap(), before, "both come back");
 }
@@ -12497,7 +12513,12 @@ fn object_manager_deletes_a_curve_without_touching_the_data() {
     let drawn = layout_of(&before);
     after.frame_widths = drawn.frame_widths;
     after.frame_heights = drawn.frame_heights;
-    assert_eq!(graph_spec(&state, graph), after);
+    // The edit also writes the Auto ranges that have data (#529).
+    let written = graph_spec(&state, graph);
+    assert!(!written.panels[0].bottom.auto_range && !written.panels[0].left.auto_range);
+    after.panels.get_mut(0).unwrap().bottom = written.panels[0].bottom.clone();
+    after.panels.get_mut(0).unwrap().left = written.panels[0].left.clone();
+    assert_eq!(written, after);
     let model = object_tree(state.tree(), graph, None).unwrap();
     assert_eq!(model.layers[0].series.len(), 1);
     assert_eq!(model.layers[0].series[0].label, "Second series");
@@ -18311,6 +18332,249 @@ mod origin_import {
         assert!(!sheets[2].contains('!'), "{sheets:?}");
     }
 
+    fn write_opju(path: &Path, books: Vec<synthetic::Book>, bad_annotation: Option<usize>) {
+        let bytes = synthetic::write_opju(&synthetic::Project {
+            books,
+            opju_bad_annotation: bad_annotation,
+            ..synthetic::Project::default()
+        });
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    type ImportedContent = Vec<(String, Vec<(String, Vec<u64>)>)>;
+
+    /// Every root workbook: its sheets, each with the first three values of
+    /// its first column.
+    fn imported_content(state: &AppState) -> ImportedContent {
+        let mut out = Vec::new();
+        for name in root_names(state) {
+            let book = book_named(state.tree(), &name);
+            let sheets = state
+                .worksheets_of(book)
+                .into_iter()
+                .map(|(id, sheet_name)| {
+                    let first = state.visible_columns(id)[0].0;
+                    let n = 3;
+                    // Bit patterns: a missing cell is NaN, which is never equal to itself.
+                    let values = (0..n)
+                        .map(|row| cell_f64(state, first, row).to_bits())
+                        .collect();
+                    (sheet_name, values)
+                })
+                .collect();
+            out.push((name, sheets));
+        }
+        out
+    }
+
+    #[test]
+    fn an_opju_goes_to_the_chooser_and_imports_like_its_opj_twin() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let opj_dir = dir.path().join("a");
+        let opju_dir = dir.path().join("b");
+        std::fs::create_dir_all(&opj_dir).unwrap();
+        std::fs::create_dir_all(&opju_dir).unwrap();
+        let mut results = Vec::new();
+        for (path, is_opju) in [
+            (opj_dir.join("kinetics.opj"), false),
+            (opju_dir.join("kinetics.opju"), true),
+        ] {
+            let (_session, mut state) = start_demo(dir.path());
+            if is_opju {
+                write_opju(&path, standard_books(), None);
+            } else {
+                write_opj(&path, standard_books());
+            }
+            drop_paths(&mut state, vec![path.clone()]);
+            assert!(state.origin_import_open(), "{}", path.display());
+            assert!(
+                state.import_state().is_none(),
+                "an .opju never reaches the text wizard"
+            );
+            assert!(!state.origin_import_files()[0].partial);
+            state.dispatch(Action::ImportOrigin);
+            no_red_message_ever(&state);
+            assert_eq!(state.take_imported_paths(), vec![path]);
+            results.push(imported_content(&state));
+        }
+        assert_eq!(results[0], results[1]);
+        assert!(results[0].iter().any(|(name, _)| name == "Kinetics"));
+    }
+
+    #[test]
+    fn the_chooser_says_when_part_of_an_opju_could_not_be_read() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let whole = dir.path().join("whole.opju");
+        write_opju(&whole, standard_books(), None);
+        let cut = dir.path().join("cut.opju");
+        write_opju(&cut, standard_books(), Some(1));
+        let opj = standard_opj(dir.path(), "kinetics.opj");
+
+        drop_paths(&mut state, vec![whole, cut, opj]);
+
+        let partial: Vec<bool> = state
+            .origin_import_files()
+            .iter()
+            .map(|file| file.partial)
+            .collect();
+        assert_eq!(partial, vec![false, true, false]);
+    }
+
+    #[test]
+    fn importing_a_partial_opju_ends_on_a_warning_that_names_the_partial_read() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let whole = dir.path().join("whole.opju");
+        write_opju(&whole, standard_books(), None);
+        let cut = dir.path().join("cut.opju");
+        write_opju(&cut, standard_books(), Some(1));
+
+        drop_paths(&mut state, vec![whole.clone()]);
+        state.dispatch(Action::ImportOrigin);
+        let status = state.status().unwrap();
+        assert_eq!(status.level, StatusLevel::Info, "a whole file: no warning");
+
+        drop_paths(&mut state, vec![cut]);
+        state.dispatch(Action::ImportOrigin);
+        let status = state.status().unwrap();
+        assert_eq!(status.level, StatusLevel::Warning, "{}", status.text);
+        assert_eq!(status.text, tr!("status-import-origin-partial", books = 2));
+    }
+
+    #[test]
+    fn the_unnamed_sheets_of_a_partial_opju_are_sheet1_sheet2_in_the_chooser_and_the_workbook() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let mut books = standard_books();
+        books[1] = book(
+            "B",
+            "Kinetics",
+            vec![
+                sheet(
+                    "Alpha",
+                    vec![column("T", OriginDesignation::X, &[0.0, 1.0])],
+                ),
+                sheet("Beta", vec![column("S", OriginDesignation::Y, &[4.0, 5.0])]),
+            ],
+        );
+        let cut = dir.path().join("cut.opju");
+        write_opju(&cut, books, Some(1));
+        drop_paths(&mut state, vec![cut]);
+
+        let files = state.origin_import_files();
+        let names = |b: usize| -> Vec<String> {
+            files[0].books[b]
+                .sheets
+                .iter()
+                .map(|s| s.name.clone())
+                .collect()
+        };
+        assert_eq!(
+            names(0),
+            ["Graph", "Data", "Note"],
+            "a named sheet keeps its name"
+        );
+        assert_eq!(names(1), ["Sheet1", "Sheet2"]);
+
+        state.dispatch(Action::ToggleOriginSheet {
+            file: 0,
+            book: 1,
+            sheet: 0,
+        });
+        state.dispatch(Action::ToggleOriginSheet {
+            file: 0,
+            book: 1,
+            sheet: 1,
+        });
+        state.dispatch(Action::ImportOrigin);
+        let content = imported_content(&state);
+        // The book the cut section did not describe has no long name left.
+        let sheet_names: Vec<&str> = content
+            .iter()
+            .flat_map(|(_, sheets)| sheets.iter().map(|(n, _)| n.as_str()))
+            .filter(|name| name.starts_with("Sheet"))
+            .collect();
+        assert_eq!(sheet_names, ["Sheet1", "Sheet2"]);
+    }
+
+    #[test]
+    fn importing_a_partial_opju_is_one_undo_entry_and_no_error() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let cut = dir.path().join("cut.opju");
+        write_opju(&cut, standard_books(), Some(1));
+        let tree_before = state.tree().clone();
+        let probe = history_len_probe(&state);
+        drop_paths(&mut state, vec![cut]);
+        assert!(state.origin_import_files()[0].partial);
+
+        let books_before = root_names(&state).len();
+        state.dispatch(Action::ImportOrigin);
+
+        no_red_message_ever(&state);
+        assert!(!same_tree(&state, &tree_before));
+        // The book the cut window section did not describe is still imported.
+        assert_eq!(root_names(&state).len(), books_before + 2);
+        assert_eq!(
+            state.undo_label().unwrap(),
+            tr!(
+                "history-undo-entry",
+                label = history_text(&HistoryLabel::Macro(MacroKind::Import))
+            )
+        );
+        state.dispatch(Action::Undo);
+        assert!(same_tree(&state, &tree_before));
+        assert_eq!(history_len_probe(&state), probe, "no second entry left");
+    }
+
+    #[test]
+    fn a_truncated_opju_gives_the_origin_sentence_and_no_chooser() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let cut = dir.path().join("cut.opju");
+        let bytes = synthetic::write_opju(&synthetic::Project {
+            books: standard_books(),
+            ..synthetic::Project::default()
+        });
+        std::fs::write(&cut, &bytes[..synthetic::FIRST_DATASET_OFFSET + 3]).unwrap();
+        let probe = history_len_probe(&state);
+
+        drop_paths(&mut state, vec![cut]);
+
+        assert!(!state.origin_import_open());
+        let status = state.status().unwrap();
+        assert!(status.is_error());
+        assert!(status.text.contains("cut.opju"), "{}", status.text);
+        assert!(
+            !status.text.to_lowercase().contains("offset"),
+            "the raw Display leaked: {}",
+            status.text
+        );
+        assert_eq!(history_len_probe(&state), probe, "no empty Import entry");
+    }
+
+    #[test]
+    fn an_opju_renamed_dat_is_dropped_into_the_chooser() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let renamed = dir.path().join("measure.dat");
+        write_opju(&renamed, standard_books(), None);
+
+        drop_paths(&mut state, vec![renamed]);
+
+        assert!(state.origin_import_open());
+        assert!(state.import_state().is_none(), "never the text wizard");
+        no_red_message_ever(&state);
+    }
+
     #[test]
     fn cancelling_leaves_the_history_and_the_project_alone() {
         let _recipes = isolate_recipe_store();
@@ -19964,4 +20228,107 @@ fn editing_the_frames_never_stores_a_bound_text() {
     .expect("fit");
     assert_eq!(draft.title, "#ln");
     assert_eq!(draft.panels[0].left.label, "#ln");
+}
+
+/// #529: the margins of the automatic framing are a preference of the user:
+/// 0 / 0 / 1 / 5 by default, remembered across sessions, held to 0..=100.
+#[test]
+fn the_auto_margins_are_a_remembered_preference_with_defaults() {
+    use stokesforge_render::AutoMargins;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (session, _state, _sheet, _columns) = kinetics(dir.path());
+    let file = dir.path().join("preferences.json");
+    let mut state = state_on_preferences(&session, dir.path(), &file);
+    assert_eq!(
+        state.auto_margins(),
+        AutoMargins {
+            left: 0.0,
+            right: 0.0,
+            bottom: 1.0,
+            top: 5.0
+        }
+    );
+    state.dispatch(Action::SetAutoMargins(AutoMargins {
+        left: 2.0,
+        right: 3.0,
+        bottom: 0.5,
+        top: 150.0,
+    }));
+    assert_eq!(state.auto_margins().top, 100.0, "held to 0..=100");
+    let next = state_on_preferences(&session, dir.path(), &file);
+    assert_eq!(next.auto_margins().left, 2.0);
+    assert_eq!(next.auto_margins().bottom, 0.5);
+}
+
+/// #529, L5: rows dropped on a graph that go beyond its written ranges widen
+/// the exceeded side in a second step; the first Ctrl+Z keeps the rows.
+#[test]
+fn dropping_rows_beyond_the_ranges_widens_them_in_a_second_step() {
+    use stokesforge_commands::{HistoryLabel, PlotEditKind};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, sheet, _) = kinetics(dir.path());
+    state.dispatch(Action::AddGraph);
+    let root = state.tree().root();
+    let graph = *state.tree().node(root).unwrap().children().last().unwrap();
+    let drop = |state: &mut AppState, row: usize| {
+        state.dispatch(Action::AddRowsToGraph {
+            graph,
+            panel: 0,
+            sheet,
+            rows: vec![row],
+            axis: RowAxis::Present,
+        });
+    };
+    // Row 0 reads 1, 4, 7: the first drop writes the ranges.
+    drop(&mut state, 0);
+    let first = state.plot_spec(graph).unwrap();
+    let top = first.panels[0].left.range_max.expect("written");
+    assert!(!first.panels[0].left.auto_range && top < 9.0);
+    // Row 2 reads 3, 6, 9: above the top.
+    drop(&mut state, 2);
+    let widened = state.plot_spec(graph).unwrap();
+    assert_eq!(widened.panels[0].series.len(), 2);
+    assert!(widened.panels[0].left.range_max.unwrap() >= 9.0);
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(PlotEditKind::WidenRanges))
+    );
+    assert_eq!(
+        state.status().map(|m| m.level),
+        Some(stokesforge_app_state::state::StatusLevel::Warning)
+    );
+    state.dispatch(Action::Undo);
+    let kept = state.plot_spec(graph).unwrap();
+    assert_eq!(kept.panels[0].series.len(), 2, "the rows stay");
+    assert_eq!(kept.panels[0].left.range_max, Some(top));
+}
+
+/// #538: a theme applied to two graphs is one undo step, one undo restores both.
+#[test]
+fn applying_a_theme_to_two_graphs_is_one_undo_step() {
+    use stokesforge_plot::{GraphTheme, ThemeFamilies, THEMES};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, _sheet, _columns) = kinetics(dir.path());
+    state.dispatch(Action::AddGraph);
+    state.dispatch(Action::AddGraph);
+    let graphs: Vec<_> = state.graphs().into_iter().map(|(id, _)| id).collect();
+    assert_eq!(graphs.len(), 2);
+    let specs = |state: &AppState| -> Vec<_> {
+        graphs
+            .iter()
+            .map(|g| state.plot_spec(*g).expect("a graph"))
+            .collect()
+    };
+    let before = specs(&state);
+    state.dispatch(Action::ApplyTheme {
+        theme: GraphTheme::from_colors("Dark", &THEMES[1]),
+        families: ThemeFamilies::all(),
+        graphs: graphs.clone(),
+        add_missing_layers: false,
+    });
+    assert!(specs(&state)
+        .iter()
+        .all(|spec| spec.background == "#1e1e1e"));
+    state.dispatch(Action::Undo);
+    assert_eq!(specs(&state), before);
 }

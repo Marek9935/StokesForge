@@ -74,7 +74,7 @@ pub use pdf::{document_to_pdf, render_to_pdf, render_to_pdf_file, PdfError};
 pub use png::{document_to_png, render_to_png, render_to_png_file, PngError};
 pub use stokesforge_render::pipeline::{FittedFigure, FittedFrames, SizeAxis};
 pub use stokesforge_render::text::{font_definitions, TextMeasurer as SvgTextMeasurer};
-pub use stokesforge_render::{bind_spec, FigureTexts, FontChoice};
+pub use stokesforge_render::{bind_spec, AutoMargins, FigureTexts, FontChoice};
 
 /// Size of the figure of a graph that records no cell size and has no title,
 /// in SVG units: [`pipeline::DEFAULT_FIGURE_SIZE`]. **Not the size to export
@@ -173,6 +173,103 @@ pub fn fix_legacy_frames(
     target.frame_widths = widths;
     target.frame_heights = heights;
     Ok(true)
+}
+
+/// Freezes the automatic axis ranges of `spec` (#529): draws it once, with the
+/// export's own measurement and the user's `margins`, and writes the ranges
+/// drawn into every axis still on Auto (From/To in data space, in the order of the
+/// axis direction, and `auto_range = false`). The graph then no longer moves, neither with the
+/// preferences nor with a new version. It draws (it does not call the framing
+/// alone) so that the range written is the single one the drawing used, on
+/// the export's own measurement.
+///
+/// Written: `bottom` and `left` of a layer that owns that axis, `right` only
+/// when drawn. An axis with no data to frame stays on Auto: it freezes at the
+/// first command that gives it some. An inverted axis keeps its `inverted`
+/// flag and its bounds follow [`stokesforge_plot::AxisSpec::orient`] (the two
+/// never add up). `tree` resolves
+/// the series and binds the text variables (#501); only ranges are written into
+/// `spec`. `true` if something was written.
+pub fn freeze_auto_ranges(
+    tree: &Tree,
+    spec: &mut PlotSpec,
+    margins: stokesforge_render::AutoMargins,
+    measurer: &TextMeasurer,
+    choice: &stokesforge_render::FontChoice,
+) -> Result<bool, SvgError> {
+    if !spec
+        .panels
+        .iter()
+        .any(|p| p.bottom.auto_range || p.left.auto_range || p.right.auto_range)
+    {
+        return Ok(false);
+    }
+    let texts = FigureTexts::default().with_margins(margins);
+    let bound = bind_spec(tree, spec, &texts);
+    let size = figure_size(&bound, measurer, choice);
+    let plot = resolve_spec(tree, &bound);
+    let drawn = draw_geometry(&plot, size, measurer, choice, &texts)?;
+    let mut written = false;
+    for panel in &drawn.panels {
+        let Some(target) = spec.panels.get_mut(panel.index) else {
+            continue;
+        };
+        let x_own = panel.overlay.is_none_or(|o| o.x_top);
+        let y_own = panel.overlay.is_none_or(|o| o.y_right);
+        if x_own && panel.has_data.x {
+            written |= freeze_axis(&mut target.bottom, panel.x_range);
+        }
+        if y_own && panel.has_data.y {
+            written |= freeze_axis(&mut target.left, panel.y_range);
+        }
+        if let (Some(range), true) = (panel.y2_range, panel.has_data.y2) {
+            written |= freeze_axis(&mut target.right, range);
+        }
+    }
+    Ok(written)
+}
+
+/// Writes `drawn` (in drawing order, so possibly decreasing) into `axis` if it
+/// is on Auto and the range is usable.
+fn freeze_axis(axis: &mut stokesforge_plot::AxisSpec, drawn: (f64, f64)) -> bool {
+    if !axis.auto_range || !drawn.0.is_finite() || !drawn.1.is_finite() || drawn.0 == drawn.1 {
+        return false;
+    }
+    axis.auto_range = false;
+    axis.range_min = Some(drawn.0.min(drawn.1));
+    axis.range_max = Some(drawn.0.max(drawn.1));
+    // The stored order follows the direction, like the From and To fields.
+    *axis = axis.orient();
+    true
+}
+
+/// Draws `plot` once on a throwaway SVG backend that measures like the export
+/// (Typst included when a title is there) and returns the geometry.
+fn draw_geometry(
+    plot: &ResolvedPlot<'_>,
+    size: (u32, u32),
+    measurer: &TextMeasurer,
+    choice: &stokesforge_render::FontChoice,
+    texts: &FigureTexts,
+) -> Result<DrawnPlot, SvgError> {
+    let spec = plot.spec;
+    let mut buffer = String::new();
+    let titled = (spec.title_visible && !spec.title.is_empty())
+        || spec
+            .panels
+            .iter()
+            .any(|panel| panel.title_visible && !panel.title.is_empty());
+    if !titled {
+        let backend = MeasuredSvgBackend::with_string(&mut buffer, size, measurer);
+        return Ok(pipeline::draw_with_texts(backend, plot, texts)?);
+    }
+    let cache = stokesforge_render::formula::FormulaCache::new();
+    let mode = SvgTextMode::Text;
+    let typst = typst_export::TypstExport::new(&cache, choice, mode).map_err(SvgError::Typst)?;
+    let backend = MeasuredSvgBackend::with_string(&mut buffer, size, measurer)
+        .with_typst(&typst)
+        .with_font(choice, mode);
+    Ok(pipeline::draw_with_texts(backend, plot, texts)?)
 }
 
 /// The free frames a graph on the grid would keep in free placement (#398),

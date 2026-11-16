@@ -615,6 +615,7 @@ history-macro-remove-formula = Remove Formula
 history-macro-delete-columns = Delete Columns
 history-macro-move-columns = Move Columns
 history-macro-analyze-rows = Analyze Rows
+history-macro-apply-theme = Apply Theme
 history-transpose-rows = Transpose Rows
 history-recalculate-transpose = Recalculate Transposed Sheet
 history-transpose-auto-on = Check Recalculate Automatically
@@ -678,7 +679,9 @@ error-import-no-data = No data found after the header. Check the number of heade
 error-import-whitespace-thousands = A space cannot both separate the columns and group the thousands. Choose another delimiter or another thousands separator
 error-import-file = { $path }: { $detail }
 error-import-origin-not-origin = The file is not an Origin project
-error-import-origin-opju = Origin files in the .opju format cannot be opened yet. Save the project as .opj from Origin 2018 to 2022b, or open it in the free Origin Viewer and save it as .opj
+error-import-origin-opju-unsupported = This .opju file uses a part of the format StokesForge cannot read yet. Open it in the free Origin Viewer and save it as .opj (Origin 2018 to 2022b can also save .opj)
+error-import-origin-too-many-cells = The Origin file looks damaged: it announces more data than it can hold
+error-import-origin-too-much-text = The Origin file looks damaged: it announces more text than it can hold
 error-import-origin-version = This Origin file was saved by a version StokesForge cannot read
 error-import-origin-truncated = The Origin file is incomplete. It may have been cut short by a copy or a download
 error-import-origin-bad-structure = The Origin file is damaged: its structure is not valid
@@ -888,8 +891,7 @@ plot-axes-log-scale =
     .hint = Base-10 logarithm
 plot-axes-from = From
 plot-axes-from-auto = Auto
-    .hint = Bounds follow the data again. The axis keeps its direction
-    .disabled = The bounds already follow the data
+    .hint = Computes the range from the data now, with the margins of Preferences > Display > Graphs, and writes it in From and to. It no longer follows the data. The axis keeps its direction
 plot-axes-display-section = Display
 plot-axes-decimal-comma = Decimal comma on tick labels
     .hint = Writes 1,5 instead of 1.5 on every axis of this graph, on screen and in exports
@@ -1503,6 +1505,7 @@ history-plot-legend-text = Change Legend Text
 history-plot-color-bar = Change Color Bar
 history-plot-fit-page = Fit Page to Layout
 history-plot-fit-layout = Fit Layout to Page
+history-plot-widen-ranges = Widen Axis Ranges
 
 # Fixed panels and detached windows (#100)
 panel-expand = Expand the panel
@@ -1995,6 +1998,7 @@ error-columns-group = Could not change the columns
 error-create-group = Could not create the objects
 error-import-group = Could not import the files
 error-group-close = Could not complete the operation as a single undo step: { $cause }
+error-theme-undo-group = The theme could not be applied as a single undo step: { $cause }
 error-paste-no-cell = Select a cell to paste into
 status-paste-absolute-empty = Nothing to paste as absolute: copy from the grid first
 status-import-done = { $imported ->
@@ -2030,6 +2034,10 @@ status-import-origin-done = Imported { $sheets ->
     [one] { $books } workbook
    *[other] { $books } workbooks
     }
+status-import-origin-partial = Imported { $books ->
+    [one] { $books } workbook
+   *[other] { $books } workbooks
+}; part of the file could not be read
 status-import-origin-left-wizard = { $count ->
     [one] The Origin file was
    *[other] { $count } Origin files were
@@ -2047,6 +2055,7 @@ origin-import-summary = To create: { $sheets ->
     [one] { $books } workbook
    *[other] { $books } workbooks
     }
+origin-import-partial = Part of this file could not be read: some workbooks keep their data but lose long names, units and X/Y roles
 origin-import-accept =
     Import
     .hint = Creates a workbook for each checked workbook of the list (Enter)
@@ -2149,6 +2158,17 @@ preferences-display = Display
 preferences-display-interface = Interface
 preferences-display-object-manager = Object Manager
 preferences-display-new = New
+preferences-display-graphs = Graphs
+preferences-graphs-auto-range = Automatic axis range
+preferences-graphs-auto-range-note = Empty space left around the data when an axis is automatic, in % of the data extent. A new graph writes its ranges once with these values; graphs that already exist keep theirs. Logarithmic axes are not affected.
+preferences-graphs-margin-left = Left (%)
+    .hint = Empty space at the left edge of the plot area, in % of the data extent. A new graph writes its ranges once. Default 0.
+preferences-graphs-margin-right = Right (%)
+    .hint = Empty space at the right edge of the plot area, in % of the data extent. A new graph writes its ranges once. Default 0.
+preferences-graphs-margin-bottom = Bottom (%)
+    .hint = Empty space at the bottom edge of the plot area, in % of the data extent, even on a reversed axis. A new graph writes its ranges once. Default 1.
+preferences-graphs-margin-top = Top (%)
+    .hint = Empty space at the top edge of the plot area, in % of the data extent, even on a reversed axis. A new graph writes its ranges once. Default 5.
 preferences-show-formula-help = Show formula syntax help
     .hint = Shows the "?" icon next to the text fields that accept a formula (titles, labels, units). Hidden, the fields keep their own reminder.
 preferences-show-column-formula-help = Show F(x)= help
@@ -2300,6 +2320,20 @@ status-import-stopped = Import stopped. Nothing was imported
 status-recalculating = Recalculating…
 status-page-edge-reached = Page edge reached: drag a corner to enlarge the page
 status-figure-grew = The image grew beyond the room kept by the Fixed figure size. The plot area kept its size
+status-ranges-written =
+    { $count ->
+        [one] The axis range of { $count } graph was written from the data. Save to keep it
+       *[other] The axis ranges of { $count } graphs were written from the data. Save to keep them
+    }
+status-axes-widened =
+    { $count ->
+        [one] Widened the { $axes } axis to show the new series. Ctrl+Z undoes the new range
+       *[other] Widened the { $axes } axes to show the new series. Ctrl+Z undoes the new ranges
+    }
+widen-axis-x = X
+widen-axis-y = Y
+widen-axis-top-x = top X
+widen-axis-right-y = right Y
 status-recalc-stopped = Recalculation stopped. The change was undone
 
 analysis-baseline-constant = Constant…

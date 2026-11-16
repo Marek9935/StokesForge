@@ -147,8 +147,27 @@ so `Cargo.lock`, `deny.toml` and `vendor/crate-license-notices/` do not see
 it: its copyright lines are kept in the header of each ported file and in
 [`vendor/liborigin/NOTICE`](../vendor/liborigin/NOTICE), which
 `scripts/licenses-dist.sh` copies to `licenses/liborigin/`. No liborigin file
-is shipped. A further port from another reader (for `.opju`, the
-Apache-2.0 reader `quantized` was considered) would get its own section here.
+is shipped.
+
+## Origin `.opju` reader (#492)
+
+The reader of Origin `.opju` files (`CPYUA` container, Origin 2018 and later:
+`opju.rs`, `opju_cells.rs`, `opju_codec.rs` beside the `.opj` reader) is
+original work: the container grammar was reverse-engineered on real files and
+is documented in the module docs. It ports nothing from liborigin, so those
+files carry no liborigin copyright lines. Two outside sources are involved:
+
+- **FPC**, the floating-point compression of the cell values, is a published
+  algorithm (M. Burtscher and P. Ratanaworabhan, "FPC: A High-Speed Compressor
+  for Double-Precision Floating-Point Data", IEEE Transactions on Computers,
+  2009). The decoder is written from the paper's description.
+- The **FPC parameters** (two 4096-entry tables, the hashes), the **segment
+  grammar** of the cell block and the **value tags** were first documented by
+  the Apache-2.0 project quantized
+  (<https://github.com/pquarterman17/quantized>, (c) 2026 Paige Quarterman,
+  `docs/origin_project_format.md` section 3.3). Only those facts were used:
+  none of its code or text is copied, so no Apache-2.0 `NOTICE` is shipped.
+  The credit is kept in the header of each `.opju` file.
 
 ## Contributions
 

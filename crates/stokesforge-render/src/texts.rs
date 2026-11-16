@@ -11,6 +11,7 @@
 //! legend text is measured once and decides the frame, so a screen drawn with
 //! one language and an export with another would disagree silently.
 
+use crate::framing::AutoMargins;
 use std::fmt;
 use std::sync::Arc;
 
@@ -28,6 +29,9 @@ pub struct FigureTexts {
     broken_named: NamePhrase,
     more_entries: Phrase<usize>,
     row_series: Phrase<usize>,
+    /// Margins of the automatic framing (#529): a user preference, never in
+    /// the spec. Both backends must receive the same ones (invariant 4).
+    pub margins: AutoMargins,
 }
 
 impl FigureTexts {
@@ -49,7 +53,15 @@ impl FigureTexts {
             broken_named: Arc::new(broken_named),
             more_entries: Arc::new(more_entries),
             row_series: Arc::new(row_series),
+            margins: AutoMargins::default(),
         }
+    }
+
+    /// The same texts with the margins of the automatic framing (#529).
+    #[must_use]
+    pub fn with_margins(mut self, margins: AutoMargins) -> Self {
+        self.margins = margins;
+        self
     }
 
     /// Legend text of a **named** series whose reference is broken.
@@ -85,6 +97,7 @@ impl fmt::Debug for FigureTexts {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("FigureTexts")
             .field("language", &self.language)
+            .field("margins", &self.margins)
             .finish_non_exhaustive()
     }
 }

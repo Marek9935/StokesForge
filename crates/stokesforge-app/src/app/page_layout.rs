@@ -217,6 +217,7 @@ impl StokesForgeApp {
             self.state.length_unit(),
             self.state.size_locks().clone(),
         );
+        super::graph_window::publish_auto_margins(ctx, self.state.auto_margins());
         let requests: Vec<NodeId> = ctx.data_mut(|data| {
             std::mem::take(data.get_temp_mut_or_default::<Vec<NodeId>>(toggle_requests_id()))
         });

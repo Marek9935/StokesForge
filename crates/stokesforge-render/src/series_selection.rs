@@ -213,14 +213,24 @@ pub fn paint_handles<DB: DrawingBackend>(
     Ok(())
 }
 
+/// How close, in figure pixels, a click must be to a series to pick it.
+const PICK_DISTANCE: f64 = 5.0;
+
 /// Layer index and original rank within the declared layer. On a tie, the last one drawn wins.
 pub fn series_at(plot: &DrawnPlot, pixel: (f64, f64)) -> Option<(usize, usize)> {
     for panel in plot.panels.iter().rev() {
-        if !PanelTransform::of(panel)?.contains(pixel.0, pixel.1) {
+        // The plot area widened by the pick distance: the automatic framing
+        // draws the first and last markers on the frame (#529), so half of
+        // each lies outside it and must stay pickable.
+        let ((ox, oy), (w, h)) = PanelTransform::of(panel)?.frame();
+        let reach = PICK_DISTANCE;
+        if !(ox - reach..=ox + w + reach).contains(&pixel.0)
+            || !(oy - reach..=oy + h + reach).contains(&pixel.1)
+        {
             continue;
         }
         let mut best = None;
-        let mut distance = 5.0;
+        let mut distance = PICK_DISTANCE;
         for series in panel.series_geometry.iter().rev() {
             let candidate = series.distance(pixel);
             if candidate < distance {

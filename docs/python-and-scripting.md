@@ -441,7 +441,7 @@ test will read. The Y keys target the `axis` axis (`left` by default, `right`).
 | `title_color`, `background` | `#RRGGBB` or `#RRGGBBAA`; `""` = automatic (title) or white (background) |
 | `x_scale`, `y_scale` | `linear` or `log` |
 | `x_from`/`x_to`, `y_from`/`y_to` | both together, finite and different, positive on a log axis; `from > to` draws the axis reversed (and marks the axis as inverted, #344); switch the framing to manual |
-| `x_auto_range`, `y_auto_range` | `True` makes the framing automatic (contradictory with bounds given in the same call) |
+| `x_auto_range`, `y_auto_range` | `True` computes the automatic range **once**, with the default margins (a script has no preferences), and writes it as From/To (#529): the axis does not follow the data afterwards (contradictory with bounds given in the same call). Like every graph written by a script (`plot`, `set_graph`, series groups), a new axis range is frozen at the write; a surface of keys unchanged, so `__api_version__` does not move |
 | `x_inverted`, `y_inverted`, `x_grid`, `y_grid`, `x_visible`, `y_visible` | booleans; `x_inverted=True` on increasing bounds swaps them (the direction is read from their order, `AxisSpec::orient`, #344); the surface itself does not change |
 | `legend_visible`, `legend_position` | boolean; `top_left`, `top_right`, `bottom_left`, `bottom_right` (legend of the `panel` panel) |
 | `legend_text_from`, `legend_template` | the header row the legend entries read (`long_name`, `comments`, `x_prime`, `units`, `short_name`, `long_name_units`, `long_name_comments`, `custom`); the Typst template of `custom`, which reads the string variables `long-name`/`ln`, `short-name`/`sn`, `units`/`u`, `comments`/`c`, `x-prime`/`xp` (#499) |
@@ -651,10 +651,13 @@ created. Without a template name, it applies the automatic choice, otherwise the
 permissive recipe. It respects the template settings (ignored columns, types,
 metadata, blocks and split into sheets) and always creates a new
 workbook; the modes that modify an active sheet concern the wizard.
-An Origin project (`.opj`) is read too: one workbook per Origin book and one
+An Origin project (`.opj` or `.opju`) is read too: one workbook per Origin book and one
 sheet per `Data` sheet (every sheet with columns when a book has none named
 `Data`), columns carrying their long names, units, roles and the Horiba
-information; a template name with an `.opj` is refused.
+information; a template name with an `.opj` or `.opju` is refused. An `.opju` read only
+in part (`OriginProject::partial`) is imported without a word from `pyst` (the API is frozen:
+no warning channel); `stokesforge-cli import` prints a warning line, the application an
+orange one.
 A single `pyst.undo()` or Ctrl+Z removes the whole import. The sheet it creates
 is named after the file and carries no "Raw Data" mark (#488: only the
 application's **One Workbook per File** marks its sheet). A script that writes

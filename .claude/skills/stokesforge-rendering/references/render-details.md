@@ -7,7 +7,7 @@ Read from `stokesforge-rendering` when the task touches the drawing order, layer
 Each step depends on what the previous one learnt (`docs/rendering.md` § The order in which a panel is plotted):
 
 1. prepare each series as geometry (axis scale applied); framing and drawing read **the same** geometry;
-2. frame the axes on it;
+2. frame the axes on it (data plus the margins of `framing::AutoMargins`, one rule `framing::auto_frame` shared with `interact::fit_range`), see `docs/rendering.md` § Automatic framing (#529) ; a new graph writes the result once and never reframes;
 3. build the plotting area — the pixel width exists only here;
 4. decimate (LTTB), which needs that width;
 5. paint in pixels;
@@ -31,7 +31,7 @@ Always compiled; `cargo test --workspace` covers it (`docs/rendering.md` § Typs
 
 A continuous gesture (dragging free text, editing in place, moving a title or the legend) never edits the model each frame: the preview sits on the view (`GraphView::set_annotation_preview`, `set_text_preview`, counted in `view_generation`), and the app sends **one** action at the end — one history entry. `hold_preview` keeps it until the model catches up. App side: `app::graph_window::annotation_interactions`, editors in `app/graph_text_edit.rs` (`commit_annotation_editor`). Pan is Ctrl + drag or middle-click drag, decided on press (`decide_nav`), never a plain drag (#318).
 
-Hit-testing (`hit.rs`, #385): an axis is its tick band **and** its line (a strip of `AXIS_LINE_TOLERANCE_POINTS` screen points inside the plot area edge; callers pass `4 / display_scale` figure pixels to `component_at_with_tolerance`). Never hard-code figure pixels for a tolerance; the axis beats the curve on that strip.
+Hit-testing (`hit.rs`, #385): an axis is its tick band **and** its line (a strip of `AXIS_LINE_TOLERANCE_POINTS` screen points inside the plot area edge; callers pass `4 / display_scale` figure pixels to `component_at_with_tolerance`). Never hard-code figure pixels for a tolerance; on that strip a curve under the pointer beats the axis (#529), the axis wins off the curve.
 
 ## Errors
 

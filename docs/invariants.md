@@ -39,6 +39,16 @@ matching command in `stokesforge-commands` opens a non-undoable write path. No
 test checks this today (`b21` measures the cost and identity on the write path,
 not this corollary): review is what holds it.
 
+A second load exception (#529): `Request::Load` may carry an opaque **normaliser**
+(`SessionHandle::load_normalised`, a closure built by the application state, so the
+session keeps no rendering dependency). It runs once, over the project just loaded,
+**after** the recalculation of the formula columns (so the ranges it writes read
+the values of the recalculation, invariant 11, not the cache of the file) and before
+the reply, with the direct primitives of `core` and no history: the application
+writes the automatic axis ranges of an older file (`frame_sizes::freeze_loaded_graphs`).
+Plain `load` (robustness, session tests, the CLI) normalises nothing. `FORMAT_VERSION`
+does not move.
+
 One follow-up written by the actor stays inside the rule: the **binding of a kept
 formula** (#433, Q3). A formula the field kept because a column or a sheet it
 names did not exist is bound by the actor as soon as a gesture makes the name
