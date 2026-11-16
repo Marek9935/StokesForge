@@ -44,3 +44,38 @@ The Text tab is the raw text, in an editor. It applies when you leave the editor
 If the text is not valid TOML, it is kept and saved anyway. The editor shows the line and the reason in red under the text, and the Form tab is frozen: it shows the last readable form greyed out, under a red banner that names the line. Fix the text and the form comes back.
 
 An empty text shows "No settings yet. Add a key in the Text tab".
+
+## In a script
+
+A script reads the settings with `pyst.settings` and writes them with `pyst.set_settings`. Both take the handle of the object, which you get like any other object with `pyst.resolve`.
+
+```python
+cfg = pyst.settings(pyst.resolve("[Settings1]"))
+print(cfg["title"])            # Raman, sample A
+print(cfg["fit"]["model"])     # gauss
+for peak in cfg["peak"]:       # [[peak]] gives a list of dictionaries
+    print(peak["name"], peak["centre"])
+
+pyst.set_settings(pyst.resolve("[Settings1]"), {
+    "title": "Raman, sample B",
+    "fit": {"iterations": 500},   # a table is a nested dictionary
+})
+```
+
+`pyst.settings` returns the keys in the order of the file. Text gives `str`, whole numbers give `int` (exact, even beyond 2^53), real numbers give `float`, `true` and `false` give `bool`. A date gives `datetime.date`, a date with a time gives `datetime.datetime`, and a time alone gives `datetime.time`. A list gives a `list`, a `[table]` a nested dictionary, and `[[table]]` a list of dictionaries.
+
+`pyst.set_settings` takes a dictionary and changes only the keys you name:
+
+- a key that does not exist is **created**; the keys you do not name stay as they are;
+- a key that exists must keep its type: writing text into a number raises `InvalidValueError` that names the key (for example `Settings1: fit.iterations: expected integer, got string`), and **nothing is written**, not even the other keys of the same call. A whole number is accepted for a real-number key;
+- comments, order and spacing stay as you wrote them;
+- the hints in comments (`choices:`, `between`, `at least`, `at most`) do not refuse a script. A value written outside its hint shows in orange in the form;
+- a `[[table]]` list must have as many entries as the file has; adding or removing blocks is done in the Text tab;
+- a call that changes nothing writes nothing.
+
+One run of the script is one undo entry, so <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes all the settings and everything else the run changed.
+
+If the stored text is not valid TOML (you kept it as typed in the Text tab), `pyst.settings` and `pyst.set_settings` raise `InvalidValueError` with the name of the object, the line and the reason, for example `Settings1: line 3, column 5: …`. Fix the text and run again.
+
+A handle that is not a Script Settings object raises `InvalidValueError`. A script cannot create a Script Settings object yet: create it with **File ▸ New ▸ Add Script Settings** (or import a `.toml` file), then let the script read and write it.
+

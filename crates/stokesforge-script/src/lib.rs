@@ -87,6 +87,8 @@ mod selftest;
 #[cfg(feature = "python")]
 mod set_graph;
 #[cfg(feature = "python")]
+mod settings;
+#[cfg(feature = "python")]
 mod sheet_edit;
 #[cfg(feature = "python")]
 mod surface;

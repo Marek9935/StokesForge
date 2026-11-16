@@ -151,6 +151,9 @@ fn bench() -> Bench {
     project.add_folder(root, "Folder").unwrap();
     project.add_matrix(root, Some("Mat")).unwrap();
     project.add_note(root, Some("Note1"), "text").unwrap();
+    project
+        .add_script_settings(root, Some("Settings1"), "a = 1\n")
+        .unwrap();
     let actor = Session::spawn(project, None).unwrap();
     let prefix = std::env::var_os(interpreter::HOME_ENV)
         .map(PathBuf::from)
