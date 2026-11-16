@@ -60,8 +60,9 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    AxisScale, AxisSide, AxisSpec, ColorBarSpec, FreeFrame, LayerPlacement, LegendSpec, PanelSpec,
-    PlotSpec, SeriesSpec, Theme, FALLBACK_FRAME, MAX_FRAME_SIZE, MIN_FRAME_SIZE,
+    AxisScale, AxisSide, AxisSpec, ColorBarSpec, FreeFrame, LayerPlacement, LegendSpec, LineStyle,
+    PanelSpec, PlotSpec, SeriesSpec, SymbolShape, Theme, FALLBACK_FRAME, MAX_FRAME_SIZE,
+    MIN_FRAME_SIZE,
 };
 
 /// Space, in points, left between a free frame and the one offset after it
@@ -471,8 +472,21 @@ fn apply_panel(target: &mut PanelSpec, theme: &PanelSpec, families: ThemeFamilie
         if !theme.series.is_empty() {
             for (j, series) in target.series.iter_mut().enumerate() {
                 let source = &theme.series[j % theme.series.len()];
-                series.line = source.line.clone();
-                series.symbol = source.symbol.clone();
+                // The plot type is never changed, so a theme that hides what
+                // this type draws (points only on a line, no marker on a
+                // scatter) leaves the target's own, or the curve would vanish.
+                let hides_line = series.plot_type.draws_line()
+                    && !series.plot_type.draws_symbols()
+                    && source.line.style == LineStyle::None;
+                let hides_symbol = series.plot_type.draws_symbols()
+                    && !series.plot_type.draws_line()
+                    && source.symbol.shape == SymbolShape::None;
+                if !hides_line {
+                    series.line = source.line.clone();
+                }
+                if !hides_symbol {
+                    series.symbol = source.symbol.clone();
+                }
             }
         }
         apply_gradients(&mut target.group_gradients, &theme.group_gradients);
@@ -841,6 +855,25 @@ mod tests {
         );
         // The data of the target series is untouched.
         assert_eq!(panel(&target, 0).series[6].y, NodeId::from_raw(7));
+    }
+
+    #[test]
+    fn a_theme_never_hides_what_the_plot_type_draws() {
+        // A points-only theme onto a line curve keeps the line; a theme
+        // without markers onto a scatter keeps the markers (#542).
+        let mut source = graph(&[&["#c1"]]);
+        let theme_series = &mut source.panels.get_mut(0).unwrap().series[0];
+        theme_series.line.style = LineStyle::None;
+        theme_series.symbol.shape = SymbolShape::None;
+        let theme = theme_of(&source);
+        let mut target = graph(&[&["#a", "#b"]]);
+        target.panels.get_mut(0).unwrap().series[0].plot_type = crate::PlotType::Line;
+        target.panels.get_mut(0).unwrap().series[0].line.style = LineStyle::Dash;
+        target.panels.get_mut(0).unwrap().series[1].plot_type = crate::PlotType::Scatter;
+        target.panels.get_mut(0).unwrap().series[1].symbol.shape = SymbolShape::Square;
+        target.apply_theme_families(&theme, ThemeFamilies::only(ThemeFamily::Curves));
+        assert_eq!(target.panels[0].series[0].line.style, LineStyle::Dash);
+        assert_eq!(target.panels[0].series[1].symbol.shape, SymbolShape::Square);
     }
 
     #[test]

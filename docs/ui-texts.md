@@ -88,13 +88,24 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Setting | Réglage | Value chosen by the user | Option, Paramètre | G |
 | Template | Modèle | Import settings saved under a name | Recette, Preset, Filtre | O |
 | Wizard | Assistant | Window with steps | Wizard, Guide | G |
-| Theme | Thème | Set of global colors of a graph | Style, Palette | O |
+| Theme | Thème | A graph's look kept under a name: background, fonts, axes, legend, curves, color bar, sizes and layout, never its data (#514). The Theme tab of Graph Properties manages them | Style, Palette, Template | O |
 | Publication / Publication Wide | Publication / Publication large | Built-in graph themes (#544, keys `plot-theme-publication`, `plot-theme-publication-wide`): the plot area is 8.5 cm or 17 cm wide | — | O |
 | Presentation | Présentation | Built-in graph theme with large texts and thick lines (#544) | Diaporama | O |
 | Fit + Residuals | Ajustement + résidus | Built-in graph theme of two stacked layers: the data with its fit, the residuals below (#544) | Fit | O |
 | Kinetics | Cinétique | Built-in graph theme of a group of curves on a gradient with a colour bar (#544) | — | O |
 | Side by Side | Côte à côte | Built-in graph theme of two equal layers in one row (#544) | — | O |
 | Color Map | Carte de couleurs | Built-in graph theme of gradient curves with a colour bar and no legend (#544) | — | O |
+| Copy Theme / Paste Theme | Copier le thème / Coller le thème | Right-click and Graph menu entries (#541, keys `action-copy-theme`, `action-paste-theme`): put the style of one graph on the app's own theme clipboard (never the system one; Ctrl+C still copies the graph), then give its Style and Size to the selected graphs, one undo step, no window. Copy greyed « Select a single graph », Paste greyed « Copy a theme first » | Copy Style, Copy Format, Format Painter | O |
+| Apply Theme… | Appliquer un thème… | Entry (right-click, Graph menu) that opens the Apply Theme window (#541, key `action-apply-theme`, window title `theme-apply-title`, verb « Apply »): a theme chosen among tiles, then « What to apply » boxes, with a preview | Theme Manager, Format Dialog | O |
+| Save Theme As… | Enregistrer le thème sous… | Graph menu entry (#541, key `action-save-theme-as`) that asks a name and where to keep the style of the graph: **Mine** (this computer, default) or **Project** (the `.stf`, undoable) | Export Theme, Save Template | O |
+| Rename… (theme) | Renommer… | Theme tab (#542, `theme-mgr-rename`): gives a user or project theme another name; greyed on a built-in (« A built-in theme keeps its name ») | Edit Name | #542 |
+| Update From This Graph | Mettre à jour depuis ce graphique | Theme tab (#542, `theme-mgr-update`): replaces the style of the selected theme with the style of the graph as the window holds it; on a built-in it edits it (a dot marks the tile) | Overwrite, Save Over | #542 |
+| Reset (theme) | Réinitialiser | Theme tab (#542, `theme-mgr-reset`): an edited built-in gets its original style back; greyed on any other theme | Restore, Revert | #542 |
+| Use for new graphs / Default theme | Utiliser pour les nouveaux graphiques / Thème par défaut | One setting (#542): the theme every new graph starts with, all but Texts and Axis ranges. The box of the Theme tab and the row of Preferences > Display > New; a project theme cannot be it | Make default, Startup theme | #542 |
+| What to apply | Quoi appliquer | Heading of the four boxes of the Apply Theme window (#541): **Style** (Background, Title fonts, Axes, Legend, Curves, Color bar), **Size**, **Texts**, **Axis ranges**; plus **Add missing layers** (off). One notion = one word: « Size » is the same box in the window and in the help | Customize, Everything, Size and Page | #541 |
+| Project / Mine (theme rows) | Projet / Mes thèmes | The two row groups of the theme picker (#541): the themes saved in the open project, then the built-ins and the user's own themes. « Mine » is also the first target of Save Theme As… | Global, User, Local | #541 |
+| More themes | Autres thèmes | Last cell of a full row group of the picker (#541): a drop-down of the other themes, most used first | Others, More… | #541 |
+| Before / After (preview) | Avant / Après | Caption of the preview of the Apply Theme window (#541): After is the first target with the theme applied, Before (pointer on the preview) is the graph as it is | Old / New, Original | #541 |
 | Shortcut | Raccourci | Keys that run a command | Raccourci clavier | G |
 
 ### 2.3 Workbook and grid
@@ -269,7 +280,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Model expression | Expression de modèle | What the user writes for a custom fit | Formula, Équation | #322 |
 | Zoom / Reset Zoom | Zoom / Réinitialiser le zoom | Framing of the view; return to the original ranges | Rescale, Recadrer | G |
 | Pan† | Panoramique | Move the framing | Déplacement | G |
-| Global colors | Couleurs globales | Background, text, axes of a theme | — | — |
+| Global colors | Couleurs globales | Text color and Axes color, on the General tab of Graph Properties (#542): each is written into every local color, the last one set wins | Theme colors | — |
 | Palette | Palette | Set of colors offered | — | G |
 | Swatch | Nuance | One color of a palette | Échantillon | G |
 | Saved colors | Couleurs enregistrées | Colors kept in the project or for the user | Favoris | — |

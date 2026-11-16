@@ -385,6 +385,9 @@ fn new_tab(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) {
     let mut comma = state.new_graph_decimal_comma();
     let comma_before = comma;
     let legend_text = state.new_graph_legend_text();
+    let theme_choices = state.default_theme_choices();
+    let default_theme = state.new_graph_theme().map(|(reference, _)| reference);
+    let mut picked_theme = default_theme.clone();
     let mut picked_from = legend_text.from.clone();
     let mut template_commit: Option<String> = None;
     form(ui, "preferences_display_new", |rows| {
@@ -403,6 +406,19 @@ fn new_tab(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) {
             tr!("preferences-new-graph-decimal-comma"),
             Some(tr!("preferences-new-graph-decimal-comma", "hint")),
         );
+        rows.row(tr!("preferences-new-graph-theme"), |ui| {
+            let options = theme_choices
+                .iter()
+                .map(|(reference, name)| ChoiceOption::new(reference.clone(), name.as_str()))
+                .collect::<Vec<_>>();
+            choice(
+                ui,
+                "preferences_new_graph_theme",
+                &mut picked_theme,
+                &options,
+            );
+        });
+        rows.note(tr!("preferences-new-graph-theme", "hint"));
         rows.row(tr!("preferences-new-graph-legend-text"), |ui| {
             let options = LegendTextFrom::CHOICES
                 .iter()
@@ -426,6 +442,9 @@ fn new_tab(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) {
     }
     if comma != comma_before {
         actions.push(Action::SetNewGraphDecimalComma(comma));
+    }
+    if picked_theme != default_theme {
+        actions.push(Action::SetNewGraphTheme(picked_theme));
     }
     // One action for the pick and the template, so a pick that blurs the
     // template field cannot undo the commit of that field.
@@ -1242,7 +1261,12 @@ mod tests {
         _from: &LegendTextFrom,
         to: &LegendTextFrom,
     ) {
-        harness.get_by_role(egui::accesskit::Role::ComboBox).click();
+        // The legend list is the second of the page (the default theme is first).
+        harness
+            .query_all_by_role(egui::accesskit::Role::ComboBox)
+            .last()
+            .expect("the legend list")
+            .click();
         harness.run();
         harness.get_by_label(&legend_text_from_label(to)).click();
         harness.run();
@@ -1759,5 +1783,48 @@ mod tests {
         let blocked = dir.path().join("file");
         std::fs::write(&blocked, "x").unwrap();
         assert!(crate::app::open_folder_in_file_manager(&blocked.join("inside")).is_err());
+    }
+
+    /// Display > New has a « Default theme » row (#542): it shows the setting
+    /// that « Use for new graphs » of Graph Properties writes, and choosing in
+    /// it writes the same setting.
+    #[test]
+    fn the_default_theme_row_shows_and_sets_the_use_for_new_graphs_setting() {
+        let mut harness = bench();
+        harness
+            .state_mut()
+            .state
+            .dispatch(Action::SetNewGraphTheme(Some(
+                stokesforge_app_state::user_themes::ThemeRef::Builtin(1),
+            )));
+        go_to_display(&mut harness, &tr!("preferences-display-new"));
+        harness.get_by_label(&tr!("preferences-new-graph-theme"));
+        let list = harness
+            .query_all_by_role(egui::accesskit::Role::ComboBox)
+            .next()
+            .expect("the theme list");
+        assert_eq!(
+            list.value().as_deref(),
+            Some(tr!("plot-theme-dark").as_str())
+        );
+        list.click();
+        harness.run();
+        harness.get_by_label(&tr!("plot-theme-kinetics")).click();
+        harness.run();
+        assert_eq!(
+            harness
+                .state()
+                .state
+                .new_graph_theme()
+                .map(|(reference, _)| reference),
+            Some(stokesforge_app_state::user_themes::ThemeRef::Builtin(6)),
+            "the same setting as Use for new graphs"
+        );
+        assert!(harness.state().seen.iter().any(|action| matches!(
+            action,
+            Action::SetNewGraphTheme(Some(stokesforge_app_state::user_themes::ThemeRef::Builtin(
+                6
+            )))
+        )));
     }
 }

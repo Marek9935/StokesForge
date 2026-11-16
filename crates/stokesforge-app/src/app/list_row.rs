@@ -242,6 +242,15 @@ fn list_row_background(rect: egui::Rect, selected: bool, hovered: bool) -> [egui
     }
 }
 
+/// The look of a row (selected: pale background and accent strip; hovered:
+/// light grey) painted behind any rectangle that is not a full-width row, such
+/// as a tile of the theme picker (#541): the same two shapes as a list row.
+pub(super) fn paint_row_look(ui: &egui::Ui, rect: egui::Rect, selected: bool, hovered: bool) {
+    for shape in list_row_background(rect, selected, hovered) {
+        ui.painter().add(shape);
+    }
+}
+
 /// Background of a row made of several widgets: reserved before them, laid
 /// down after (see the module head doc).
 pub(super) struct ListRowBackground([egui::layers::ShapeIdx; 2]);

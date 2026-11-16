@@ -340,6 +340,18 @@ fn selected_ids(selection: &HashSet<PmEntry>, order: &[PmEntry]) -> Vec<NodeId> 
         .collect()
 }
 
+/// The graphs among the selected windows, in tree order (#541).
+fn selected_graphs(selection: &HashSet<PmEntry>, order: &[PmEntry]) -> Vec<NodeId> {
+    order
+        .iter()
+        .filter(|entry| selection.contains(entry))
+        .filter_map(|entry| match entry {
+            PmEntry::Window(Tab::Graph(id)) => Some(*id),
+            _ => None,
+        })
+        .collect()
+}
+
 /// The target of a Project Manager object menu: windows, or a folder (which
 /// additionally offers Add Folder, and whose Copy and Duplicate are grayed out
 /// for now, as for any selection that contains one).
@@ -1285,6 +1297,12 @@ fn project_tree_node_ui(
                     .data(|data| data.get_temp::<PmMemory>(memory_key))
                     .unwrap_or_default();
                 let ids = selected_ids(interaction.selection, &memory.order);
+                // Graph themes (#541): the graphs of the selection only (a
+                // folder's contents are not included).
+                let graphs = selected_graphs(interaction.selection, &memory.order);
+                sections.section(ui, !graphs.is_empty(), |ui| {
+                    super::theme_menu::theme_menu_entries(ui, &graphs, false, interaction.actions);
+                });
                 let viewport = ui.ctx().viewport_id();
                 let parent = paste_parent(interaction.selection, &memory, interaction.root);
                 object_menu(
@@ -2381,9 +2399,12 @@ pub(super) mod tests {
         let order = [
             tr!("project-manager-open"),
             tr!("project-manager-close"),
+            tr!("action-copy-theme"),
+            tr!("action-paste-theme"),
+            tr!("action-apply-theme"),
             tr!("action-cut"),
-            tr!("action-copy"),
-            tr!("action-paste"),
+            // "Copy" and "Paste" are not looked up: their text is also in
+            // "Copy Theme" and "Paste Theme".
             tr!("action-rename-project-object"),
             tr!("action-duplicate-project-object"),
             tr!("action-delete-project-object"),
@@ -2400,6 +2421,43 @@ pub(super) mod tests {
             !painted(&menu, &tr!("menu-selected-content")),
             "no wrapper on right click"
         );
+    }
+
+    /// #541: the theme entries of a graph row push their actions with the
+    /// graph as target; Paste Theme is greyed while nothing is copied.
+    #[test]
+    fn the_theme_entries_act_on_the_graph_and_paste_waits_for_a_copy() {
+        let (_session, _book_tab, graph_tab, tree) = project_manager_fixture();
+        let Tab::Graph(graph) = graph_tab else {
+            panic!("a graph tab");
+        };
+        let context = egui::Context::default();
+        let bench = Bench::new(HashSet::new());
+        let paint = |context: &egui::Context, events| bench.paint(context, &tree, events);
+        let first = paint(&context, Vec::new());
+        let graph_pos = find_text_center(&first.shapes, "Graph1");
+        click_at(&context, graph_pos, egui::Modifiers::NONE, paint);
+        for (label, expected) in [
+            (tr!("action-copy-theme"), Some(Action::CopyTheme { graph })),
+            (tr!("action-paste-theme"), None),
+            (
+                tr!("action-apply-theme"),
+                Some(Action::OpenApplyTheme {
+                    graphs: vec![graph],
+                }),
+            ),
+        ] {
+            bench.actions.borrow_mut().clear();
+            let menu = open_context_menu(&context, graph_pos, paint);
+            let at = find_text_center(&menu.shapes, &label);
+            click_at(&context, at, egui::Modifiers::NONE, paint);
+            assert_eq!(
+                *bench.actions.borrow(),
+                expected.into_iter().collect::<Vec<_>>(),
+                "{label}"
+            );
+            paint(&context, Vec::new());
+        }
     }
 
     /// #157, #326: a folder offers Add Folder, Paste, Rename and Delete
