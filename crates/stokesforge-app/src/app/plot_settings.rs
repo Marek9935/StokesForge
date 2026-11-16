@@ -50,6 +50,38 @@ use super::tab_strip::{tab_strip, tab_strip_left_with_reasons, TabStripSide};
 /// Key, in the egui context, of "the formula help icon is hidden" (#148).
 const FORMULA_HELP_HIDDEN: &str = "stokesforge_formula_help_hidden";
 
+/// The row of the Series list, as a selection of its graph (#510).
+type ListSelection = (
+    NodeId,
+    stokesforge_app_state::object_manager::VisibilityTarget,
+);
+
+/// Hands the row chosen in the Series list to the app, once per change, so
+/// the graph selects it as the Object Manager does (#510). `None` (window
+/// closed) forgets it: reopening selects the row again.
+fn publish_list_selection(ctx: &egui::Context, selection: Option<ListSelection>) {
+    let last = egui::Id::new("series_list_selection_last");
+    if ctx
+        .data(|d| d.get_temp::<Option<ListSelection>>(last))
+        .flatten()
+        == selection
+    {
+        return;
+    }
+    ctx.data_mut(|d| {
+        d.insert_temp(last, selection);
+        if let Some(selection) = selection {
+            d.insert_temp(egui::Id::new("series_list_selection"), Some(selection));
+        }
+    });
+}
+
+/// The row the Series list chose since the last call, to select on its graph.
+pub(super) fn take_list_selection(ctx: &egui::Context) -> Option<ListSelection> {
+    ctx.data_mut(|d| d.remove_temp::<Option<ListSelection>>(egui::Id::new("series_list_selection")))
+        .flatten()
+}
+
 /// Properties window of a graph: a floating dialog (same family
 /// as `import_window`), opened by the right-click on a component of the
 /// graph or by the "Graph" menu, and organized into thematic tabs
@@ -82,6 +114,7 @@ const FORMULA_HELP_HIDDEN: &str = "stokesforge_formula_help_hidden";
 /// editing *the* graph.
 pub(super) fn plot_settings_window(ctx: &egui::Context, state: &mut AppState) {
     let Some(settings) = state.plot_settings() else {
+        publish_list_selection(ctx, None);
         return;
     };
     // The preference of the formula help icon, read by `formula_help` (the fields
@@ -320,10 +353,25 @@ fn plot_settings_contents(
                     edit.selected_panel,
                     tree,
                     &mut edit.selected_series,
+                    &mut edit.selected_group,
                     &mut env,
                     &mut gradient_actions,
                 );
             }
+            // The page chosen in the list is also the selection of the graph,
+            // as a click in the Object Manager (#510).
+            use stokesforge_app_state::object_manager::VisibilityTarget as T;
+            let target = match edit.selected_group {
+                Some(group) => T::SeriesGroup(stokesforge_plot::SeriesGroupRef {
+                    panel: edit.selected_panel,
+                    group,
+                }),
+                None => T::Series(stokesforge_plot::SeriesRef {
+                    panel: edit.selected_panel,
+                    index: edit.selected_series,
+                }),
+            };
+            publish_list_selection(ui.ctx(), Some((settings.graph, target)));
         } else if chosen_tab == PlotSettingsTab::Axes {
             // Two levels (S-L9, #393): the vertical axis strip stays fixed and
             // only the page of the axis scrolls, so no common scrolling.
@@ -1826,9 +1874,9 @@ fn axis_editor(
     commit
 }
 
-/// Edits the selected series: name, plot type, visibility, presence in
-/// the legend, line style, marker style. Returns `true` if the draft
-/// must be committed — see the head doc of [`plot_settings_window`].
+/// The fields of one curve (#510): name, plot type, bins or width, Y axis,
+/// error columns, presence in the legend. Returns `true` if the draft must be
+/// committed — see the head doc of [`plot_settings_window`].
 ///
 /// [`PlotType::Unknown`] (C5, `guide-de-correction-robustesse.md` §F3) is
 /// **never** in the offered list: it is the plot type of a
@@ -1837,35 +1885,27 @@ fn axis_editor(
 /// carries it is still shown, read-only for this one field — the
 /// rest (name, visibility…) stays editable as usual.
 ///
-/// `locked` (#177): the **group** of the series is being set, not the series alone.
-/// The settings specific to a series (name, visibility, presence in
-/// the legend) are then grayed out, with a tooltip that says why, and the
-/// colors hidden (#213: the group's color gradient provides them); the others (line style, symbol shape and size) stay active and the
-/// page copies them to the whole group.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn series_editor(
+/// Only the curve page shows them: what is common to a group (gradient, line,
+/// symbol) is on the group page, see [`series_style_editor`]. The Y axis is
+/// written into the series only: the page applies it through
+/// `PanelSpec::set_series_axis`.
+pub(super) fn series_curve_editor(
     ui: &mut egui::Ui,
     series: &mut stokesforge_plot::SeriesSpec,
-    env: &mut PickerEnv,
-    color_reason: Option<String>,
-    locked: bool,
     auto_bar_width: f64,
     overlay: bool,
     error_columns: &[(NodeId, String)],
 ) -> bool {
     form(ui, "plot_series_editor", |form| {
         let mut commit = false;
-        commit |= per_series(form, locked, |form| {
-            formula_field(
-                form,
-                &tr!("plot-series-name"),
-                &tr!("plot-series-name", "hint"),
-                &mut series.name,
-            )
-        });
-
-        // The plot type is always set series by series (#213), even in
-        // "whole group" scope; it only touches the chosen series.
+        form.section(tr!("curve-section"));
+        commit |= formula_field(
+            form,
+            &tr!("plot-series-name"),
+            &tr!("plot-series-name", "hint"),
+            &mut series.name,
+        );
+        // The plot type is set series by series (#213).
         commit |= form.row(tr!("plot-series-plot-type"), |ui| match &series.plot_type {
             PlotType::Unknown(_) => {
                 ui.weak(tr!("plot-series-type-unknown"));
@@ -1889,85 +1929,15 @@ pub(super) fn series_editor(
                 }),
             ),
         });
-        // Bins and width (#359): only for the type they concern; in "whole
-        // group" scope they are copied to the members of that type.
+        // Bins and width (#359): only for the type they concern.
         match series.plot_type {
-            PlotType::Histogram => {
-                commit |= form.row(tr!("plot-series-bins"), |ui| {
-                    let mut bins = series.histogram_bins.get();
-                    let changed = number_field(
-                        ui,
-                        "series_histogram_bins",
-                        &mut bins,
-                        &quantities::HISTOGRAM_BINS,
-                    )
-                    .changed;
-                    match stokesforge_plot::BinCount::new(bins) {
-                        Some(count) if changed => {
-                            series.histogram_bins = count;
-                            true
-                        }
-                        _ => false,
-                    }
-                });
-            }
-            PlotType::Bar => {
-                let hint = tr!(
-                    "common-auto-value",
-                    value = crate::number_field::format_value(
-                        auto_bar_width,
-                        quantities::BAR_WIDTH.decimals
-                    )
-                );
-                commit |= form.row(tr!("plot-series-bar-width"), |ui| {
-                    auto_number_field(
-                        ui,
-                        "series_bar_width",
-                        &mut series.bar_width,
-                        &quantities::BAR_WIDTH,
-                        &hint,
-                    )
-                    .changed
-                });
-            }
+            PlotType::Histogram => commit |= bins_row(form, series),
+            PlotType::Bar => commit |= width_row(form, series, auto_bar_width),
             _ => {}
         }
-        // Y axis (#358): Left or Right. Here only the series field changes;
-        // `series_page` applies it through `PanelSpec::set_series_axis` (the
-        // right axis becomes visible) and copies it to the group. Grayed out
-        // on an overlaid layer: the rendering ignores Right there.
-        commit |= form.row(tr!("plot-series-axis"), |ui| {
-            let shown = ui.add_enabled_ui(!overlay, |ui| {
-                choice(
-                    ui,
-                    "plot_config_series_axis",
-                    &mut series.axis,
-                    &[
-                        ChoiceOption::new(
-                            stokesforge_plot::SeriesAxis::Left,
-                            tr!("plot-axis-left"),
-                        ),
-                        ChoiceOption::new(
-                            stokesforge_plot::SeriesAxis::Right,
-                            tr!("plot-axis-right"),
-                        ),
-                    ],
-                )
-            });
-            if overlay {
-                shown
-                    .response
-                    .on_disabled_hover_text(tr!("plot-series-axis", "disabled"));
-            } else {
-                shown
-                    .response
-                    .on_hover_text(tr!("plot-series-axis", "hint"));
-            }
-            shown.inner
-        });
+        commit |= axis_row(form, series, overlay);
         // Error columns (#360): Y error and X error, "None" first. Per
-        // series even in "whole group" scope (the columns are data, not
-        // style), so `series_page` copies nothing. Not for a "row" series
+        // series (the columns are data, not style). Not for a "row" series
         // (#166) nor a histogram, which has no point to put a whisker on.
         if series.row.is_none() && series.plot_type != PlotType::Histogram {
             commit |= error_row(
@@ -1992,24 +1962,50 @@ pub(super) fn series_editor(
             );
         }
         // "Show series" is the checkbox of the series list (curve_settings.rs).
-        commit |= per_series(form, locked, |form| {
-            form.checkbox(
-                &mut series.show_in_legend,
-                tr!("plot-series-show-in-legend"),
-                None,
-            )
-        });
+        commit |= form.checkbox(
+            &mut series.show_in_legend,
+            tr!("plot-series-show-in-legend"),
+            None,
+        );
+        commit
+    })
+}
 
+/// The line and the symbol of a series (#510), the page of a curve (this curve
+/// only) and the page of a group (the first member, copied to the others by
+/// the page). `colors` is false on the group page: the gradient provides
+/// them; `color_hint` is the hover of an editable color that overrides the
+/// group's gradient (#510 D4); `color_reason` greys them out, with its sentence, when the color bar
+/// of the layer provides them.
+pub(super) fn series_style_editor(
+    ui: &mut egui::Ui,
+    series: &mut stokesforge_plot::SeriesSpec,
+    env: &mut PickerEnv,
+    (color_reason, color_hint): (Option<String>, Option<String>),
+    colors: bool,
+) -> bool {
+    form(ui, "plot_series_style", |form| {
+        let mut commit = false;
         form.section(tr!("plot-series-line-section"));
-        if !locked {
+        if colors {
             let out = form.enabled(color_reason.is_none(), |form| {
-                form.color(
-                    &tr!("plot-series-line-color"),
-                    &mut series.line.color,
-                    ColorUsage::Curves,
-                    None,
-                    env,
-                )
+                let label = tr!("plot-series-line-color");
+                form.row(&label, |ui| {
+                    let changed = crate::color_picker::color_button(
+                        ui,
+                        &label,
+                        &mut series.line.color,
+                        ColorUsage::Curves,
+                        None,
+                        env,
+                    );
+                    // A "?" beside the swatch: the swatch's own tooltip (its
+                    // hex) would hide a bubble on the whole row (#510 D4).
+                    if let Some(hint) = &color_hint {
+                        super::hover_help::help_text(ui, hint.clone());
+                    }
+                    changed
+                })
             });
             if let Some(reason) = &color_reason {
                 out.response.on_disabled_hover_text(reason);
@@ -2068,7 +2064,7 @@ pub(super) fn series_editor(
             )
             .changed
         });
-        if !locked {
+        if colors {
             let out = form.enabled(color_reason.is_none(), |form| {
                 form.color(
                     &tr!("plot-series-symbol-color"),
@@ -2080,9 +2076,110 @@ pub(super) fn series_editor(
             });
             if let Some(reason) = &color_reason {
                 out.response.on_disabled_hover_text(reason);
+            } else if let Some(hint) = &color_hint {
+                out.response.on_hover_text(hint);
             }
             commit |= out.inner;
         }
+        commit
+    })
+}
+
+/// The Bins row of a Histogram series (#359).
+fn bins_row(form: &mut Form<'_>, series: &mut stokesforge_plot::SeriesSpec) -> bool {
+    form.row(tr!("plot-series-bins"), |ui| {
+        let mut bins = series.histogram_bins.get();
+        let changed = number_field(
+            ui,
+            "series_histogram_bins",
+            &mut bins,
+            &quantities::HISTOGRAM_BINS,
+        )
+        .changed;
+        match stokesforge_plot::BinCount::new(bins) {
+            Some(count) if changed => {
+                series.histogram_bins = count;
+                true
+            }
+            _ => false,
+        }
+    })
+}
+
+/// The Width row of a Bar series (#359).
+fn width_row(
+    form: &mut Form<'_>,
+    series: &mut stokesforge_plot::SeriesSpec,
+    auto_bar_width: f64,
+) -> bool {
+    let hint = tr!(
+        "common-auto-value",
+        value = crate::number_field::format_value(auto_bar_width, quantities::BAR_WIDTH.decimals)
+    );
+    form.row(tr!("plot-series-bar-width"), |ui| {
+        auto_number_field(
+            ui,
+            "series_bar_width",
+            &mut series.bar_width,
+            &quantities::BAR_WIDTH,
+            &hint,
+        )
+        .changed
+    })
+}
+
+/// The Y axis row (#358): Left or Right. Only the series field changes; the
+/// page applies it through `PanelSpec::set_series_axis`.
+fn axis_row(form: &mut Form<'_>, series: &mut stokesforge_plot::SeriesSpec, overlay: bool) -> bool {
+    // Y axis (#358): Left or Right. Here only the series field changes;
+    // `curve_page` applies it through `PanelSpec::set_series_axis` (the
+    // right axis becomes visible). Grayed out
+    // on an overlaid layer: the rendering ignores Right there.
+    form.row(tr!("plot-series-axis"), |ui| {
+        let shown = ui.add_enabled_ui(!overlay, |ui| {
+            choice(
+                ui,
+                "plot_config_series_axis",
+                &mut series.axis,
+                &[
+                    ChoiceOption::new(stokesforge_plot::SeriesAxis::Left, tr!("plot-axis-left")),
+                    ChoiceOption::new(stokesforge_plot::SeriesAxis::Right, tr!("plot-axis-right")),
+                ],
+            )
+        });
+        if overlay {
+            shown
+                .response
+                .on_disabled_hover_text(tr!("plot-series-axis", "disabled"));
+        } else {
+            shown
+                .response
+                .on_hover_text(tr!("plot-series-axis", "hint"));
+        }
+        shown.inner
+    })
+}
+
+/// What the group page shares between its curves (#510 D1, D2): the Y axis,
+/// and Bins or Width when `bins` / `width` say every curve of the group has
+/// that type. The first member is edited; the page copies what changed.
+pub(super) fn series_group_editor(
+    ui: &mut egui::Ui,
+    series: &mut stokesforge_plot::SeriesSpec,
+    (bins, width): (bool, bool),
+    auto_bar_width: f64,
+    overlay: bool,
+) -> bool {
+    form(ui, "plot_group_editor", |form| {
+        let mut commit = false;
+        form.section(tr!("curve-group-curves-section"));
+        if bins {
+            commit |= bins_row(form, series);
+        }
+        if width {
+            commit |= width_row(form, series, auto_bar_width);
+        }
+        commit |= axis_row(form, series, overlay);
         commit
     })
 }
@@ -2106,16 +2203,6 @@ fn error_row(
         help_text(ui, hint);
         changed
     })
-}
-
-/// A setting specific to a series: grayed out, with the tooltip that says why,
-/// when the whole group is being set (`locked`, see [`series_editor`]).
-fn per_series(form: &mut Form<'_>, locked: bool, add: impl FnOnce(&mut Form<'_>) -> bool) -> bool {
-    let out = form.enabled(!locked, add);
-    if locked {
-        out.response.on_hover_text(tr!("curve-scope-locked"));
-    }
-    out.inner
 }
 
 /// Edits a [`stokesforge_plot::LegendSpec`]: visibility, place, text, font,
@@ -2458,7 +2545,7 @@ pub(super) fn legend_template_field(
 
 /// Label of a [`PlotType`], including [`PlotType::Unknown`] (out of
 /// caution: this arm exists so that the function stays total, but
-/// `series_editor` never shows it — an unknown type does not go through the
+/// `series_curve_editor` never shows it — an unknown type does not go through the
 /// dropdown menu that calls this function).
 fn plot_type_label(plot_type: &PlotType) -> String {
     match plot_type {
@@ -4295,10 +4382,71 @@ mod tests {
         assert_eq!(after.panels[0].series[1].name, "Second");
     }
 
+    /// #510: the page chosen in the Series list is handed to the app once per
+    /// change, as the graph selection (the group, then a curve), and closing
+    /// the window forgets it so that reopening selects again. Witness: drop
+    /// the `publish_list_selection` call after `curve_settings_page`.
+    #[test]
+    fn the_series_list_choice_becomes_the_selection_of_the_graph() {
+        use stokesforge_app_state::object_manager::VisibilityTarget as T;
+        let mut harness = harness(|spec| {
+            let panel = first_panel(spec);
+            let model = panel.series[0].clone();
+            panel.series.clear();
+            panel.push_series_batch(vec![model.clone(), model]);
+        });
+        let context = test_support::context();
+        let graph = harness.graph;
+        harness.open(PlotSettingsTab::Series, None);
+        {
+            let edit = harness.state.plot_edit_mut().unwrap();
+            edit.selected_series = 0;
+            edit.selected_group = Some(1);
+        }
+        paint_window(&context, &mut harness.state, Vec::new());
+        let group = stokesforge_plot::SeriesGroupRef { panel: 0, group: 1 };
+        assert_eq!(
+            super::take_list_selection(&context),
+            Some((graph, T::SeriesGroup(group)))
+        );
+        paint_window(&context, &mut harness.state, Vec::new());
+        assert_eq!(
+            super::take_list_selection(&context),
+            None,
+            "once per change"
+        );
+        {
+            let edit = harness.state.plot_edit_mut().unwrap();
+            edit.selected_series = 1;
+            edit.selected_group = None;
+        }
+        paint_window(&context, &mut harness.state, Vec::new());
+        let curve = stokesforge_plot::SeriesRef { panel: 0, index: 1 };
+        assert_eq!(
+            super::take_list_selection(&context),
+            Some((graph, T::Series(curve)))
+        );
+        harness.state.close_plot_settings();
+        paint_window(&context, &mut harness.state, Vec::new());
+        harness.open(PlotSettingsTab::Series, None);
+        {
+            let edit = harness.state.plot_edit_mut().unwrap();
+            edit.selected_series = 1;
+            edit.selected_group = None;
+        }
+        paint_window(&context, &mut harness.state, Vec::new());
+        assert_eq!(
+            super::take_list_selection(&context),
+            Some((graph, T::Series(curve))),
+            "reopening selects the row again"
+        );
+    }
+
     /// #177–#179: the series have their window — the graph's strip no longer
-    /// offers them — which shows the group of the chosen series; choosing a
-    /// color gradient spreads it at once over its own series only (no
-    /// "Apply" button, #213), down to the model.
+    /// offers them — whose group page (#510) shows the group of the chosen
+    /// header; choosing a color gradient spreads it at once over its own
+    /// series only (no "Apply" button, #213), down to the model. A curve page
+    /// has no gradient.
     #[test]
     fn the_series_window_sets_a_group_and_applies_a_color_gradient_to_it() {
         let mut harness = harness(|spec| {
@@ -4315,17 +4463,17 @@ mod tests {
         assert!(!is_painted(&painted, &PlotSettingsTab::Series.label()));
 
         harness.open(PlotSettingsTab::Series, None);
-        harness.state.plot_edit_mut().unwrap().selected_series = 1;
+        {
+            let edit = harness.state.plot_edit_mut().unwrap();
+            edit.selected_series = 0;
+            edit.selected_group = Some(1);
+        }
         let painted = paint_window(&context, &mut harness.state, Vec::new());
         assert!(!is_painted(&painted, &PlotSettingsTab::Graph.label()));
-        assert!(is_painted(&painted, &tr!("curve-group-section")));
+        assert!(is_painted(&painted, &tr!("curve-group-name-field")));
         assert!(
-            !is_painted(&painted, &tr!("curve-scope-group-note")),
-            "the scope sentence is under the '?' icon, no longer a note"
-        );
-        assert!(
-            is_painted(&painted, &tr!("plot-series-plot-type")),
-            "the type stays settable"
+            !is_painted(&painted, &tr!("plot-series-plot-type")),
+            "the type is a curve's: not on the group page"
         );
         let original = harness.model();
 
@@ -4400,61 +4548,21 @@ mod tests {
             .collect();
         assert_eq!(colors[..2], ["#000000", "#0000ff"], "click on the swatch");
 
-        // "This series" scope: the individual color comes back.
-        let painted = click_label(&context, &mut harness.state, &tr!("curve-scope-series"));
+        // The page of a member: the individual color comes back, no gradient.
+        {
+            let edit = harness.state.plot_edit_mut().unwrap();
+            edit.selected_group = None;
+            edit.selected_series = 1;
+        }
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
         assert!(is_painted(&painted, &tr!("plot-series-line-color")));
+        assert!(!is_painted(&painted, &tr!("curve-colors-section")));
 
         // A series outside any group has no gradient to set, but its color.
         harness.state.plot_edit_mut().unwrap().selected_series = 2;
         let painted = paint_window(&context, &mut harness.state, Vec::new());
-        assert!(!is_painted(&painted, &tr!("curve-gradient-section")));
+        assert!(!is_painted(&painted, &tr!("curve-colors-section")));
         assert!(is_painted(&painted, &tr!("plot-series-line-color")));
-    }
-
-    /// #177: "whole group" scope — the settings specific to a series are
-    /// grayed out (the click does nothing); "this series only" scope — they
-    /// reopen and touch only the chosen series.
-    #[test]
-    fn the_scope_grays_out_the_settings_specific_to_a_series() {
-        let mut harness = harness(|spec| {
-            let panel = first_panel(spec);
-            let model = panel.series[0].clone();
-            panel.series.clear();
-            panel.push_series_batch(vec![model.clone(), model]);
-        });
-        let context = test_support::context();
-        harness.open(PlotSettingsTab::Series, None);
-        harness.state.plot_edit_mut().unwrap().selected_series = 1;
-        let original = harness.model();
-
-        click_label(
-            &context,
-            &mut harness.state,
-            &tr!("plot-series-show-in-legend"),
-        );
-        assert_eq!(
-            harness.model(),
-            original,
-            "grayed out: the click changes nothing"
-        );
-
-        click_label(&context, &mut harness.state, &tr!("curve-scope-series"));
-        click_label(
-            &context,
-            &mut harness.state,
-            &tr!("plot-series-show-in-legend"),
-        );
-        let after = harness.model();
-        assert!(
-            after.panels[0].series[0].show_in_legend,
-            "the other member is intact"
-        );
-        assert!(!after.panels[0].series[1].show_in_legend);
-        assert_eq!(
-            after.panels[0].series[1].group,
-            Some(1),
-            "stays in its group"
-        );
     }
 
     /// #124: checks the return of the graph page up to the common
@@ -4946,61 +5054,65 @@ mod tests {
         assert!(harness.state.undo_label().is_none(), "history exhausted");
     }
 
-    /// "Whole group": Bins reach the Histogram members only, Width the Bar
-    /// members only; the plot type of the members stays what it was.
+    /// #510 D2: on the group page Bins reach every member (all Histogram) and
+    /// Width every member (all Bar); a mixed group shows neither row there.
+    /// Witness: « any member » instead of « all members » shows the row of a
+    /// mixed group.
     #[test]
-    fn bins_and_width_are_copied_to_the_members_of_the_matching_type() {
-        let make = |first: PlotType| {
-            harness(|spec| {
+    fn bins_and_width_are_copied_to_the_members_of_a_uniform_group() {
+        let make = |kind: PlotType, mixed: bool| {
+            harness(move |spec| {
                 let panel = first_panel(spec);
                 let mut model = panel.series[0].clone();
                 panel.series.clear();
                 let mut series = Vec::new();
-                for plot_type in [first.clone(), first, PlotType::Line] {
-                    model.plot_type = plot_type;
+                for _ in 0..3 {
+                    model.plot_type = kind.clone();
                     series.push(model.clone());
                 }
-                // Third member: the other kind, to prove it is skipped.
-                series[2].plot_type = if series[0].plot_type == PlotType::Bar {
-                    PlotType::Histogram
-                } else {
-                    PlotType::Bar
-                };
+                if mixed {
+                    series[2].plot_type = PlotType::Line;
+                }
                 panel.push_series_batch(series);
             })
         };
+        let group_page = |harness: &mut Harness| {
+            harness.open(PlotSettingsTab::Series, None);
+            let edit = harness.state.plot_edit_mut().unwrap();
+            edit.selected_series = 0;
+            edit.selected_group = Some(1);
+        };
         let context = test_support::context();
 
-        let mut histogram = make(PlotType::Histogram);
-        histogram.open(PlotSettingsTab::Series, None);
-        histogram.state.plot_edit_mut().unwrap().selected_series = 0;
+        let mut histogram = make(PlotType::Histogram, false);
+        group_page(&mut histogram);
         let default = histogram.model().panels[0].series[1]
             .histogram_bins
             .get()
             .to_string();
         type_in(&mut histogram, &context, &default, "25");
         let after = histogram.model();
-        let series = &after.panels[0].series;
-        assert_eq!(series[0].histogram_bins.get(), 25);
-        assert_eq!(series[1].histogram_bins.get(), 25, "Histogram member");
-        assert_eq!(
-            series[2].histogram_bins.get().to_string(),
-            default,
-            "Bar member untouched"
-        );
-        assert_eq!(series[2].plot_type, PlotType::Bar, "type stays per series");
+        for member in &after.panels[0].series {
+            assert_eq!(member.histogram_bins.get(), 25);
+        }
 
-        let mut bar = make(PlotType::Bar);
-        bar.open(PlotSettingsTab::Series, None);
-        bar.state.plot_edit_mut().unwrap().selected_series = 0;
+        let mut bar = make(PlotType::Bar, false);
+        group_page(&mut bar);
         let painted = paint_window(&context, &mut bar.state, Vec::new());
         let auto = auto_width_text(&painted).expect("Auto (...)").text.clone();
         type_in(&mut bar, &context, &auto, "0.5");
-        let after = bar.model();
-        let series = &after.panels[0].series;
-        assert_eq!(series[0].bar_width, Some(0.5));
-        assert_eq!(series[1].bar_width, Some(0.5), "Bar member");
-        assert_eq!(series[2].bar_width, None, "Histogram member untouched");
+        for member in &bar.model().panels[0].series {
+            assert_eq!(member.bar_width, Some(0.5));
+        }
+
+        for kind in [PlotType::Histogram, PlotType::Bar] {
+            let mut mixed = make(kind, true);
+            group_page(&mut mixed);
+            let painted = paint_window(&context, &mut mixed.state, Vec::new());
+            assert!(!is_painted(&painted, &tr!("plot-series-bins")));
+            assert!(!is_painted(&painted, &tr!("plot-series-bar-width")));
+            assert!(is_painted(&painted, &tr!("plot-series-axis")), "axis stays");
+        }
     }
 
     // -- Y axis of a series (#358) ----------------------------------------
@@ -5087,8 +5199,9 @@ mod tests {
         assert_eq!(harness.model(), original, "nothing changes");
     }
 
-    /// "Whole group": the axis is copied to every member of the group, and
-    /// the right axis is shown.
+    /// #510 D1: on the group page the axis is copied to every member of the
+    /// group (through `set_series_axis`), and the right axis is shown.
+    /// Witness: the axis applied to the first member only.
     #[test]
     fn the_axis_is_copied_to_the_whole_group() {
         let mut harness = harness(|spec| {
@@ -5099,7 +5212,11 @@ mod tests {
             panel.push_series_batch(vec![model.clone(), model.clone(), model]);
         });
         harness.open(PlotSettingsTab::Series, None);
-        harness.state.plot_edit_mut().unwrap().selected_series = 0;
+        {
+            let edit = harness.state.plot_edit_mut().unwrap();
+            edit.selected_series = 0;
+            edit.selected_group = Some(1);
+        }
         let context = test_support::context();
         click_label(&context, &mut harness.state, &tr!("plot-axis-right"));
         let after = harness.model();
@@ -5322,55 +5439,350 @@ mod tests {
         })
     }
 
-    /// #499: the « Color bar » section of the Legend tab is folded on a layer
-    /// with no bar and lists EVERY group, each with its « on the bar » box;
-    /// ticking « Show color bar » commits at once, ticking a group puts it on
-    /// the bar with a retained gradient and unticking takes it off.
-    /// Witness: a section that edits nothing fails every step.
-    #[test]
-    fn the_color_bar_section_lists_every_group_and_ticks_them() {
+    /// A layer of `grouped(2)` whose bar carries the groups `on_bar`.
+    fn with_bar(on_bar: &[u32]) -> Harness {
+        use stokesforge_plot::{ColorBarSegment, ColorBarSpec};
         let mut harness = grouped(2);
-        harness.open(PlotSettingsTab::Legend, None);
-        let context = test_support::context();
-        scroll_page(&context, &mut harness, -1000.0);
-        let painted = paint_window(&context, &mut harness.state, Vec::new());
-        assert!(
-            !is_painted(&painted, &tr!("plot-color-bar-show")),
-            "folded without a bar"
-        );
-        click_label(&context, &mut harness.state, &tr!("plot-color-bar-section"));
-        scroll_page(&context, &mut harness, -1000.0);
-        click_label(&context, &mut harness.state, &tr!("plot-color-bar-show"));
-        let bar = harness.model().panels[0].color_bar.clone().expect("bar");
-        assert!(bar.visible && bar.segments.is_empty());
+        let mut spec = harness.model();
+        first_panel(&mut spec).color_bar = Some(ColorBarSpec {
+            visible: true,
+            segments: on_bar.iter().map(|g| ColorBarSegment::new(*g)).collect(),
+            ..ColorBarSpec::default()
+        });
+        harness.state.dispatch(Action::SetPlotSpec {
+            graph: harness.graph,
+            spec,
+        });
+        harness
+    }
 
+    /// The texts of the Legend tab scrolled `up` points above its bottom, on
+    /// a layer of `grouped(2)` with `on_bar` ticked. The window is short: at
+    /// the bottom the Look block is in view, 100 points up the Groups table
+    /// (the Look block then leaves).
+    fn bar_page(on_bar: &[u32], up: f32) -> (egui::Context, Harness, Vec<Text>) {
+        let context = test_support::context();
+        let mut harness = with_bar(on_bar);
+        harness.open(PlotSettingsTab::Legend, None);
+        scroll_page(&context, &mut harness, -1000.0);
+        if up > 0.0 {
+            scroll_page(&context, &mut harness, up);
+        }
         let painted = paint_window(&context, &mut harness.state, Vec::new());
-        let boxes: Vec<_> = painted
+        (context, harness, painted)
+    }
+
+    /// #510: a layer of two groups whose bar carries `ranges` (group, from,
+    /// to), drawn or not, chained or not; the Legend tab scrolled to the bar.
+    fn preview_page(shown: bool, chain: bool, ranges: &[(u32, f64, f64)]) -> Vec<Text> {
+        preview_page_ticks(
+            shown,
+            chain,
+            stokesforge_plot::ColorBarTicks::default(),
+            ranges,
+        )
+    }
+
+    /// [`preview_page`] with the bar's « Ticks » setting.
+    fn preview_page_ticks(
+        shown: bool,
+        chain: bool,
+        ticks: stokesforge_plot::ColorBarTicks,
+        ranges: &[(u32, f64, f64)],
+    ) -> Vec<Text> {
+        use stokesforge_plot::{ColorBarSegment, ColorBarSpec};
+        let context = test_support::context();
+        let mut harness = grouped(2);
+        let mut spec = harness.model();
+        first_panel(&mut spec).color_bar = Some(ColorBarSpec {
+            visible: shown,
+            chain,
+            ticks,
+            segments: ranges
+                .iter()
+                .map(|&(group, from, to)| ColorBarSegment {
+                    from: Some(from),
+                    to: Some(to),
+                    ..ColorBarSegment::new(group)
+                })
+                .collect(),
+            ..ColorBarSpec::default()
+        });
+        harness.state.dispatch(Action::SetPlotSpec {
+            graph: harness.graph,
+            spec,
+        });
+        harness.open(PlotSettingsTab::Legend, None);
+        scroll_page(&context, &mut harness, -1000.0);
+        scroll_page(&context, &mut harness, 100.0);
+        paint_window(&context, &mut harness.state, Vec::new())
+    }
+
+    /// The topmost text `wanted` (the preview sits above the range fields,
+    /// which show the same numbers).
+    fn topmost(texts: &[Text], wanted: &str) -> Option<egui::Pos2> {
+        texts
             .iter()
-            .filter(|text| text.text == tr!("plot-color-bar-group-on"))
-            .collect();
-        assert_eq!(boxes.len(), 2, "one box per group of the layer");
-        assert!(is_painted(&painted, "Group 1") && is_painted(&painted, "Group 2"));
-        let first = boxes[0].center;
-        click(&context, first, egui::PointerButton::Primary, |ui| {
-            plot_settings_window(ui.ctx(), &mut harness.state)
-        });
-        paint_window(&context, &mut harness.state, Vec::new());
-        let model = harness.model();
-        let bar = model.panels[0].color_bar.as_ref().expect("bar");
-        assert_eq!(bar.segments.len(), 1);
-        assert_eq!(bar.segments[0].group, 1);
-        assert!(model.panels[0].group_gradient(1).is_some());
-        click(&context, first, egui::PointerButton::Primary, |ui| {
-            plot_settings_window(ui.ctx(), &mut harness.state)
-        });
-        paint_window(&context, &mut harness.state, Vec::new());
-        assert!(harness.model().panels[0]
+            .filter(|t| t.text == wanted)
+            .map(|t| t.center)
+            .min_by(|a, b| a.y.total_cmp(&b.y))
+    }
+
+    /// #510: the preview of the bar sits under « Show color bar », only with
+    /// a shown bar and a group on it. Witness: drawn anyway (the end values
+    /// are painted by the preview alone when the fields are greyed or absent).
+    #[test]
+    fn the_color_bar_preview_needs_a_shown_bar_with_a_group() {
+        let ranges = [(1, 10.0, 40.0), (2, 50.0, 60.0)];
+        let painted = preview_page(true, false, &ranges);
+        // Preview value labels sit above the group table's first row.
+        let groups_title = text_exact(&painted, &tr!("plot-color-bar-groups-section")).center;
+        assert!(topmost(&painted, "40").is_some_and(|p| p.y < groups_title.y));
+        let painted = preview_page(false, false, &ranges);
+        assert!(topmost(&painted, "40").is_none());
+        let painted = preview_page(true, false, &[]);
+        assert!(topmost(&painted, "40").is_none());
+    }
+
+    /// #510: two groups on the bar, unchained: two segments, the first three
+    /// times wider, the labels 10, 40, 50, 60. Witness: equal widths put 40
+    /// at the middle of the strip.
+    #[test]
+    fn the_color_bar_preview_sizes_segments_by_their_ranges() {
+        let painted = preview_page(true, false, &[(1, 10.0, 40.0), (2, 50.0, 60.0)]);
+        let at = |text: &str| topmost(&painted, text).unwrap().x;
+        let (first, second) = (at("40") - at("10"), at("60") - at("50"));
+        assert!(first > 2.0 * second, "{first} against {second}");
+        assert!(at("40") < at("50"));
+    }
+
+    /// #510: chained, the segments follow each other on one scale: 10-40
+    /// then 50-100 is drawn 10-40 then 40-90, the break carrying one label
+    /// and the end 90, a number no field holds. Witness: chain ignored
+    /// paints 50 and 100 instead of 90.
+    #[test]
+    fn the_color_bar_preview_follows_the_chain() {
+        let ranges = [(1, 10.0, 40.0), (2, 50.0, 100.0)];
+        let chained = preview_page(true, true, &ranges);
+        assert!(topmost(&chained, "90").is_some());
+        let unchained = preview_page(true, false, &ranges);
+        assert!(topmost(&unchained, "90").is_none());
+        assert!(topmost(&unchained, "100").is_some());
+    }
+
+    /// #510 trial (510-9): the preview draws the ticks the bar draws, so with
+    /// « Automatic » it shows the intermediate graduations of 0-100, and with
+    /// « Ends and breaks » only 0 and 100. Witness: the preview forcing the
+    /// ends and breaks whatever the setting.
+    #[test]
+    fn the_color_bar_preview_draws_the_ticks_of_the_bar() {
+        use stokesforge_plot::ColorBarTicks;
+        let inner = |painted: &[Text]| {
+            ["20", "25", "40", "50", "60", "75", "80"]
+                .iter()
+                .any(|value| topmost(painted, value).is_some())
+        };
+        let auto = preview_page_ticks(true, false, ColorBarTicks::Auto, &[(1, 0.0, 100.0)]);
+        assert!(inner(&auto), "automatic ticks are previewed");
+        let ends = preview_page_ticks(true, false, ColorBarTicks::Breaks, &[(1, 0.0, 100.0)]);
+        assert!(!inner(&ends), "ends and breaks only");
+    }
+
+    /// The segments of the draft bar, as group numbers.
+    fn draft_bar_groups(harness: &Harness) -> Vec<u32> {
+        let mut spec = harness.draft();
+        first_panel(&mut spec)
             .color_bar
             .as_ref()
-            .unwrap()
-            .segments
-            .is_empty());
+            .map(|bar| bar.segments.iter().map(|s| s.group).collect())
+            .unwrap_or_default()
+    }
+
+    /// Types `text` into the field under `pos`, then leaves it: Enter for a
+    /// number field, a click on `elsewhere` for a text field (whose Enter is
+    /// also the dialog's OK).
+    fn type_at(
+        context: &egui::Context,
+        harness: &mut Harness,
+        pos: egui::Pos2,
+        text: &str,
+        elsewhere: Option<egui::Pos2>,
+    ) {
+        click(context, pos, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state)
+        });
+        one_frame(
+            context,
+            &mut harness.state,
+            vec![egui::Event::Text(text.into())],
+        );
+        match elsewhere {
+            None => one_frame(context, &mut harness.state, vec![key(egui::Key::Enter)]),
+            Some(away) => click(context, away, egui::PointerButton::Primary, |ui| {
+                plot_settings_window(ui.ctx(), &mut harness.state)
+            }),
+        }
+        one_frame(context, &mut harness.state, Vec::new());
+    }
+
+    /// The « Auto » hints of the range fields of the Groups table (the ones
+    /// on the row of a group), top to bottom then left to right.
+    fn range_hints(painted: &[Text]) -> Vec<egui::Pos2> {
+        let auto = tr!("common-auto");
+        let mut hints: Vec<egui::Pos2> = painted
+            .iter()
+            .filter(|t| t.text == auto)
+            .map(|t| t.center)
+            .filter(|at| {
+                painted
+                    .iter()
+                    .any(|t| t.text.starts_with("Group ") && (t.center.y - at.y).abs() < 6.0)
+            })
+            .collect();
+        hints.sort_by(|a, b| {
+            (a.y.round() as i32, a.x.round() as i32).cmp(&(b.y.round() as i32, b.x.round() as i32))
+        });
+        hints
+    }
+
+    /// #510: the Groups table ticks a group onto the bar (the group gets a
+    /// gradient in the same edit) and off again. Witness: a tick handler that
+    /// skips `put_group_on_bar` leaves no segment, no gradient.
+    #[test]
+    fn ticking_a_group_in_the_table_puts_it_on_the_bar_and_takes_it_off() {
+        let (context, mut harness, _) = bar_page(&[], 100.0);
+        assert!(draft_bar_groups(&harness).is_empty());
+        click_label(&context, &mut harness.state, "Group 1");
+        assert_eq!(draft_bar_groups(&harness), [1]);
+        let mut spec = harness.draft();
+        assert!(
+            first_panel(&mut spec).group_gradient(1).is_some(),
+            "a gradient is given in the same edit"
+        );
+        click_label(&context, &mut harness.state, "Group 1");
+        assert!(draft_bar_groups(&harness).is_empty());
+    }
+
+    /// #510: a From typed on a ticked row reaches its segment; the range of
+    /// an unticked row is disabled (a click there takes no typing). Witness:
+    /// the range enabled on unticked rows paints the typed text.
+    #[test]
+    fn the_range_of_a_ticked_row_is_typed_and_that_of_an_unticked_row_is_disabled() {
+        let (context, mut harness, painted) = bar_page(&[1], 100.0);
+        let hints = range_hints(&painted);
+        assert_eq!(hints.len(), 4, "From and to of two rows");
+        // Row 2 is not on the bar: typing there goes nowhere.
+        click(&context, hints[2], egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state)
+        });
+        one_frame(
+            &context,
+            &mut harness.state,
+            vec![egui::Event::Text("7".into())],
+        );
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(!is_painted(&painted, "7"), "disabled: no typing");
+        // Row 1 is: the value reaches the segment of group 1.
+        type_at(&context, &mut harness, hints[0], "3", None);
+        let mut spec = harness.draft();
+        let bar = first_panel(&mut spec).color_bar.clone().unwrap();
+        assert_eq!(bar.segments.len(), 1);
+        assert_eq!(bar.segments[0].from, Some(3.0));
+        assert_eq!(bar.segments[0].to, None);
+    }
+
+    /// #510: the Breaks block exists with two groups on the bar or more:
+    /// one row named by its two neighbours, its label kept by the left
+    /// group, and the chain box inside it. Absent with 0 or 1 group.
+    /// Witnesses: the block shown with one group, or the label written to
+    /// the right group, fails.
+    #[test]
+    fn the_breaks_block_is_for_two_groups_on_the_bar() {
+        let heading = tr!("plot-color-bar-breaks-section");
+        let named = tr!(
+            "plot-color-bar-break-between",
+            left = "Group 1",
+            right = "Group 2"
+        );
+        for on_bar in [&[][..], &[1][..]] {
+            let (_, _, painted) = bar_page(on_bar, 100.0);
+            assert!(!is_painted(&painted, &heading), "{on_bar:?}");
+            assert!(!is_painted(&painted, &tr!("plot-color-bar-chain")));
+            assert!(!is_painted(&painted, &tr!("plot-color-bar-group-break")));
+        }
+        let (context, mut harness, painted) = bar_page(&[1, 2], 100.0);
+        assert!(is_painted(&painted, &heading));
+        assert!(is_painted(&painted, &named), "named by its neighbours");
+        assert!(is_painted(&painted, &tr!("plot-color-bar-chain")));
+        let label = text_exact(&painted, &tr!("plot-color-bar-group-break")).center;
+        let away = text_exact(&painted, &tr!("plot-color-bar-breaks-section")).center;
+        type_at(
+            &context,
+            &mut harness,
+            label + egui::vec2(60.0, 0.0),
+            "k",
+            Some(away),
+        );
+        let mut spec = harness.draft();
+        let bar = first_panel(&mut spec).color_bar.clone().unwrap();
+        assert_eq!(bar.segments[0].label, "k", "kept by the left group");
+        assert_eq!(bar.segments[1].label, "");
+    }
+
+    /// #510: the four blocks follow one another: Groups, Breaks (when
+    /// shown), Value, Look. Witness: two blocks swapped fails.
+    #[test]
+    fn the_sub_headings_of_the_color_bar_follow_one_another() {
+        let order = |painted: &[Text], keys: &[&String]| {
+            let ys: Vec<f32> = keys
+                .iter()
+                .map(|key| text_exact(painted, key).center.y)
+                .collect();
+            assert!(
+                ys.windows(2).all(|pair| pair[0] < pair[1]),
+                "{keys:?} {ys:?}"
+            );
+        };
+        let groups = &tr!("plot-color-bar-groups-section");
+        let breaks = &tr!("plot-color-bar-breaks-section");
+        let value = &tr!("plot-color-bar-value-section");
+        let look = &tr!("plot-color-bar-look-section");
+        let (_, _, painted) = bar_page(&[1, 2], 100.0);
+        order(&painted, &[groups, breaks, value]);
+        let (_, _, painted) = bar_page(&[1, 2], 0.0);
+        order(&painted, &[breaks, value, look]);
+        // Without a second group the block is gone, the others keep order.
+        let (_, _, painted) = bar_page(&[1], 100.0);
+        order(&painted, &[groups, value]);
+        let (_, _, painted) = bar_page(&[1], 0.0);
+        order(&painted, &[value, look]);
+    }
+
+    /// #510: no group in the layer: one dimmed line says so.
+    #[test]
+    fn a_layer_without_groups_says_so_in_the_color_bar_section() {
+        let context = test_support::context();
+        let mut harness = harness_without_groups_on_a_bar();
+        harness.open(PlotSettingsTab::Legend, None);
+        scroll_page(&context, &mut harness, -1000.0);
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(is_painted(
+            &painted,
+            &tr!("plot-color-bar-no-series-groups")
+        ));
+        assert!(!is_painted(&painted, &tr!("plot-color-bar-breaks-section")));
+    }
+
+    /// A layer with a visible bar and no series group.
+    fn harness_without_groups_on_a_bar() -> Harness {
+        let mut harness = harness(|spec| {
+            first_panel(spec).color_bar = Some(stokesforge_plot::ColorBarSpec {
+                visible: true,
+                ..Default::default()
+            });
+        });
+        harness.open(PlotSettingsTab::Legend, None);
+        harness
     }
 
     /// #499: the break label sits between two ticked groups only (none after
@@ -5394,44 +5806,6 @@ mod tests {
         // A free group in the middle does not break the chain of two.
         assert_eq!(groups_with_a_break(&bar(&[3, 1]), &[1, 2, 3]), [1]);
         assert_eq!(groups_with_a_break(&bar(&[1, 2, 3]), &[1, 2, 3]), [1, 2]);
-    }
-
-    /// #499: a ticked group always shows its « Range » row (From and to, no
-    /// fold to open), and a typed end reaches the model on Enter, the other
-    /// end staying Auto. Witness: a row folded away fails the lookup, an edit
-    /// that does not reach the segment, or that touches the other end, fails.
-    #[test]
-    fn the_range_row_is_always_shown_and_its_edits_reach_the_model() {
-        use stokesforge_plot::{ColorBarSegment, ColorBarSpec};
-        let mut harness = harness(|spec| {
-            let panel = first_panel(spec);
-            let template = panel.series[0].clone();
-            panel.series.clear();
-            let mut series = template;
-            series.group = Some(1);
-            panel.series.push(series);
-            let mut segment = ColorBarSegment::new(1);
-            segment.from = Some(2.0);
-            panel.color_bar = Some(ColorBarSpec {
-                visible: true,
-                segments: vec![segment],
-                ..ColorBarSpec::default()
-            });
-        });
-        harness.open(PlotSettingsTab::Legend, None);
-        let context = test_support::context();
-        // The Legend page may be taller than the window: bring the bar's
-        // rows into view.
-        scroll_page(&context, &mut harness, -400.0);
-        let painted = paint_window(&context, &mut harness.state, Vec::new());
-        assert!(is_painted(&painted, &tr!("plot-color-bar-range")));
-        assert!(is_painted(&painted, &tr!("common-auto")), "empty end");
-        // The click may or may not select the old text: 7 or 27, never 2.
-        type_into(&context, &mut harness, "2", "7");
-        let model = harness.model();
-        let segment = &model.panels[0].color_bar.as_ref().unwrap().segments[0];
-        assert!(matches!(segment.from, Some(v) if v == 7.0 || v == 27.0));
-        assert_eq!(segment.to, None);
     }
 
     /// #499: the section opens by itself when the layer's bar is shown, and
@@ -5881,7 +6255,7 @@ mod tests {
     }
 
     /// Each dropdown list of the properties offers **all** its
-    /// known variants (the unknown type never, see [`series_editor`]), and
+    /// known variants (the unknown type never, see [`series_curve_editor`]), and
     /// a choice in it is committed right away.
     #[test]
     fn each_dropdown_list_offers_all_its_variants() {

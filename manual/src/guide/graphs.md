@@ -215,18 +215,20 @@ A graph saved by an older version has no sizes of its own. It keeps its familiar
 
 Double-click a curve, or choose **Graph ▸ Properties ▸ Series…**.
 
-<img src="../images/graphs-properties-series.png" alt="The Series Properties window of Graph1: the list of series on the left, group, name, plot type, line and symbol settings on the right." width="640">
+<img src="../images/graphs-properties-series.png" alt="The Series Properties window of Graph1: the list of series on the left, the curve page of the selected series on the right: name, plot type, Y axis, error columns, group, line and symbol settings." width="640">
 
-The settings of the selected series:
+What you select in the list chooses the page on the right: a curve opens its **curve page**, a group header opens its **group page** (see [Series groups](#series-groups)). The graph selects it too, as a click in the Object Manager does. The curve page has:
 
 - **Name**. If you leave it empty, the series uses the name of its column.
 - **Plot type**: **Scatter**, **Line**, **Line + Symbol**, **Bar**, **Histogram** or **Line + Error Bars**.
 - **Show series** and **Show in legend**.
-- **Y axis**: **Left** or **Right**. **Right** draws the series against the right axis of the layer and shows that axis; going back to **Left** does not hide it. With the scope **Whole group**, the choice is copied to every series of the group. The field is grayed out on a layer drawn on top, which has a single Y axis. The data cursor does not read series on the right axis.
+- **Y axis**: **Left** or **Right**. **Right** draws the series against the right axis of the layer and shows that axis; going back to **Left** does not hide it. The field is grayed out on a layer drawn on top, which has a single Y axis. The data cursor does not read series on the right axis.
 - **Line**: **Color**, **Line style** and **Line width (pt)**. Line styles are **None**, **Solid**, **Dashed**, **Dotted** and **Dash-dot**.
 - **Symbol**: **Shape**, **Size (pt)** and **Symbol color**. Shapes are **None**, **Circle**, **Square**, **Triangle**, **Diamond**, **Plus (+)** and **Cross (×)**.
 
-Move a series up or down in the list to change the drawing order. The shortcuts are <kbd>Ctrl</kbd>+<kbd>↑</kbd> and <kbd>Ctrl</kbd>+<kbd>↓</kbd>.
+The line and symbol of the curve page apply to this curve only. Its colors are grayed out, with the reason, while the color bar of the layer gives them.
+
+Select a curve in the list and click **Move Up** or **Move Down** under it to change the drawing order. The shortcuts are <kbd>Ctrl</kbd>+<kbd>↑</kbd> and <kbd>Ctrl</kbd>+<kbd>↓</kbd>.
 
 ### Colors
 
@@ -238,28 +240,24 @@ Use **Save Color** to keep a color in the project or for yourself. Right-click a
 
 - **Histogram** counts the values of one column and draws the counts as bars. In **Series Properties**, the **Bins** field sets the number of bars, from 1 to 65536.
 - **Bar** draws one bar per point. The **Width (X units)** field sets the width of the bars in the units of the X axis. It shows **Auto** with the computed width in gray until you type a value; empty the field, or type `auto`, to go back to it.
-- When the series is in a group and the scope is **Whole group**, **Bins** and **Width (X units)** are copied to the members that have the matching type.
-- **Y error** and **X error** (in **Series Properties**) choose the column of uncertainties of the series. **None** is the first choice and removes the error bars. The list holds the other columns of the same worksheet. By default, the field shows the column paired by its role (see [How columns become series](#how-columns-become-series)). The field applies to the selected series only, even in **Whole group** scope, because an error column is data, not style. It is not shown for a histogram or for a series made from a row.
+- **Y error** and **X error** (in **Series Properties**) choose the column of uncertainties of the series. **None** is the first choice and removes the error bars. The list holds the other columns of the same worksheet. By default, the field shows the column paired by its role (see [How columns become series](#how-columns-become-series)). The field applies to the selected series only, because an error column is data, not style. It is not shown for a histogram or for a series made from a row.
 - Error bars are drawn for every plot type as soon as the series has an error column: **Line**, **Scatter**, **Line + Symbol**, **Bar** and **Line + Error Bars**. A whisker is drawn above and below each point for **Y error**, and left and right for **X error**.
 - With a script, `pyst.plot` pairs the error columns the same way. The `x_error` and `y_error` options choose a column explicitly, and `None` goes without. See [The pyst API](../scripting/api.md).
 
 ### Series groups
 
-Series added together form a group. In **Series Properties**, the **Group** section lets you:
+Series added together form a group. In the list of **Series Properties**, a group is a header with its curves below it, and the header is what you click to set the group.
 
-- Choose **None**, an existing group or **New group** for the selected series.
-- Click **Leave Group** to detach the series. It keeps its style.
-- Give the group a **Name**.
-- Use **Move Group Up** and **Move Group Down**.
-- Use **Ungroup** to turn the members back into single series.
-- Use **Delete Group** to delete the group and all its series.
+The **group page** (click the header) has:
 
-The **Edit** choice decides what a change applies to:
+- **Group**: the **Name** of the group, **Ungroup** to turn the members back into single series, and **Delete Group** to delete the group and all its series.
+- **Colors**: a **Gradient** (**Blue to Red**, **Viridis**, **Plasma** and others, or **Custom** with your own colors added by **Add Color**), spread over the curves in list order. You can save a custom gradient in the project or for yourself. The color bar is not set here: see [Color bar](#color-bar).
+- **All curves**: the **Y axis**, and **Bins** or **Width (X units)** when every curve of the group is a histogram or a bar; a group that mixes types shows neither. What you change is copied to each member.
+- The **Line** and **Symbol** of every curve of the group: what you change is copied to each member.
 
-- **Whole group (n series)**: the default. Line style, line width, symbol shape and symbol size are copied to every member.
-- **This series only**: only the selected series changes.
+The **curve page** (click a curve) has the fields of that curve, then a **Group** row to choose **None**, an existing group or **New group**, and **Leave Group** to detach the curve, which keeps its style. Its line and symbol touch this curve only. Its colors stay editable and override the gradient of the group; they are grayed out only while the color bar gives them.
 
-Name, plot type, visibility and colors always stay per series. With the whole group selected, the colors are hidden and a **Color gradient** takes over. Pick one of the gradients (**Blue to Red**, **Viridis**, **Plasma** and others), or choose **Custom** and add your own colors with **Add Color**. A gradient spreads its colors over the series in list order. You can save a custom gradient in the project or for yourself.
+To change the order, select the group header or a curve and use **Move Up** and **Move Down** under the list: they move what is selected, the whole group or the one curve. You can also drag a header or a row.
 
 ## Axes
 
@@ -340,17 +338,18 @@ Drag the legend to move it anywhere on the figure. Right-click it and choose **R
 
 A color bar colors the curves of one or more groups by a **value** instead of by their rank in the group, and shows the scale. It replaces the entries of those groups in the legend. Each layer has at most one bar. It is the way to show, for example, the time of each spectrum of a kinetic: the curves keep the gradient of their group, and the bar says which color is which time.
 
-To put a group on the bar, open the page of the group in the Series window and tick **On the color bar**, or open the **Legend** tab of Graph Properties, unfold the **Color bar** section at the bottom (it is closed until the layer has a bar, and opens by itself once the bar is shown), tick **Show color bar**, then tick **On the bar** for each group. A group that had no color gradient gets the first one of the list. Unticking **On the bar** gives the curves their own colors and legend entries back: a group left off the bar, like a reference spectrum, keeps its color and its legend entry. While a group is on a visible bar, the line and symbol colors of its curves are greyed out in the Series window: the color comes from the bar.
+The whole bar is set in one place: the **Legend** tab of Graph Properties, **Color bar** section at the bottom (it is closed until the layer has a bar, and opens by itself once the bar is shown). Tick **Show color bar**, then tick the groups to put on the bar in its **Groups** table. A group that had no color gradient gets the first one of the list. Unticking a group gives the curves their own colors and legend entries back: a group left off the bar, like a reference spectrum, keeps its color and its legend entry. While a group is on a visible bar, the line and symbol colors of its curves are greyed out in the Series window: the color comes from the bar. Under **Show color bar**, a small preview of the bar follows each change: one strip per ticked group, with the group names above it, and under it the graduations of its **Ticks** setting and the break labels.
 
-<img src="../images/graphs-properties-color-bar.png" alt="The Graph Properties window on its Legend tab, with the Color bar section open: the series group Kinetics on the bar, its Range row, Chain the segments, then the value, placement and title rows." width="640">
+<img src="../images/graphs-properties-color-bar.png" alt="The Graph Properties window on its Legend tab, with the Color bar section open: Show color bar ticked, then the Groups table (Kinetics ticked, with its gradient and its From and to range), the Breaks, Value and Look blocks." width="640">
 
 The **Color bar** section has:
 
 - **Show color bar**. Cleared, the curves get their own colors and legend entries back; the settings are kept.
-- **Series groups**. Every group of the layer is listed, in the order of the graph (the same order as in the Object Manager), each with an **On the bar** box. The order of the bar always follows this order; there is nothing to move. Between two groups that are on the bar, a line **Break label** holds the Typst text written under the bar, right of the value of the break between them; there is none after the last group. The label stays with the group above it, so it comes back when you tick again a group you had cleared below it. Under each group on the bar, a **Range** row shows **From** and **to**, where empty means **Auto**, the smallest and the largest value of the curves of the group. **Chain the segments** makes each segment start where the previous one ends: groups of 0 to 57 and 0 to 25 are drawn from 0 to 57 and from 57 to 82. The colors do not change, only the scale.
-- **Value from**. The header row that gives the value of each curve: **x'** (the default), **Comments**, **Long Name**, **Short Name** or **Units**. For a row series, **Row series** chooses **No value** or **Value of column…** with the column to read. A cell that holds text or a unit (`57 min`) has no value. The value is read each time the figure is drawn: change the x' of a column and the color follows. A line such as **1 curve has no value** lists the curves of the bar that have none; they keep their own color and are left off the bar.
-- **Scale**: **Linear** or **Log**. On a log scale a value of zero or less has no color.
-- **Position**: the four corners of the plot area, **Below the frame** or **Right of the frame**. Outside the frame the figure grows to make room; the plot area keeps its size. **Orientation** (**Horizontal** or **Vertical**) is greyed out for those two places, which force it. Drag the bar to move it anywhere on the figure; **Position** then reads **Dragged**, and choosing any place in the list, even **Below the frame**, brings the bar back there. A bar inside the plot area keeps its size when moved and is not stretched: click it, then pull one of the small squares around it, as for a rectangle drawn on the graph, to make it longer, shorter, thicker or thinner. The texts of the bar keep their font size and are placed again around the strip. Below or right of the frame the length follows the frame and only the thickness can be pulled. Choosing another **Position** keeps the size; a drag of the bar is undone in one step.
+- **Groups**. A table with one row per series group of the layer, in the order of the graph (the same order as in the Object Manager); the order of the bar always follows it, there is nothing to move. Each row has a box with the name of the group (ticked, the group is on the bar), its gradient, and a **From** and **to** range (empty means **Auto**, the smallest and the largest value of the curves of the group; grayed out, with the reason, while the group is not ticked). A group has to be grouped first, in the Series window, to appear here.
+- **Breaks**. Shown only with two groups or more on the bar. One row per break, named by its two neighbours (**Kinetics | Cooling**), with its **Break label**: the Typst text written under the bar, right of the value of the break between the two groups. The label stays with the group above it, so it comes back when you tick again a group you had cleared below it. **Chain the segments** makes each segment start where the previous one ends: groups of 0 to 57 and 0 to 25 are drawn from 0 to 57 and from 57 to 82. The colors do not change, only the scale.
+- **Value from** (block **Value**). The header row that gives the value of each curve: **x'** (the default), **Comments**, **Long Name**, **Short Name** or **Units**. For a row series, **Row series** chooses **No value** or **Value of column…** with the column to read. A cell that holds text or a unit (`57 min`) has no value. The value is read each time the figure is drawn: change the x' of a column and the color follows. A line such as **1 curve has no value** lists the curves of the bar that have none; they keep their own color and are left off the bar.
+- **Scale** (block **Value**): **Linear** or **Log**. On a log scale a value of zero or less has no color.
+- **Position** (block **Look**): the four corners of the plot area, **Below the frame** or **Right of the frame**. Outside the frame the figure grows to make room; the plot area keeps its size. **Orientation** (**Horizontal** or **Vertical**) is greyed out for those two places, which force it. Drag the bar to move it anywhere on the figure; **Position** then reads **Dragged**, and choosing any place in the list, even **Below the frame**, brings the bar back there. A bar inside the plot area keeps its size when moved and is not stretched: click it, then pull one of the small squares around it, as for a rectangle drawn on the graph, to make it longer, shorter, thicker or thinner. The texts of the bar keep their font size and are placed again around the strip. Below or right of the frame the length follows the frame and only the thickness can be pulled. Choosing another **Position** keeps the size; a drag of the bar is undone in one step.
 - **Ticks**: **Ends and breaks** (the default) or **Automatic**.
 - **Title**: Typst text written under the bar.
 

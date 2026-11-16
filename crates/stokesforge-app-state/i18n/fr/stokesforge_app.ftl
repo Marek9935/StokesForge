@@ -958,6 +958,9 @@ plot-series-symbol-color = Couleur du symbole
 curve-window-title = Propriétés des séries — { $name }
 curve-group-name = Groupe { $number }
 curve-group-section = Groupe
+curve-section = Courbe
+curve-group-curves-section = Toutes les courbes
+curve-colors-section = Couleurs
 curve-group-field = Groupe
 curve-group-none = Aucun
 curve-group-new = Nouveau groupe
@@ -975,19 +978,6 @@ curve-group-ungroup =
 curve-group-delete =
     Supprimer le groupe
     .hint = Retire du graphique le groupe et toutes ses séries
-curve-group-move-up =
-    Monter le groupe
-    .hint = Remonte tout le groupe dans l'ordre de tracé
-curve-group-move-down =
-    Descendre le groupe
-    .hint = Fait descendre tout le groupe dans l'ordre de tracé
-curve-scope-field = Modifier
-curve-scope-series = Cette série seulement
-curve-scope-group = Tout le groupe ({ $count } séries)
-curve-scope-group-note = Le style et l'épaisseur du trait, la forme et la taille des symboles s'appliquent à toutes les séries du groupe. Le nom, le type, la visibilité et les couleurs restent propres à chaque série ; répartissez les couleurs avec le nuancier ci-dessous.
-curve-scope-series-note = Les changements ne touchent que cette série. Elle reste dans son groupe ; « Quitter le groupe » la détache.
-curve-scope-locked = Réglage propre à une série : choisissez « Cette série seulement » pour le modifier
-curve-gradient-locked = Choisissez « Tout le groupe » pour appliquer un nuancier
 curve-gradient-saved = { $name } ({ $target })
 curve-gradient-delete =
     Supprimer
@@ -1000,7 +990,6 @@ curve-gradient-save =
     Enregistrer
     .hint = Enregistre le nuancier personnalisé dans le projet ou pour l'utilisateur
     .disabled = Donnez d'abord un nom au nuancier
-curve-gradient-section = Nuancier
 curve-gradient-field = Nuancier
 curve-gradient-custom = Personnalisé
 curve-gradient-stop = Couleur { $number }
@@ -1077,18 +1066,20 @@ plot-legend-row-gap = Espace entre les lignes (pt)
 plot-legend-column-gap = Espace entre les colonnes (pt)
 plot-legend-swatch-length = Longueur de l'échantillon de trait (pt)
 
-# Onglet Barre de couleurs (#499)
+# Section Barre de couleurs de l'onglet Légende (#499, #510)
 
 plot-color-bar-section = Barre de couleurs
 plot-color-bar-show =
     Afficher la barre de couleurs
     .hint = Colore les courbes des groupes de la barre selon leur valeur, et remplace leurs entrées dans la légende. Masquée, la barre rend aux courbes leurs couleurs et leurs entrées de légende.
-plot-color-bar-groups-section = Groupes de séries
+plot-color-bar-groups-section = Groupes
+plot-color-bar-breaks-section = Ruptures
+plot-color-bar-break-between = { $left } | { $right }
+plot-color-bar-group-on =
+    Sur la barre de couleurs
+    .hint = Colore les courbes de ce groupe selon leur valeur sur la barre de couleurs de la couche, et retire leurs entrées de la légende. Un groupe sans nuancier reçoit le premier nuancier prédéfini.
 plot-color-bar-group-break = Étiquette de rupture
     .hint = Texte Typst écrit sous la barre, à droite de la valeur de la rupture entre ce groupe et le suivant sur la barre. Laisser vide pour aucune. Conservé avec ce groupe.
-plot-color-bar-group-on = Sur la barre
-    .hint = Colore les courbes de ce groupe selon leur valeur sur la barre, et retire leurs entrées de la légende. Décoché, le groupe garde ses couleurs et ses entrées de légende.
-plot-color-bar-range = Plage
 plot-color-bar-no-series-groups = Cette couche n'a aucun groupe de séries. Groupez d'abord ses courbes, dans la fenêtre Séries.
 plot-color-bar-chain =
     Enchaîner les segments
@@ -1106,7 +1097,7 @@ plot-color-bar-no-value =
         [one] { $count } courbe n'a pas de valeur
        *[other] { $count } courbes n'ont pas de valeur
     }
-plot-color-bar-layout-section = Emplacement
+plot-color-bar-look-section = Aspect
 plot-color-bar-position = Position
 plot-color-bar-position-dragged = Déplacée
 plot-color-bar-position-below = Sous le cadre
@@ -1122,10 +1113,9 @@ plot-color-bar-title = Titre
     .hint = Texte Typst écrit sous la barre. Laisser vide pour aucun.
 plot-color-bar-unknown = Par défaut (réglage d'une version plus récente)
 disabled-color-bar-off = Activez d'abord « Afficher la barre de couleurs »
-curve-on-color-bar =
-    Sur la barre de couleurs
-    .hint = Colore les courbes de ce groupe selon leur valeur sur la barre de couleurs de la couche, et retire leurs entrées de la légende.
-curve-color-by-bar = La couleur vient de la barre de couleurs de cette couche. Retirez le groupe de la barre pour la régler ici.
+disabled-color-bar-group-off = Cochez d'abord le groupe : seul un groupe de la barre a une plage
+curve-color-overrides-gradient = Remplace le nuancier du groupe
+curve-color-by-bar = La couleur vient de la barre de couleurs de cette couche. Retirez le groupe de la barre pour la régler ici (Propriétés du graphique, Légende, Barre de couleurs).
 
 # Onglet Thème
 

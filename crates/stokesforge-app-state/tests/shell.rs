@@ -13007,6 +13007,39 @@ fn object_manager_placement_of_series_groups_and_objects_is_undoable() {
     assert_eq!(state.revision(), revision);
 }
 
+/// #510: a series group opens the Series window on its group page
+/// (`selected_group`), a series on its curve page. Witness: the `SeriesGroup`
+/// arm that leaves `selected_group` empty fails the first assertion.
+#[test]
+fn object_manager_properties_choose_the_group_page_or_the_curve_page() {
+    use stokesforge_app_state::object_manager::VisibilityTarget as T;
+    use stokesforge_plot::{SeriesGroupRef, SeriesRef};
+    let dir = tempfile::tempdir().unwrap();
+    let (mut project, graph, mut spec) = object_manager_project();
+    {
+        let panel = spec.panels.get_mut(0).unwrap();
+        panel.series[1].group = Some(1);
+        panel.series[2].group = Some(1);
+    }
+    project.set_plot_spec(graph, spec).unwrap();
+    let (_session, mut state) = start(project, &dir.path().join("pages.stf"));
+    state.dispatch(Action::OpenObjectProperties {
+        graph,
+        target: T::SeriesGroup(SeriesGroupRef::new(0, 1)),
+    });
+    assert_eq!(state.plot_settings().unwrap().tab, PlotSettingsTab::Series);
+    let edit = state.plot_edit().unwrap();
+    assert_eq!(edit.selected_group, Some(1));
+    assert_eq!(edit.selected_series, 1, "its first member");
+    state.dispatch(Action::OpenObjectProperties {
+        graph,
+        target: T::Series(SeriesRef::new(0, 2)),
+    });
+    let edit = state.plot_edit().unwrap();
+    assert_eq!(edit.selected_group, None, "a curve opens the curve page");
+    assert_eq!(edit.selected_series, 2);
+}
+
 #[test]
 fn object_manager_properties_open_the_series_of_the_right_layer_and_undo() {
     use stokesforge_app_state::object_manager::VisibilityTarget as T;
@@ -19044,6 +19077,120 @@ mod origin_import {
         assert!(state
             .status_history()
             .any(|message| message.text == tr!("status-origin-drop-refused")));
+    }
+
+    /// Timing (#536), measurement only: with a real private Origin file, the
+    /// time from the drop to the ready chooser, the default import (revision
+    /// delta, total), and the undo. Prints counts and durations only. The
+    /// folder is `STOKESFORGE_PRIVATE_OPJ_DIR` (default `test/private_file/`
+    /// of the main checkout); a missing folder skips the test.
+    #[test]
+    #[ignore = "needs the private Origin files; measurement only"]
+    fn private_origin_import_timing() {
+        let folder = std::env::var_os("STOKESFORGE_PRIVATE_OPJ_DIR").map_or_else(
+            || PathBuf::from("/home/aliocha/dev_project/StokesForge/test/private_file/"),
+            PathBuf::from,
+        );
+        let Ok(entries) = std::fs::read_dir(&folder) else {
+            eprintln!("no private Origin folder: nothing measured");
+            return;
+        };
+        let mut opju = Vec::new();
+        let mut opj: Vec<(u64, PathBuf)> = Vec::new();
+        for path in entries.flatten().map(|e| e.path()) {
+            let size = std::fs::metadata(&path).map_or(0, |m| m.len());
+            match path.extension().and_then(|e| e.to_str()) {
+                Some("opju") => opju.push((size, path)),
+                Some("opj") => opj.push((size, path)),
+                _ => {}
+            }
+        }
+        // The user's real file is the largest `.opju`; then the largest `.opj`.
+        let mut chosen = Vec::new();
+        opju.sort();
+        chosen.extend(opju.pop().map(|(_, p)| ("largest .opju", p)));
+        opj.sort();
+        chosen.extend(opj.pop().map(|(_, p)| ("largest .opj", p)));
+        if chosen.is_empty() {
+            eprintln!("no Origin file: nothing measured");
+            return;
+        }
+        let runs: Vec<_> = chosen
+            .into_iter()
+            .flat_map(|(label, path)| [(label, path.clone(), false), (label, path, true)])
+            .collect();
+        for (label, path, all_ticked) in runs {
+            let _recipes = isolate_recipe_store();
+            let dir = tempfile::tempdir().unwrap();
+            let (_session, mut state) = start_demo(dir.path());
+
+            let started = std::time::Instant::now();
+            state.dispatch(Action::DropFiles {
+                paths: vec![path],
+                target_book: None,
+            });
+            wait_import(&mut state);
+            let chooser = started.elapsed();
+            assert!(state.origin_import_open(), "the chooser is open");
+
+            let started = std::time::Instant::now();
+            let files = state.origin_import_files();
+            let view = started.elapsed();
+            if all_ticked {
+                // Also take every sheet the default selection leaves out.
+                for (file, view) in files.iter().enumerate() {
+                    for (book, b) in view.books.iter().enumerate() {
+                        for (sheet, s) in b.sheets.iter().enumerate() {
+                            if !s.ticked {
+                                state.dispatch(Action::ToggleOriginSheet { file, book, sheet });
+                            }
+                        }
+                    }
+                }
+            }
+            let files = state.origin_import_files();
+            let books: usize = files.iter().map(|f| f.books.len()).sum();
+            let sheets: usize = files
+                .iter()
+                .flat_map(|f| &f.books)
+                .map(|b| b.sheets.len())
+                .sum();
+            let ticked: usize = files
+                .iter()
+                .flat_map(|f| &f.books)
+                .flat_map(|b| &b.sheets)
+                .filter(|s| s.ticked)
+                .count();
+            let ticked_columns: usize = files
+                .iter()
+                .flat_map(|f| &f.books)
+                .flat_map(|b| &b.sheets)
+                .filter(|s| s.ticked)
+                .map(|s| s.columns)
+                .sum();
+
+            let revision_before = state.revision();
+            let started = std::time::Instant::now();
+            state.dispatch(Action::ImportOrigin);
+            let import = started.elapsed();
+            let delta = state.revision() - revision_before;
+
+            let started = std::time::Instant::now();
+            state.dispatch(Action::Undo);
+            let undo = started.elapsed();
+
+            eprintln!(
+                "timing {label}{}: {books} books, {sheets} sheets ({ticked} ticked, \
+                 {ticked_columns} columns); drop to chooser ready {chooser:.2?}; \
+                 origin_import_files {view:.2?}; import {import:.2?}, revision delta \
+                 {delta}; undo {undo:.2?}",
+                if all_ticked {
+                    " (all sheets ticked)"
+                } else {
+                    " (default ticks)"
+                }
+            );
+        }
     }
 
     #[test]

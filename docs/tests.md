@@ -1102,6 +1102,14 @@ Gestures go through egui events, never through a direct call of the
 
 | Mutant (what is broken) | Seen by |
 |---|---|
+| the list selection no longer chooses the page (header pick sets only the series) | `the_list_selection_chooses_the_group_page_or_the_curve_page` (`app/curve_settings.rs`) |
+| the list's Move Up / Down always `move_series`, even on a group page | `the_list_buttons_move_the_selected_group_or_the_selected_series` |
+| a group page that shares the target key of its first member | `a_width_typed_on_the_group_page_reaches_every_member_and_not_the_reverse` |
+| the bar rows shown off the bar, or a break label on the last group | `the_group_page_carries_the_rows_of_its_segment_on_the_bar` |
+| a stale `selected_group` after the group is gone | `a_group_removed_under_the_draft_gives_the_page_back_to_a_curve` |
+| the `SeriesGroup` arm of `OpenObjectProperties` leaves `selected_group` empty | `object_manager_properties_choose_the_group_page_or_the_curve_page` (`stokesforge-app-state/tests/shell.rs`) |
+| the Color bar section names every group, not those on the bar | `the_color_bar_section_names_the_groups_on_the_bar` (`app/plot_settings.rs`) |
+| a link between the two windows skipping `pick_allowed`, or not setting `selected_group` / the unfold | `the_links_move_between_the_bar_look_and_the_group_page` |
 | `membership_editor`: the selection no longer follows the moved series (`*index = moved` removed) | `the_dropdown_joins_a_group_and_the_editor_follows_the_series` (`app/curve_settings.rs`) |
 | graph: the "group selected" branch skipped, Del targets the first series | `shortcuts_of_a_selected_group_target_the_group` (`app/graph_window.rs`) |
 | Ctrl+↑/↓ without the `can_move_group` bound | same |

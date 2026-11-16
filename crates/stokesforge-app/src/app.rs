@@ -1513,6 +1513,16 @@ impl StokesForgeApp {
         // dialog as the import window, painted as long as
         // `self.state.plot_settings()` is `Some`.
         plot_settings_window(ctx, &mut self.state);
+        // A row chosen in the Series list selects it on the graph (#510).
+        if let Some((graph, target)) = plot_settings::take_list_selection(ctx) {
+            if let Some(spec) =
+                stokesforge_core::compose::current_plot_spec(self.state.tree(), graph)
+            {
+                self.with_graph_view(graph, |view| {
+                    select_manager_target(view, Some(target), &spec)
+                });
+            }
+        }
         column_metadata_window(ctx, &self.state, actions);
         status_history_window(ctx, &self.state, actions);
         low_r2_list_window(ctx, &self.state, actions);

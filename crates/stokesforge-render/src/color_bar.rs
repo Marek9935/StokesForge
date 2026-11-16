@@ -93,7 +93,7 @@ const TICK_LEN: i32 = 6;
 
 /// Where a tick label sits against its tick, along the strip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Anchor {
+pub enum Anchor {
     /// Centred on the tick.
     Centre,
     /// Ends at the tick (the end of the segment before a gap).
@@ -105,6 +105,8 @@ enum Anchor {
 /// One drawn segment of the bar.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BarSegment {
+    /// The series group (`SeriesSpec::group`) the segment colours.
+    pub group: u32,
     /// Range of the values of its curves (typed ends completed).
     pub natural: (f64, f64),
     /// Range as drawn on the scale (shifted by `chain`).
@@ -117,6 +119,7 @@ pub struct BarSegment {
 
 /// A segment with the members that have a value.
 struct Resolved {
+    group: u32,
     members: Vec<usize>,
     natural: (f64, f64),
     stops: Vec<String>,
@@ -160,6 +163,7 @@ fn resolve_segments(panel: &ResolvedPanel<'_>, bar: &ColorBarSpec) -> Vec<Resolv
                 .collect(),
         };
         out.push(Resolved {
+            group: segment.group,
             members,
             natural,
             stops,
@@ -181,6 +185,7 @@ pub fn bar_segments(panel: &ResolvedPanel<'_>) -> Vec<BarSegment> {
         .into_iter()
         .zip(drawn)
         .map(|(segment, drawn)| BarSegment {
+            group: segment.group,
             natural: segment.natural,
             drawn,
             stops: segment.stops,
@@ -609,27 +614,7 @@ pub fn draw<DB: DrawingBackend>(
     let strip_v = i32::from(labels) * MARKER_ROW;
 
     // Segment extents along the strip.
-    let spans: Vec<f64> = segments
-        .iter()
-        .map(|segment| segment_span(&bar.scale.effective(), segment.drawn))
-        .collect();
-    let gaps = SEG_GAP * (segments.len() as i32 - 1);
-    let usable = f64::from((length - gaps).max(segments.len() as i32));
-    let total: f64 = spans.iter().sum();
-    let mut starts = Vec::with_capacity(segments.len());
-    let mut lens = Vec::with_capacity(segments.len());
-    let mut cursor = 0.0f64;
-    for span in &spans {
-        let share = if total > 0.0 {
-            span / total
-        } else {
-            1.0 / segments.len() as f64
-        };
-        let len = (usable * share).round().max(1.0);
-        starts.push(cursor.round() as i32);
-        lens.push(len as i32);
-        cursor += len + f64::from(SEG_GAP);
-    }
+    let (starts, lens) = segment_extents(&bar.scale.effective(), segments, length);
 
     // The strip: one rounded bar per segment. The rounded ends are a cap and
     // two filled circles per end (the corners), the body is painted in
@@ -800,6 +785,39 @@ pub fn draw<DB: DrawingBackend>(
     Ok(Some(((bx, by), (bw.max(1) as u32, bh.max(1) as u32))))
 }
 
+/// Where each segment of a strip of `length` pixels starts and how long it
+/// is, in bar order: lengths proportional to the drawn ranges on `scale`
+/// (equal shares when no range has a width), `SEG_GAP` between neighbours.
+/// The drawing and the preview of the settings page both use it.
+pub fn segment_extents(
+    scale: &ColorBarScale,
+    segments: &[BarSegment],
+    length: i32,
+) -> (Vec<i32>, Vec<i32>) {
+    let spans: Vec<f64> = segments
+        .iter()
+        .map(|segment| segment_span(scale, segment.drawn))
+        .collect();
+    let gaps = SEG_GAP * (segments.len() as i32 - 1);
+    let usable = f64::from((length - gaps).max(segments.len() as i32));
+    let total: f64 = spans.iter().sum();
+    let mut starts = Vec::with_capacity(segments.len());
+    let mut lens = Vec::with_capacity(segments.len());
+    let mut cursor = 0.0f64;
+    for span in &spans {
+        let share = if total > 0.0 {
+            span / total
+        } else {
+            1.0 / segments.len() as f64
+        };
+        let len = (usable * share).round().max(1.0);
+        starts.push(cursor.round() as i32);
+        lens.push(len as i32);
+        cursor += len + f64::from(SEG_GAP);
+    }
+    (starts, lens)
+}
+
 /// Length weight of a segment on the strip.
 fn segment_span(scale: &ColorBarScale, (from, to): (f64, f64)) -> f64 {
     let span = match scale {
@@ -847,7 +865,7 @@ fn position(scale: &ColorBarScale, (from, to): (f64, f64), value: f64) -> Option
 /// (a chain, or data that meet) that value is the break, put at the centre of
 /// the gap (the next start has no tick of its own); otherwise each edge of the
 /// gap has its own tick and its label hugs it, away from the gap.
-fn tick_marks(
+pub fn tick_marks(
     bar: &ColorBarSpec,
     segments: &[BarSegment],
     starts: &[i32],
@@ -933,6 +951,33 @@ fn decades(from: f64, to: f64) -> Vec<f64> {
 mod tests {
     use super::*;
     use stokesforge_plot::TextAnchor;
+
+    fn drawn(from: f64, to: f64) -> BarSegment {
+        BarSegment {
+            group: 1,
+            natural: (from, to),
+            drawn: (from, to),
+            stops: Vec::new(),
+            label: String::new(),
+        }
+    }
+
+    /// Segment lengths follow the drawn ranges (10-40 against 50-60 is three
+    /// times longer), a gap between them; a log scale weighs decades; ranges
+    /// without width share equally. Witness: equal shares fail the first.
+    #[test]
+    fn segment_extents_follow_the_drawn_ranges() {
+        let two = [drawn(10.0, 40.0), drawn(50.0, 60.0)];
+        let (starts, lens) = segment_extents(&ColorBarScale::Linear, &two, 306);
+        assert_eq!(lens, [225, 75]);
+        assert_eq!(starts, [0, 231]);
+        let logs = [drawn(1.0, 10.0), drawn(10.0, 1000.0)];
+        let (_, lens) = segment_extents(&ColorBarScale::Log, &logs, 306);
+        assert_eq!(lens, [100, 200]);
+        let flat = [drawn(5.0, 5.0), drawn(7.0, 7.0)];
+        let (_, lens) = segment_extents(&ColorBarScale::Linear, &flat, 306);
+        assert_eq!(lens, [150, 150]);
+    }
 
     fn bar_at(position: ColorBarPosition, anchor: Option<TextAnchor>) -> ColorBarSpec {
         ColorBarSpec {
