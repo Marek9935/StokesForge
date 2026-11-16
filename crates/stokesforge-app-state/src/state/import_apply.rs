@@ -50,8 +50,6 @@ pub struct ImportRun {
     models: Vec<String>,
     for_window: Vec<PathBuf>,
     origin: Vec<origin_import::OriginRead>,
-    /// Children of the root before the commands.
-    books_before: usize,
     /// The scratch state, once the commands ran.
     done: Option<Box<AppState>>,
     /// The scratch state could not be built.
@@ -121,12 +119,6 @@ impl AppState {
             self.gesture(|state| state.import_leftovers(dropped, for_window, origin));
             return None;
         }
-        let root = self.snapshot.tree.root();
-        let books_before = self
-            .snapshot
-            .tree
-            .node(root)
-            .map_or(0, |node| node.children().len());
         self.import_applying = true;
         Some(ImportRun {
             // The sender of its own, as a script's (#21): a gesture of the
@@ -145,7 +137,6 @@ impl AppState {
             models: reply.models,
             for_window: reply.for_window,
             origin,
-            books_before,
             done: None,
             start_error: None,
         })
@@ -161,7 +152,6 @@ impl AppState {
             dropped,
             for_window,
             origin,
-            books_before,
             ..
         } = run;
         let Some(scratch) = done else {
@@ -185,14 +175,8 @@ impl AppState {
             self.last_import = Some(last);
         }
         self.refresh();
-        let root = self.snapshot.tree.root();
-        let created: Vec<NodeId> = self
-            .snapshot
-            .tree
-            .node(root)
-            .map(|node| node.children().iter().skip(books_before).copied().collect())
-            .unwrap_or_default();
-        for book in created {
+        // The workbooks the scratch state created, wherever they sit.
+        for book in scratch.take_created_books() {
             if self
                 .snapshot
                 .tree

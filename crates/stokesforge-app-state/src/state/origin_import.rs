@@ -32,6 +32,7 @@ use stokesforge_importer::{
     ImportFailure, OriginSelection,
 };
 
+use super::import_plans::{BookApply, BookTarget, Naming, SheetApply};
 use super::{AppState, ImportDestination, ImportSource};
 use crate::errors;
 use crate::tr;
@@ -384,31 +385,36 @@ impl AppState {
                 if sheets.is_empty() {
                     continue;
                 }
-                let Some(book) = self.create_import_book(None) else {
-                    failures.push(tr!("error-import-create-book", name = plan.name.clone()));
-                    continue;
-                };
-                self.rename_if_usable(book, &plan.name);
-                book_count += 1;
-                created = true;
-                for (planned, sheet) in sheets {
-                    let Some(target) = self.add_bare_sheet(book) else {
-                        failures.push(tr!(
-                            "error-import-create-sheet",
-                            name = planned.name.clone()
-                        ));
+                let root = self.snapshot.tree.root();
+                let books = vec![BookApply {
+                    target: BookTarget::New {
+                        name: Some(plan.name.clone()),
+                        failed_names: vec![plan.name.clone()],
+                    },
+                    sheets: sheets
+                        .iter()
+                        .map(|(planned, sheet)| SheetApply {
+                            name: planned.name.clone(),
+                            columns: sheet.columns.iter().collect(),
+                            // Raw Data is a classic-import rule, never Origin.
+                            raw: false,
+                        })
+                        .collect(),
+                }];
+                let outcomes = self.apply_book_plans(
+                    root,
+                    Naming::Silent,
+                    books,
+                    &mut failures,
+                    &mut |column| Some(make_origin_column(origin_book, column)),
+                );
+                for outcome in outcomes {
+                    if outcome.book.is_none() {
                         continue;
-                    };
-                    self.rename_if_usable(target, &planned.name);
-                    sheet_count += 1;
-                    for column in &sheet.columns {
-                        self.execute(Command::AddColumn {
-                            sheet: target,
-                            index: None,
-                            name: None,
-                            column: make_origin_column(origin_book, column),
-                        });
                     }
+                    book_count += 1;
+                    created = true;
+                    sheet_count += outcome.sheets.iter().filter(|ok| **ok).count();
                 }
             }
             if created {
@@ -440,7 +446,7 @@ impl AppState {
     /// Gives `id` the Origin name `name` when the model would accept it: valid,
     /// and not the name of a sibling (case ignored). Otherwise `id` keeps its
     /// automatic name and nothing is said: a refused name is not a failure.
-    fn rename_if_usable(&mut self, id: NodeId, name: &str) {
+    pub(super) fn rename_if_usable(&mut self, id: NodeId, name: &str) {
         let tree = &self.snapshot.tree;
         let Some(parent) = tree.node(id).and_then(Node::parent) else {
             return;

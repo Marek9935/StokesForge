@@ -20332,3 +20332,70 @@ fn applying_a_theme_to_two_graphs_is_one_undo_step() {
     state.dispatch(Action::Undo);
     assert_eq!(specs(&state), before);
 }
+
+/// #537: an import reports the workbooks it created by id, not by counting the
+/// root's children. Here they sit in a folder, not at the root. Witness:
+/// computing the ids from the root's children again finds none of them.
+#[test]
+fn an_import_reports_the_workbooks_it_created_inside_a_folder_and_one_undo_removes_them() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let root = state.tree().root();
+    state.dispatch(Action::AddFolder { parent: root });
+    let folder = *state.tree().node(root).unwrap().children().last().unwrap();
+    let _ = state.take_created_books();
+    let root_before = state.tree().node(root).unwrap().children().to_vec();
+
+    state.import_empty_books_for_test(folder, &["First", "Second"]);
+
+    let created = state.take_created_books();
+    let in_folder = state.tree().node(folder).unwrap().children().to_vec();
+    assert_eq!(created.len(), 2);
+    assert_eq!(created, in_folder, "ids, in creation order");
+    assert_eq!(
+        state.tree().node(root).unwrap().children(),
+        root_before.as_slice(),
+        "nothing new at the root"
+    );
+    assert!(state.take_created_books().is_empty(), "taken once");
+
+    state.dispatch(Action::Undo);
+    assert!(state.tree().node(folder).unwrap().children().is_empty());
+}
+
+/// #537: a project whose root already holds workbooks reports only the new
+/// ones. Witness: returning every root workbook includes the demo's.
+#[test]
+fn an_import_into_a_project_with_workbooks_reports_only_the_new_ones() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let root = state.tree().root();
+    let existing = state.tree().node(root).unwrap().children().to_vec();
+    assert!(!existing.is_empty());
+    let _ = state.take_created_books();
+    let paths: Vec<PathBuf> = ["a.csv", "b.csv"]
+        .iter()
+        .map(|name| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, "1,10\n2,20\n").unwrap();
+            path
+        })
+        .collect();
+
+    state.dispatch(Action::ImportFiles {
+        destination: ImportDestination::NewBookPerFile,
+        recipe: stokesforge_import::ImportRecipe::new("Untitled"),
+        paths,
+    });
+
+    let created = state.take_created_books();
+    let children = state.tree().node(root).unwrap().children().to_vec();
+    assert_eq!(created.len(), 2);
+    assert_eq!(
+        created,
+        children[existing.len()..],
+        "only the new, in order"
+    );
+    assert!(created.iter().all(|id| !existing.contains(id)));
+}
