@@ -3025,7 +3025,7 @@ error-theme-unknown = Ce thème n'existe plus
 error-theme-not-saved = Les thèmes n'ont pas pu être enregistrés : { $cause }
 
 # Réglages de script (#548)
-action-add-script-settings = Réglages de script
+action-add-script-settings = Ajouter des réglages de script
     .hint = Ajoute des réglages de script avec un exemple commenté, à modifier dans un formulaire
 action-import-script-settings = Réglages de script…
     .hint = Lit un fichier TOML dans de nouveaux réglages de script

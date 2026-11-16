@@ -3026,7 +3026,7 @@ error-theme-unknown = This theme no longer exists
 error-theme-not-saved = The themes could not be saved: { $cause }
 
 # Script Settings (#548)
-action-add-script-settings = Script Settings
+action-add-script-settings = Add Script Settings
     .hint = Adds Script Settings holding a commented example, edited as a form
 action-import-script-settings = Script Settings…
     .hint = Reads a TOML file into new Script Settings

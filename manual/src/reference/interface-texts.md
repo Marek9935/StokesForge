@@ -20,6 +20,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Above | Au-dessus |
 | Add Folder | Ajouter un dossier |
 | Add Graph | Ajouter un graphique |
+| Add Script Settings | Ajouter des réglages de script |
 | Add Text | Ajouter un texte |
 | Add Workbook | Ajouter un classeur |
 | Advanced | Avancé |
@@ -182,7 +183,6 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Save Project | Enregistrer le projet |
 | Save Theme As | Enregistrer le thème sous |
 | Save Theme As… | Enregistrer le thème sous… |
-| Script Settings | Réglages de script |
 | Script Settings… | Réglages de script… |
 | Select All | Tout sélectionner |
 | Select Members | Sélectionner les membres |

@@ -1293,21 +1293,6 @@ fn project_tree_node_ui(
                         }
                         ui.close();
                     }
-                    // Script Settings (#548): written as a `.toml` file, exactly as stored.
-                    if *kind == WindowKind::ScriptSettings
-                        && ui
-                            .button(tr!("action-export-script-settings"))
-                            .on_hover_text(tr!("action-export-script-settings", "hint"))
-                            .clicked()
-                    {
-                        interaction.actions.push(Action::PickFile(
-                            PickRequest::ExportScriptSettings {
-                                settings: *id,
-                                file_name: format!("{name}.toml"),
-                            },
-                        ));
-                        ui.close();
-                    }
                 });
                 let memory = ui
                     .ctx()
@@ -1331,6 +1316,22 @@ fn project_tree_node_ui(
                     interaction.actions,
                     viewport,
                 );
+                sections.section(ui, *kind == WindowKind::ScriptSettings, |ui| {
+                    // Script Settings (#548): written as a `.toml` file, exactly as stored.
+                    if ui
+                        .button(tr!("action-export-script-settings"))
+                        .on_hover_text(tr!("action-export-script-settings", "hint"))
+                        .clicked()
+                    {
+                        interaction.actions.push(Action::PickFile(
+                            PickRequest::ExportScriptSettings {
+                                settings: *id,
+                                file_name: format!("{name}.toml"),
+                            },
+                        ));
+                        ui.close();
+                    }
+                });
             });
             // S-K3: a double-click activates or restores the window, it never
             // closes it (closing is done by Close or the header). A single click

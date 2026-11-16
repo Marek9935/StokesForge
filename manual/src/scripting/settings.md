@@ -4,12 +4,12 @@ A Script Settings object holds the settings of a Python script, as a TOML text, 
 
 ## Create or import one
 
-- **File ▸ New ▸ Script Settings** adds a Script Settings object named Settings1, Settings2… in the folder you selected in the Project Manager (the root if none). It starts with a small commented example that shows every kind of field. The window opens at once.
+- **File ▸ New ▸ Add Script Settings** adds a Script Settings object named Settings1, Settings2… in the folder you selected in the Project Manager (the root if none). It starts with a small commented example that shows every kind of field. The window opens at once.
 - **File ▸ Import ▸ Script Settings…** reads a `.toml` file into a new object, named after the file. You can also drop a `.toml` file on the main window.
 
 The TOML must be exact. A file that is not valid TOML creates nothing: the status bar names the line and the reason. StokesForge does not repair or guess.
 
-In the Project Manager, a right-click on the object offers Open, Close, **Export…**, the clipboard entries, Rename, Duplicate and Delete. **Export…** writes a `.toml` file with exactly the text stored in the project, comments and spacing included. Double-click the object, or press <kbd>Enter</kbd> on it, to open its window.
+In the Project Manager, a right-click on the object offers Open and Close, the clipboard entries, Rename and Duplicate, Delete, then **Export…**. **Export…** writes a `.toml` file with exactly the text stored in the project, comments and spacing included. Double-click the object, or press <kbd>Enter</kbd> on it, to open its window.
 
 ## The Form tab
 
