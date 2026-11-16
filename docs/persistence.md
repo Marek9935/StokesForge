@@ -924,6 +924,42 @@ name repeats an earlier one (case ignored) is dropped, a name is cut at
 read back with no theme (`witness_files.rs`); `b3_hostile_project_themes`,
 `b13_project_themes_are_bounded`.
 
+## The user's themes file (#539)
+
+The graph themes kept on this machine (offered in every project) are not in a
+`.stf`: they live in `user_themes.json` of the configuration folder, written by
+`stokesforge-app-state::user_themes`. The file has its **own** `version`
+(`1`), independent of the `.stf` version. A theme is stored as the record of
+`stokesforge_persistence::encode_theme` (the same record as a project theme,
+#540), in hexadecimal, so the codec stays the only reader of theme bytes:
+
+```json
+{ "version": 1, "next_id": 4,
+  "themes":    [ { "id": 3, "data": "<hex>" } ],
+  "overrides": { "light": "<hex>", "dark": "<hex>" },
+  "uses":      { "builtin:dark": 2, "user:3": 5, "project:fig a": 1 } }
+```
+
+- `id`: stable, never reused, survives renaming. Names are unique ignoring case
+  and spaces (`same_theme_name`), and may not be `Light` or `Dark`.
+- `overrides`: an edited built-in (Light, Dark). Reset removes the key. Without
+  an override the built-in is `GraphTheme::from_colors` of the predefined colours.
+- `uses`: use counts on this machine, by `builtin:<id>`, `user:<id>` or
+  `project:<name>` (a project theme is keyed by its trimmed, lowercased name
+  only: a path would lose the count when the file moves). At most 500 project
+  counts are kept, the least used forgotten first.
+- A missing, oversized (> 64 MiB), unreadable or corrupt file reads as an empty
+  library; a theme whose record does not decode is dropped alone; at most 200
+  themes. The first write replaces a corrupt file.
+- **A newer `version` is neither read nor overwritten**: empty library,
+  read-only for the session (`UserThemes::read_only`), every write refused.
+- Writes are atomic (temporary file, rename). None of it is in the history.
+
+The default theme of new graphs is `new_graph_theme` in `preferences.json` (a
+`builtin:` or `user:` key, `null` for none; a deleted theme reads as none). It
+is applied by `AppState::with_new_graph_defaults` through the theme engine with
+every family but Texts and Axis ranges; graphs made by scripts do not take it.
+
 ## Accepted limits (2026-10-20, after #302-#305)
 
 Do not re-raise: import recipes stored with `"data_end":"Auto"` keep cutting (no migration); a Stop after a no-effect command ends in `Done` with no status message (no `RecalcEnd::Interrupted`).

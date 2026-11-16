@@ -81,10 +81,12 @@ use crate::selection::{ColumnRanks, GridCursor, Selection};
 use crate::tr;
 use crate::tree_drop::{final_order, plan_moves, MovePlace};
 use crate::user_colors::UserColors;
+use crate::user_themes::UserThemes;
 
 mod analysis;
 mod autosave;
 mod column_use;
+mod graph_themes;
 mod import_advanced;
 mod import_apply;
 mod import_auto;
@@ -3506,6 +3508,9 @@ pub struct AppState {
     /// Colors saved for the user, outside the project (see
     /// [`crate::user_colors`]).
     user_colors: UserColors,
+    /// The user's graph themes, kept on this machine (#539, see
+    /// [`crate::user_themes`]).
+    user_themes: UserThemes,
     /// Current grid selection of each displayed sheet — pure UI
     /// state, never in the history (see the head doc of
     /// [`crate::selection`]). Missing key = no selection in this
@@ -3699,6 +3704,7 @@ impl AppState {
     ) -> SessionResult<Self> {
         let snapshot = handle.snapshot()?;
         let analysis_recent = preferences.analysis_recent().to_vec();
+        let preferences_folder = preferences.config_folder().map(Path::to_path_buf);
         // Never deduced from `path`: a file that exists is not a loaded
         // project (#315). `main` sets the mark through [`AppState::mark_loaded`].
         let saved_revision = None;
@@ -3760,6 +3766,11 @@ impl AppState {
             plot_macro_open: false,
             figure_grew_in_window: false,
             user_colors: UserColors::load(),
+            // Next to the preferences actually in use: a test that injects a
+            // preferences file never reads the real library of the machine.
+            user_themes: UserThemes::load_from(
+                preferences_folder.map(|folder| folder.join(crate::user_themes::FILE_NAME)),
+            ),
             selection: std::collections::HashMap::new(),
             header_editing: None,
             formula_refusal_memo: std::cell::RefCell::new(None),
@@ -9030,12 +9041,22 @@ impl AppState {
     /// file keeps its own), and the axis titles read from the columns (#506,
     /// [`stokesforge_core::resolve::with_default_axis_titles`]). All of it
     /// rides in the creation command itself: one history step.
-    fn with_new_graph_defaults(&self, mut spec: PlotSpec) -> PlotSpec {
+    fn with_new_graph_defaults(&self, spec: PlotSpec) -> PlotSpec {
+        // The default theme first (#539: every family but the texts and the
+        // ranges), then what the Preferences say about the legend text, which
+        // wins over it. A full theme brings its own legend look, frame included; Light and Dark
+        // (colours only) leave the no-frame default alone.
+        let themed = self
+            .new_graph_theme()
+            .is_some_and(|(_, theme)| !theme.colors_only);
+        let mut spec = self.with_default_theme(spec);
         let text = self.new_graph_legend_text();
         for panel in spec.panels.iter_mut() {
             panel.legend.text.from = text.from.clone();
             panel.legend.text.template = text.template.clone();
-            panel.legend.frame = false;
+            if !themed {
+                panel.legend.frame = false;
+            }
         }
         stokesforge_core::resolve::with_default_axis_titles(&self.snapshot.tree, spec)
     }
