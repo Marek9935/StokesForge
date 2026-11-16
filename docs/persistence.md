@@ -941,10 +941,16 @@ The graph themes kept on this machine (offered in every project) are not in a
 ```
 
 - `id`: stable, never reused, survives renaming. Names are unique ignoring case
-  and spaces (`same_theme_name`), and may not be `Light` or `Dark`.
-- `overrides`: an edited built-in (Light, Dark). Reset removes the key. Without
-  an override the built-in is `GraphTheme::from_colors` of the predefined colours.
-- `uses`: use counts on this machine, by `builtin:<id>`, `user:<id>` or
+  and spaces (`same_theme_name`), and may not be the English name of a built-in.
+- `overrides`: an edited built-in, by its stable key: `light`, `dark` (#539) and,
+  since #544, `publication`, `publication-wide`, `presentation`,
+  `fit-residuals`, `kinetics`, `side-by-side`, `color-map`
+  (`stokesforge_app_state::builtin_themes::KEYS`; never the translated name).
+  Reset removes the key. Without an override the built-in is its original
+  (`GraphTheme::from_colors` for Light and Dark, a full-style theme for the
+  others). A file with only the `light` and `dark` keys reads unchanged: the
+  file `version` stays `1`, a new key is just an additional optional entry.
+- `uses`: use counts on this machine, by `builtin:<key>`, `user:<id>` or
   `project:<name>` (a project theme is keyed by its trimmed, lowercased name
   only: a path would lose the count when the file moves). At most 500 project
   counts are kept, the least used forgotten first.

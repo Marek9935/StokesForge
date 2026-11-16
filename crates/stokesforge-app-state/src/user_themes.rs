@@ -41,25 +41,28 @@
 //!
 //! # Built-ins
 //!
-//! Light and Dark start as [`GraphTheme::from_colors`] of the predefined
-//! [`THEMES`] (colour-only, form 514-4 V4). Editing one stores an **override**
-//! ([`UserThemes::set_builtin`]); [`UserThemes::reset_builtin`] removes it, and
-//! the theme then equals the original again. [`ThemeEntry::modified`] tells the
+//! The catalogue is [`crate::builtin_themes`]: Light and Dark (colour-only,
+//! form 514-4 V4) then seven full-style themes (#544). Editing one stores an
+//! **override** ([`UserThemes::set_builtin_from_graph`]), keyed in the file by the
+//! built-in's stable key (`light`, `dark`, `publication`, ...);
+//! [`UserThemes::reset_builtin`] removes it, and the theme then equals the
+//! original again. A file written before #544 holds only the `light` and
+//! `dark` keys and reads unchanged. [`ThemeEntry::modified`] tells the
 //! interface to mark an edited built-in.
 //!
 //! # Use counts
 //!
 //! Counted on this machine, per [`ThemeRef`], including project themes; the
-//! tile order is [`UserThemes::ranked`] (most used first, ties keep the list
-//! order). A count is dropped with its user theme. Project counts are capped
+//! tile order is [`UserThemes::ranked`] (Light and Dark first, then the others
+//! most used first, ties keep the list order). A count is dropped with its user theme. Project counts are capped
 //! ([`MAX_PROJECT_COUNTS`]): the least used are forgotten first.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use stokesforge_plot::{
-    same_theme_name, GraphTheme, PlotSpec, MAX_THEMES, MAX_THEME_NAME_CHARS, THEMES,
-};
+use stokesforge_plot::{same_theme_name, GraphTheme, PlotSpec, MAX_THEMES, MAX_THEME_NAME_CHARS};
+
+use crate::builtin_themes;
 
 /// Version of the file written by this build.
 pub const FILE_VERSION: u32 = 1;
@@ -70,14 +73,16 @@ const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 /// Most project themes whose use count is kept.
 pub const MAX_PROJECT_COUNTS: usize = 500;
 
-/// The names of the built-in themes, by index in [`THEMES`].
-const BUILTIN_NAMES: [&str; 2] = ["Light", "Dark"];
+/// Built-ins that always come first in the ranking, whatever their use:
+/// Light and Dark (the indexes `0` and `1` of the catalogue).
+pub const PINNED_BUILTINS: usize = 2;
 
 /// A theme designated independently of where it is stored (module
 /// documentation, « Identity »).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ThemeRef {
-    /// Built-in Light (`0`) or Dark (`1`), the index in [`THEMES`].
+    /// A built-in, by its index in the catalogue
+    /// ([`crate::builtin_themes::KEYS`]: Light `0`, Dark `1`, then the others).
     Builtin(usize),
     /// A theme of the user's library, by stable id.
     User(u64),
@@ -97,7 +102,7 @@ impl ThemeRef {
             ThemeRef::Builtin(index) => {
                 format!(
                     "builtin:{}",
-                    THEMES.get(*index).map_or("?", |theme| theme.id)
+                    builtin_themes::KEYS.get(*index).unwrap_or(&"?")
                 )
             }
             ThemeRef::User(id) => format!("user:{id}"),
@@ -108,10 +113,7 @@ impl ThemeRef {
     /// The reference of a [`ThemeRef::key`]; `None` if unreadable.
     pub fn from_key(key: &str) -> Option<Self> {
         if let Some(id) = key.strip_prefix("builtin:") {
-            return THEMES
-                .iter()
-                .position(|theme| theme.id == id)
-                .map(ThemeRef::Builtin);
+            return builtin_themes::index_of(id).map(ThemeRef::Builtin);
         }
         if let Some(id) = key.strip_prefix("user:") {
             return id.parse().ok().map(ThemeRef::User);
@@ -178,7 +180,7 @@ pub struct ThemeEntry {
 #[derive(Debug, Clone, Default)]
 pub struct UserThemes {
     themes: Vec<(u64, GraphTheme)>,
-    overrides: [Option<GraphTheme>; 2],
+    overrides: [Option<GraphTheme>; builtin_themes::COUNT],
     uses: BTreeMap<String, u64>,
     next_id: u64,
     read_only: Option<ReadOnlyReason>,
@@ -252,14 +254,14 @@ impl UserThemes {
             }
         }
         if let Some(map) = root.get("overrides").and_then(serde_json::Value::as_object) {
-            for (index, theme) in THEMES.iter().enumerate() {
+            for (index, key) in builtin_themes::KEYS.iter().enumerate() {
                 self.overrides[index] = map
-                    .get(theme.id)
+                    .get(*key)
                     .and_then(serde_json::Value::as_str)
                     .and_then(from_hex)
                     .and_then(|bytes| stokesforge_persistence::decode_theme(&bytes).ok())
                     .map(|mut theme| {
-                        theme.name = BUILTIN_NAMES[index].to_string();
+                        theme.name = builtin_themes::NAMES[index].to_string();
                         theme
                     });
             }
@@ -298,15 +300,11 @@ impl UserThemes {
 
     // -- Reading -------------------------------------------------------------
 
-    /// The built-in theme `index` (`0` Light, `1` Dark): its override if it
-    /// was edited, otherwise the colour-only original. `None` past the list.
+    /// The built-in theme `index` of the catalogue: its override if it was
+    /// edited, otherwise the original. `None` past the catalogue.
     pub fn builtin(&self, index: usize) -> Option<GraphTheme> {
-        let colors = THEMES.get(index)?;
-        Some(
-            self.overrides[index]
-                .clone()
-                .unwrap_or_else(|| GraphTheme::from_colors(BUILTIN_NAMES[index], colors)),
-        )
+        let original = builtin_themes::original(index)?;
+        Some(self.overrides[index].clone().unwrap_or(original))
     }
 
     /// True when the built-in `index` carries an edit (to be reset).
@@ -328,9 +326,10 @@ impl UserThemes {
         }
     }
 
-    /// Built-ins first (Light, Dark), then the user themes in creation order.
+    /// Built-ins first (the catalogue order), then the user themes in creation
+    /// order.
     pub fn entries(&self) -> Vec<ThemeEntry> {
-        let builtins = (0..THEMES.len()).filter_map(|index| {
+        let builtins = (0..builtin_themes::COUNT).filter_map(|index| {
             Some(ThemeEntry {
                 reference: ThemeRef::Builtin(index),
                 theme: self.builtin(index)?,
@@ -347,9 +346,11 @@ impl UserThemes {
         builtins.chain(users).collect()
     }
 
-    /// The tile order: [`UserThemes::entries`] plus the themes of the open
-    /// project (`project`, as [`ThemeRef::Project`]), most used first; equal
-    /// counts keep the order built-ins, user themes, project themes.
+    /// The tile order: Light and Dark **always first** (fixed, whatever their
+    /// use), then every other theme, [`UserThemes::entries`] plus the themes of
+    /// the open project (`project`, as [`ThemeRef::Project`]), most used first;
+    /// equal counts keep the order built-ins (catalogue order), user themes
+    /// (creation order), project themes.
     pub fn ranked(&self, project: &[GraphTheme]) -> Vec<ThemeEntry> {
         let mut all = self.entries();
         all.extend(project.iter().map(|theme| ThemeEntry {
@@ -358,7 +359,10 @@ impl UserThemes {
             modified: false,
             uses: self.uses_of(&ThemeRef::project(&theme.name)),
         }));
-        all.sort_by_key(|entry| std::cmp::Reverse(entry.uses));
+        let rest = all.split_off(PINNED_BUILTINS);
+        let mut rest = rest;
+        rest.sort_by_key(|entry| std::cmp::Reverse(entry.uses));
+        all.extend(rest);
         all
     }
 
@@ -377,7 +381,7 @@ impl UserThemes {
     }
 
     fn name_of_builtin(&self, name: &str) -> bool {
-        BUILTIN_NAMES
+        builtin_themes::NAMES
             .iter()
             .any(|builtin| same_theme_name(builtin, name))
     }
@@ -460,7 +464,9 @@ impl UserThemes {
         spec: &PlotSpec,
     ) -> Result<(), UserThemeError> {
         self.writable()?;
-        let name = BUILTIN_NAMES.get(index).ok_or(UserThemeError::Unknown)?;
+        let name = builtin_themes::NAMES
+            .get(index)
+            .ok_or(UserThemeError::Unknown)?;
         self.overrides[index] = Some(GraphTheme::capture(*name, spec));
         self.write()
     }
@@ -522,7 +528,10 @@ impl UserThemes {
         let mut overrides = serde_json::Map::new();
         for (index, slot) in self.overrides.iter().enumerate() {
             if let Some(theme) = slot {
-                overrides.insert(THEMES[index].id.to_string(), encode(theme)?.into());
+                overrides.insert(
+                    builtin_themes::KEYS[index].to_string(),
+                    encode(theme)?.into(),
+                );
             }
         }
         let document = serde_json::json!({
@@ -621,7 +630,11 @@ mod tests {
             std::fs::write(&path, content).expect("write");
             let library = UserThemes::load_from(Some(path));
             assert!(library.read_only().is_none());
-            assert_eq!(library.entries().len(), 2, "built-ins only");
+            assert_eq!(
+                library.entries().len(),
+                builtin_themes::COUNT,
+                "built-ins only"
+            );
             assert!(!library.is_modified(0));
         }
     }
@@ -678,11 +691,29 @@ mod tests {
                 .map(|entry| entry.theme.name.clone())
                 .collect()
         };
-        assert_eq!(order(&library), ["Light", "Dark", "A", "B", "Mine"]);
+        let tail = |library: &UserThemes| order(library)[builtin_themes::COUNT..].to_vec();
+        assert_eq!(order(&library)[..2], ["Light", "Dark"]);
+        assert_eq!(
+            order(&library)[2..builtin_themes::COUNT],
+            builtin_themes::NAMES[2..],
+            "ties keep the catalogue order"
+        );
+        assert_eq!(tail(&library), ["A", "B", "Mine"]);
         library.record_use(&ThemeRef::User(b)).expect("use");
         library.record_use(&ThemeRef::project("mine")).expect("use");
         library.record_use(&ThemeRef::project("mine")).expect("use");
-        assert_eq!(order(&library), ["Mine", "B", "Light", "Dark", "A"]);
+        library
+            .record_use(&ThemeRef::Builtin(5))
+            .expect("use a new built-in");
+        let ranked = order(&library);
+        assert_eq!(
+            ranked[..5],
+            ["Light", "Dark", "Mine", "Fit + Residuals", "B"]
+        );
+        assert_eq!(
+            ranked[5], "Publication",
+            "a tie keeps built-ins before user themes"
+        );
         library.delete(b).expect("delete");
         assert_eq!(library.uses_of(&ThemeRef::User(b)), 0);
         let _ = a;
@@ -729,6 +760,7 @@ mod tests {
     fn theme_keys_round_trip() {
         for reference in [
             ThemeRef::Builtin(1),
+            ThemeRef::Builtin(5),
             ThemeRef::User(12),
             ThemeRef::project("Fig A"),
         ] {
@@ -736,5 +768,89 @@ mod tests {
         }
         assert_eq!(ThemeRef::from_key("builtin:nope"), None);
         assert_eq!(ThemeRef::from_key("user:x"), None);
+    }
+
+    #[test]
+    fn light_and_dark_stay_first_with_no_use_while_another_theme_has_many() {
+        let mut library = UserThemes::load_from(None);
+        let mine = library
+            .add_from_graph("Mine", &styled("#111111"))
+            .expect("add");
+        for _ in 0..50 {
+            library.record_use(&ThemeRef::User(mine)).expect("use");
+            library.record_use(&ThemeRef::Builtin(4)).expect("use");
+        }
+        library.record_use(&ThemeRef::User(mine)).expect("use");
+        let ranked = library.ranked(&[]);
+        assert_eq!(ranked[0].reference, ThemeRef::Builtin(0));
+        assert_eq!(ranked[1].reference, ThemeRef::Builtin(1));
+        assert_eq!(ranked[0].uses + ranked[1].uses, 0);
+        assert_eq!(
+            ranked[2].reference,
+            ThemeRef::User(mine),
+            "most used of the rest"
+        );
+        assert_eq!(ranked[3].reference, ThemeRef::Builtin(4));
+    }
+
+    #[test]
+    fn every_new_built_in_can_be_edited_and_reset_to_its_original() {
+        let (_dir, path) = temp();
+        let mut library = UserThemes::load_from(Some(path.clone()));
+        for index in 2..builtin_themes::COUNT {
+            let original = library.builtin(index).expect("built-in");
+            assert!(!original.colors_only);
+            library
+                .set_builtin_from_graph(index, &styled("#abcdef"))
+                .expect("edit");
+            assert!(library.is_modified(index));
+            assert_ne!(library.builtin(index).expect("built-in"), original);
+            assert_eq!(
+                UserThemes::load_from(Some(path.clone()))
+                    .builtin(index)
+                    .expect("built-in")
+                    .style
+                    .background,
+                "#abcdef",
+                "the edit is written under its key"
+            );
+            library.reset_builtin(index).expect("reset");
+            assert_eq!(library.builtin(index).expect("built-in"), original);
+            assert_eq!(builtin_themes::original(index), Some(original));
+        }
+    }
+
+    #[test]
+    fn a_file_written_before_the_catalogue_still_reads() {
+        let (_dir, path) = temp();
+        let mut library = UserThemes::load_from(Some(path.clone()));
+        library
+            .set_builtin_from_graph(0, &styled("#eeeeee"))
+            .expect("edit light");
+        library
+            .set_builtin_from_graph(1, &styled("#222222"))
+            .expect("edit dark");
+        library.record_use(&ThemeRef::Builtin(1)).expect("use");
+        let text = std::fs::read_to_string(&path).expect("file");
+        let json: serde_json::Value = serde_json::from_str(&text).expect("json");
+        let keys: Vec<&String> = json["overrides"].as_object().expect("map").keys().collect();
+        assert_eq!(keys, ["dark", "light"], "the keys of #539 are kept");
+        assert!(json["uses"].get("builtin:dark").is_some());
+        let reread = UserThemes::load_from(Some(path));
+        assert!(reread.is_modified(0) && reread.is_modified(1));
+        assert_eq!(reread.builtin(1).expect("dark").style.background, "#222222");
+        assert_eq!(reread.uses_of(&ThemeRef::Builtin(1)), 1);
+        assert!((2..builtin_themes::COUNT).all(|index| !reread.is_modified(index)));
+    }
+
+    #[test]
+    fn a_name_of_a_built_in_is_refused_to_a_user_theme() {
+        let mut library = UserThemes::load_from(None);
+        for name in builtin_themes::NAMES {
+            assert!(matches!(
+                library.add_from_graph(name, &styled("#111111")),
+                Err(UserThemeError::DuplicateName)
+            ));
+        }
     }
 }
