@@ -827,6 +827,7 @@ plot-target-color-bar = Color Bar
 # Automatic values of the color fields
 
 plot-color-auto-contrast = Auto (contrasts with background)
+plot-color-auto-graph = Auto (graph color)
 plot-color-auto-white = Auto (white)
 plot-color-same-as-line = Same as line
 
@@ -839,7 +840,12 @@ plot-title-color = Title color
 plot-general-background = Background
 plot-general-text-color = Text color
 plot-general-axes-color = Axes color
-plot-general-global-note = Text color and Axes color apply to every title, axis, tick and gridline, and replace the colors set in other tabs
+plot-general-reset-parts = Reset Parts to Graph Settings
+    .hint = Clear the own colors of the titles, axes, legend and free texts, so they follow the graph again. Curves are not changed
+plot-general-own-colors-note = { $count ->
+    [one] { $count } part has its own color
+   *[other] { $count } parts have their own color
+}
 plot-general-dark-note = Auto colors turn white on a dark background
 plot-stale-warning = Warn about out-of-date data
     .hint = Greys out the curves of calculations that are out of date and marks them, on screen and in exports
@@ -2094,6 +2100,7 @@ number-presets = Common values
 ## Reasons for graying out (#226): a grayed-out item says why and what to do
 
 disabled-object-gone = This item no longer exists
+disabled-reset-parts = No part has its own color
 disabled-move-first = Already first
 disabled-move-last = Already last
 disabled-visibility-empty = Nothing to show or hide

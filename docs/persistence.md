@@ -977,6 +977,16 @@ The default theme of new graphs is `new_graph_theme` in `preferences.json` (a
 is applied by `AppState::with_new_graph_defaults` through the theme engine with
 every family but Texts and Axis ranges; graphs made by scripts do not take it.
 
+## Graph-level text and axes colours: additive fields (#550)
+
+`PlotSpecRecord` gains `text_color` and `axes_color` (`#[serde(default,
+skip_serializing_if = "String::is_empty")]`): empty = automatic, not written
+when empty, so a file without them is byte-identical to before and reads back
+empty. They are also part of a theme's style (same record). **`FORMAT_VERSION`
+did not move.** A 1.1 reader that saves the file again drops them without a
+message. Witness `tests/witnesses/v1/project.stf` regenerated with non-default
+values (`v1-before-themes` still reads back).
+
 ## Accepted limits (2026-10-20, after #302-#305)
 
 Do not re-raise: import recipes stored with `"data_end":"Auto"` keep cutting (no migration); a Stop after a no-effect command ends in `Done` with no status message (no `RecalcEnd::Interrupted`).

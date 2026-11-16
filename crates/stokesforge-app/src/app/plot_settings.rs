@@ -622,12 +622,11 @@ fn dialog_layout(
 }
 
 /// The global colors of the General tab (#542, form 514-4 V5; they were on the
-/// Theme tab): the color of all texts and the color of all axes. Each is
-/// written into every local field (graph title, title and scale of each axis of
-/// each panel, free texts), so the last one set overwrites what was set one by
-/// one, and nothing more is remembered. Painting writes nothing: a value is
-/// written only when the user changed it, even if the local colors differ from
-/// what the row shows. The background is the row above it.
+/// Theme tab): the color of all texts and the color of all axes. Since #550
+/// each row reads and writes **only the graph-level field** (`text_color`,
+/// `axes_color`): a part with its own color keeps it, the parts left on
+/// automatic follow the global one. Painting writes nothing: a value is written
+/// only when the user changed it. The background is the row above it.
 fn global_color_rows(form: &mut Form<'_>, spec: &mut PlotSpec, env: &mut PickerEnv) -> bool {
     let mut commit = false;
     let mut text = spec.theme_text_color().to_string();
@@ -642,6 +641,7 @@ fn global_color_rows(form: &mut Form<'_>, spec: &mut PlotSpec, env: &mut PickerE
         spec.set_text_color(&text);
     }
     commit |= text_committed;
+    own_colors_note(form, spec.parts_with_own_text_color());
     let mut axes = spec.theme_axes_color().to_string();
     let axes_committed = form.color(
         &tr!("plot-general-axes-color"),
@@ -654,7 +654,35 @@ fn global_color_rows(form: &mut Form<'_>, spec: &mut PlotSpec, env: &mut PickerE
         spec.set_axes_color(&axes);
     }
     commit |= axes_committed;
+    own_colors_note(form, spec.parts_with_own_axes_color());
+    // « Reset Parts to Graph Settings » (#550): greyed when no part has its own
+    // color. It only clears colors for now; #545 adds fonts and sizes.
+    let any_own = reset_parts_enabled(spec);
+    let clicked = form.field(|ui| {
+        ui.add_enabled(any_own, egui::Button::new(tr!("plot-general-reset-parts")))
+            .on_hover_text(tr!("plot-general-reset-parts", "hint"))
+            .on_disabled_hover_text(tr!("disabled-reset-parts"))
+            .clicked()
+    });
+    if clicked {
+        spec.reset_parts_to_graph();
+        commit = true;
+    }
     commit
+}
+
+/// Whether « Reset Parts to Graph Settings » has something to reset.
+fn reset_parts_enabled(spec: &PlotSpec) -> bool {
+    spec.parts_with_own_text_color() + spec.parts_with_own_axes_color() > 0
+}
+
+/// The grey note under a global color row (#550): how many parts keep their
+/// own color. Nothing when none does.
+fn own_colors_note(form: &mut Form<'_>, count: usize) {
+    if count > 0 {
+        let count = count as i64;
+        form.note(tr!("plot-general-own-colors-note", count = count));
+    }
 }
 
 /// Graph page: title, colors and size, as a two-column form (#227).
@@ -679,7 +707,7 @@ fn graph_settings_page(
             &tr!("plot-title-color"),
             &mut spec.title_color,
             ColorUsage::Text,
-            Some(&tr!("plot-color-auto-contrast")),
+            Some(&tr!("plot-color-auto-graph")),
             env,
         );
         commit |= form.color(
@@ -690,7 +718,6 @@ fn graph_settings_page(
             env,
         );
         commit |= global_color_rows(form, spec, env);
-        form.note(tr!("plot-general-global-note"));
         form.note(tr!("plot-general-dark-note"));
         commit |= form.checkbox(
             &mut spec.stale_warning,
@@ -1748,7 +1775,7 @@ fn axis_editor(
         &tr!("plot-title-color"),
         &mut axis.title_color,
         ColorUsage::Text,
-        Some(&tr!("plot-color-auto-contrast")),
+        Some(&tr!("plot-color-auto-graph")),
         env,
     );
 
@@ -1867,7 +1894,7 @@ fn axis_editor(
         &tr!("plot-axes-color"),
         &mut axis.tick_color,
         ColorUsage::Text,
-        Some(&tr!("plot-color-auto-contrast")),
+        Some(&tr!("plot-color-auto-graph")),
         env,
     );
     form.note(tr!("plot-axes-color-note"));
@@ -2338,7 +2365,7 @@ fn legend_font_section(
         &tr!("format-color"),
         &mut legend.color,
         ColorUsage::Text,
-        Some(&tr!("plot-color-auto-contrast")),
+        Some(&tr!("plot-color-auto-graph")),
         env,
     );
     commit
@@ -6487,8 +6514,9 @@ mod tests {
     /// #11, #542: the General tab shows the global colors (all texts, all
     /// axes) without changing anything as long as nothing is done, even when
     /// the local colors differ from those it shows (the title of one axis, the
-    /// scale of another). Witness: a global color written by the row reaches
-    /// every local field.
+    /// scale of another). Since #550 what the rows write is the graph-level
+    /// field only. Witness: a global color written by the row reaches a local
+    /// field.
     #[test]
     fn the_general_tab_draws_the_global_colors_without_changing_anything() {
         let mut spec = PlotSpec::empty("Figure").with_panels(PanelSpec::at(0, 0));
@@ -6516,11 +6544,36 @@ mod tests {
         ] {
             assert!(is_painted(&painted, &label), "{label:?} missing");
         }
-        // What the rows write is the whole graph at once, in one step.
+        // #550 (G4, G3): the notes count the parts with their own color, and
+        // the reset button is available because some part has one.
+        assert!(super::reset_parts_enabled(&spec));
+        for count in [1_i64, 1] {
+            let note = tr!("plot-general-own-colors-note", count = count);
+            assert!(is_painted(&painted, &note), "{note:?} missing");
+        }
+        assert!(is_painted(&painted, &tr!("plot-general-reset-parts")));
+        let mut plain = PlotSpec::empty("Figure").with_panels(PanelSpec::at(0, 0));
+        assert!(!super::reset_parts_enabled(&plain), "nothing to reset");
+        plain.set_text_color("#336699");
+        assert!(
+            !super::reset_parts_enabled(&plain),
+            "a graph color is not a part's"
+        );
+        first_panel(&mut plain)
+            .annotations
+            .push(stokesforge_plot::AnnotationSpec::new("t", 0.0, 0.0));
+        first_panel(&mut plain).annotations[0].color = "#aa0000".into();
+        assert!(super::reset_parts_enabled(&plain));
+        // What the rows write (#550): the graph-level fields only.
         spec.set_text_color("#112233");
         spec.set_axes_color("#445566");
-        assert_eq!(first_panel(&mut spec).left.title_color, "#112233");
-        assert_eq!(first_panel(&mut spec).left.tick_color, "#445566");
+        assert_eq!(
+            (spec.text_color.as_str(), spec.axes_color.as_str()),
+            ("#112233", "#445566")
+        );
+        assert_eq!(first_panel(&mut spec).left.title_color, "#aa0000");
+        assert_eq!(first_panel(&mut spec).left.tick_color, "#00aa00");
+        assert_eq!(spec.title_color, "");
     }
 
     // -- The formula reminder -------------------------------------------------

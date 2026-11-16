@@ -1831,3 +1831,77 @@ fn the_two_backends_thin_the_symbols_the_same_way() {
         "{all} circles at 1, {third} at 3"
     );
 }
+
+// -- #550: graph-level colours --
+
+/// The (uppercase hex) colour of every plain text of the egui figure.
+fn text_colors_egui(spec: &PlotSpec, tree: &Tree) -> Vec<String> {
+    let plot = resolve_spec(tree, spec);
+    let mut shapes = Vec::new();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(SIZE.0 as f32, SIZE.1 as f32));
+    collect_shapes_with_texts(
+        &mut shapes,
+        rect,
+        &TextMeasurer::default(),
+        &plot,
+        &FigureTexts::default(),
+    )
+    .expect("egui drawing");
+    let mut out: Vec<String> = shapes
+        .iter()
+        .filter_map(|shape| match shape {
+            Shape::Text(text) => text.galley.job.sections.first().map(|section| {
+                let c = section.format.color;
+                format!("#{:02X}{:02X}{:02X}", c.r(), c.g(), c.b())
+            }),
+            _ => None,
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// The (uppercase hex) fill of every plain text of the SVG figure.
+fn text_colors_svg(spec: &PlotSpec, tree: &Tree) -> Vec<String> {
+    let plot = resolve_spec(tree, spec);
+    let (document, _) = stokesforge_render_svg::render_to_string_with_geometry_and_texts(
+        &plot,
+        SIZE,
+        &TextMeasurer::default(),
+        &FigureTexts::default(),
+    )
+    .expect("SVG export");
+    let mut out: Vec<String> = document
+        .split('<')
+        .filter_map(|tag| tag.strip_prefix("text"))
+        .filter_map(|rest| attribute(rest, "fill"))
+        .map(|fill| fill.to_uppercase())
+        .collect();
+    out.sort();
+    out
+}
+
+/// The screen and the export resolve the graph-level text and axes colours the
+/// same way: the tick labels are drawn in the axes colour on both.
+#[test]
+fn the_two_backends_draw_the_graph_level_colors_alike() {
+    let mut fixture = minimal();
+    fixture.spec.axes_color = "#654321".to_owned();
+    fixture.spec.text_color = "#123456".to_owned();
+    // A layer title takes the graph text colour too (#550, G1).
+    let layer = fixture.spec.panels.get_mut(0).unwrap();
+    layer.title = "Layer".to_owned();
+    layer.title_visible = true;
+    agree(fixture.project.tree(), &fixture.spec, SIZE, "graph colours");
+    let screen = text_colors_egui(&fixture.spec, fixture.project.tree());
+    let export = text_colors_svg(&fixture.spec, fixture.project.tree());
+    assert!(
+        screen.iter().any(|color| color == "#654321"),
+        "the screen ignores the graph axes colour: {screen:?}"
+    );
+    assert!(
+        screen.iter().any(|color| color == "#123456"),
+        "the screen ignores the graph text colour: {screen:?}"
+    );
+    assert_eq!(screen, export, "text colours differ between the backends");
+}

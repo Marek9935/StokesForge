@@ -77,6 +77,41 @@ fn refused(bench: &Bench, body: &str) -> String {
     run(bench, &source).stdout.trim().to_owned()
 }
 
+/// #550: `text_color` and `axes_color` write only the graph-level fields, a
+/// part with its own colour keeps it. Witness: writing the local fields too
+/// overwrites the left axis title.
+#[test]
+fn set_graph_text_and_axes_colors_are_graph_level_only() {
+    let b = bench();
+    run(&b, GRAPH);
+    run(
+        &b,
+        "g = pyst.resolve('[G]')\n\
+         pyst.set_graph(g, y_title='Y')",
+    );
+    let mut own = graph_spec(&b);
+    own.panels.get_mut(0).unwrap().left.title_color = "#FF0000".to_owned();
+    let id = b.session.snapshot().unwrap().tree.resolve("[G]").unwrap();
+    b.session
+        .execute(stokesforge_commands::Command::SetPlotSpec {
+            graph: id,
+            spec: own,
+        })
+        .unwrap();
+    run(
+        &b,
+        "g = pyst.resolve('[G]')\n\
+         pyst.set_graph(g, text_color='#123456', axes_color='#654321')",
+    );
+    let spec = graph_spec(&b);
+    assert_eq!(spec.text_color, "#123456");
+    assert_eq!(spec.axes_color, "#654321");
+    assert_eq!(spec.panels[0].left.title_color, "#FF0000");
+    assert_eq!(spec.panels[0].bottom.title_color, "");
+    assert_eq!(spec.panels[0].bottom.tick_color, "");
+    assert_eq!(spec.title_color, "");
+}
+
 #[test]
 fn set_graph_sets_the_graph_and_the_panel() {
     let b = bench();

@@ -280,7 +280,9 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Model expression | Expression de modèle | What the user writes for a custom fit | Formula, Équation | #322 |
 | Zoom / Reset Zoom | Zoom / Réinitialiser le zoom | Framing of the view; return to the original ranges | Rescale, Recadrer | G |
 | Pan† | Panoramique | Move the framing | Déplacement | G |
-| Global colors | Couleurs globales | Text color and Axes color, on the General tab of Graph Properties (#542): each is written into every local color, the last one set wins | Theme colors | — |
+| Global colors | Couleurs globales | Text color and Axes color, on the General tab of Graph Properties (#542, #550): graph-level colors that only the parts left on Auto follow (a part with its own color keeps it); a grey note under each row counts the parts with their own color (« 1 part has its own color » / « 1 partie a sa propre couleur »); Light and Dark still clear every own color | Theme colors | — |
+| Reset Parts to Graph Settings | Réinitialiser les parties aux réglages du graphe | Button of General under the global colors (#550, keys `plot-general-reset-parts`): clears the own text and axes colors of every part (never the curves, the graph title's own color, the backgrounds or the legend frame); greyed when no part has its own color. #545 extends it to fonts and sizes, hence « Settings » | Reset Colors, Rétablir | — |
+| Auto (graph color) | Auto (couleur du graphe) | Auto choice of the color picker of a part that follows the graph text or axes color (#550, `plot-color-auto-graph`); the General rows keep « Auto (contrasts with background) » | Auto (contrasts with background) on a part | — |
 | Palette | Palette | Set of colors offered | — | G |
 | Swatch | Nuance | One color of a palette | Échantillon | G |
 | Saved colors | Couleurs enregistrées | Colors kept in the project or for the user | Favoris | — |

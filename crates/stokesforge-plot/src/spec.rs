@@ -221,6 +221,15 @@ pub struct PlotSpec {
     /// that contrasts with the background (dark on a light background, white on a dark
     /// one), like all the text and axes left automatic.
     pub title_color: String,
+    /// Graph-level text colour (`#RRGGBB`), #550: what every text left on
+    /// automatic colour (graph title, axis titles, free texts) is drawn in.
+    /// A part with its own colour keeps it. Empty = no graph-level colour:
+    /// the automatic ink. Written by [`PlotSpec::set_text_color`] only.
+    pub text_color: String,
+    /// Graph-level axes colour (`#RRGGBB`), #550: the colour of the line,
+    /// ticks, labels and grid of every axis whose own scale colour is empty.
+    /// Empty = the automatic ink. Written by [`PlotSpec::set_axes_color`].
+    pub axes_color: String,
     /// Position of the graph title if it was moved (issue #53), in the
     /// data frame of the first panel; `None` = its default place.
     pub title_anchor: Option<TextAnchor>,
@@ -559,6 +568,8 @@ impl Default for PlotSpec {
             panels: Panels::default(),
             background: TRANSPARENT.to_string(),
             title_color: String::new(),
+            text_color: String::new(),
+            axes_color: String::new(),
             title_visible: true,
             title_anchor: None,
             title_font: TextFont::default(),

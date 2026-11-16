@@ -441,7 +441,7 @@ pub(super) fn open_annotation_editor(
     else {
         return;
     };
-    start_annotation_editor(ctx, view, target, original.clone(), Some(original));
+    start_annotation_editor(ctx, view, target, original.clone(), Some(original), None);
 }
 
 /// Adds a text at data point `(panel, x, y)` and opens
@@ -459,7 +459,12 @@ pub(super) fn add_annotation_at(
         return;
     };
     let draft = stokesforge_render_egui::AnnotationSpec::new(String::new(), x, y);
-    start_annotation_editor(ctx, view, target, draft, None);
+    // An empty text is not drawn, so it has no screen box yet: the field starts
+    // at the clicked point, not at the center of the figure (#550 trial).
+    let anchor = view
+        .data_to_screen(panel, x, y)
+        .map(|point| (point, egui::Vec2::ZERO));
+    start_annotation_editor(ctx, view, target, draft, None, anchor);
 }
 
 fn start_annotation_editor(
@@ -468,6 +473,7 @@ fn start_annotation_editor(
     target: stokesforge_render_egui::AnnotationRef,
     draft: stokesforge_render_egui::AnnotationSpec,
     original: Option<stokesforge_render_egui::AnnotationSpec>,
+    anchor: Option<(egui::Pos2, egui::Vec2)>,
 ) {
     view.set_annotation_preview(Some((target, draft.clone())));
     let editor = AnnotationEditor {
@@ -475,7 +481,7 @@ fn start_annotation_editor(
         draft,
         original,
         focus: true,
-        anchor: None,
+        anchor,
     };
     ctx.data_mut(|data| data.insert_temp(annotation_editor_id(view), editor));
 }
@@ -537,7 +543,7 @@ pub(super) fn annotation_editor_ui(
                         ("annotation_color", id),
                         &mut editor.draft.color,
                         ColorUsage::Text,
-                        Some(&tr!("plot-color-auto-contrast")),
+                        Some(&tr!("plot-color-auto-graph")),
                         &mut env,
                     );
                     ui.label(tr!("plot-text-size"));
@@ -831,7 +837,7 @@ mod tests {
         });
         let target = AnnotationRef { panel: 0, index: 0 };
         let note = AnnotationSpec::new("Peak", 1.0, 2.0);
-        start_annotation_editor(&ctx, &mut view, target, note, None);
+        start_annotation_editor(&ctx, &mut view, target, note, None, None);
         let mut actions = Vec::new();
         commit_open_text_editors(&ctx, &mut view, graph, &mut actions);
         assert_eq!(actions.len(), 2, "{actions:?}");
@@ -1088,7 +1094,7 @@ mod tests {
 
         let ctx = egui::Context::default();
         let mut view = GraphView::new();
-        start_annotation_editor(&ctx, &mut view, target, draft.clone(), None);
+        start_annotation_editor(&ctx, &mut view, target, draft.clone(), None, None);
         assert_eq!(
             view.annotation_preview(),
             Some(&(target, draft.clone())),
@@ -1106,7 +1112,7 @@ mod tests {
 
         let ctx = egui::Context::default();
         let mut view = GraphView::new();
-        start_annotation_editor(&ctx, &mut view, target, draft.clone(), None);
+        start_annotation_editor(&ctx, &mut view, target, draft.clone(), None, None);
         run(&ctx, &mut view, Vec::new());
         assert_eq!(
             run(&ctx, &mut view, click_far()),
