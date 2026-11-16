@@ -363,7 +363,6 @@ const ZONE_43: &[&str] = &[
     "series_list",
     "curve_page",
     "group_page",
-    "group_bar_editor",
     "group_editor",
     "membership_editor",
     "gradient_editor",

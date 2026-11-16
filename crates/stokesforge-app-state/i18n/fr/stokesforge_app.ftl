@@ -1063,21 +1063,21 @@ plot-legend-row-gap = Espace entre les lignes (pt)
 plot-legend-column-gap = Espace entre les colonnes (pt)
 plot-legend-swatch-length = Longueur de l'échantillon de trait (pt)
 
-# Onglet Barre de couleurs (#499)
+# Section Barre de couleurs de l'onglet Légende (#499, #510)
 
 plot-color-bar-section = Barre de couleurs
 plot-color-bar-show =
     Afficher la barre de couleurs
     .hint = Colore les courbes des groupes de la barre selon leur valeur, et remplace leurs entrées dans la légende. Masquée, la barre rend aux courbes leurs couleurs et leurs entrées de légende.
-plot-color-bar-groups-section = Groupes de séries
+plot-color-bar-groups-section = Groupes
+plot-color-bar-breaks-section = Ruptures
+plot-color-bar-break-between = { $left } | { $right }
+plot-color-bar-group-on =
+    Sur la barre de couleurs
+    .hint = Colore les courbes de ce groupe selon leur valeur sur la barre de couleurs de la couche, et retire leurs entrées de la légende. Un groupe sans nuancier reçoit le premier nuancier prédéfini.
 plot-color-bar-group-break = Étiquette de rupture
     .hint = Texte Typst écrit sous la barre, à droite de la valeur de la rupture entre ce groupe et le suivant sur la barre. Laisser vide pour aucune. Conservé avec ce groupe.
-plot-color-bar-range = Plage
 plot-color-bar-no-series-groups = Cette couche n'a aucun groupe de séries. Groupez d'abord ses courbes, dans la fenêtre Séries.
-plot-color-bar-groups-on = Groupes sur la barre : { $names }
-plot-color-bar-groups-none = Aucun groupe n'est encore sur la barre. Cochez « Sur la barre de couleurs » sur un groupe, dans la fenêtre Séries.
-plot-color-bar-to-series = Groupes sur la barre : Séries »
-    .hint = Ouvre la fenêtre Séries sur le premier groupe de la barre. La plage, l'étiquette de rupture et l'enchaînement de chaque groupe s'y règlent.
 plot-color-bar-chain =
     Enchaîner les segments
     .hint = Chaque segment commence où le précédent finit : des groupes de 0 à 57 et de 0 à 25 sont tracés de 0 à 57 et de 57 à 82. Les couleurs ne changent pas.
@@ -1094,7 +1094,7 @@ plot-color-bar-no-value =
         [one] { $count } courbe n'a pas de valeur
        *[other] { $count } courbes n'ont pas de valeur
     }
-plot-color-bar-layout-section = Emplacement
+plot-color-bar-look-section = Aspect
 plot-color-bar-position = Position
 plot-color-bar-position-dragged = Déplacée
 plot-color-bar-position-below = Sous le cadre
@@ -1110,13 +1110,9 @@ plot-color-bar-title = Titre
     .hint = Texte Typst écrit sous la barre. Laisser vide pour aucun.
 plot-color-bar-unknown = Par défaut (réglage d'une version plus récente)
 disabled-color-bar-off = Activez d'abord « Afficher la barre de couleurs »
-curve-on-color-bar =
-    Sur la barre de couleurs
-    .hint = Colore les courbes de ce groupe selon leur valeur sur la barre de couleurs de la couche, et retire leurs entrées de la légende.
-curve-bar-to-look = Aspect de la barre : Propriétés du graphique »
-    .hint = Ouvre les propriétés du graphique, onglet Légende, section Barre de couleurs : valeur, échelle, position, orientation, graduations et titre.
+disabled-color-bar-group-off = Cochez d'abord le groupe : seul un groupe de la barre a une plage
 curve-color-overrides-gradient = Remplace le nuancier du groupe
-curve-color-by-bar = La couleur vient de la barre de couleurs de cette couche. Retirez le groupe de la barre pour la régler ici.
+curve-color-by-bar = La couleur vient de la barre de couleurs de cette couche. Retirez le groupe de la barre pour la régler ici (Propriétés du graphique, Légende, Barre de couleurs).
 
 # Onglet Thème
 

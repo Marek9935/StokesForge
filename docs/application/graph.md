@@ -618,10 +618,8 @@ in `stokesforge-plot` (read before writing, as requested):
   confirmed on loss of focus, empty = "Group n"; **Ungroup**, the series stay
   as single series with their style; **Delete Group**, the group and its
   series; both give the page back to a curve), then **Colors**: the
-  **gradient** (#178, always active), **On the color bar** with, once the
-  group is on the bar, its **Range**, **Break label** and **Chain the
-  segments** rows (`group_bar_editor`, `color_bar_settings::group_bar_rows`)
-  and the link back to the look of the bar, then the line and symbol of the
+  **gradient** (#178, always active; the colour bar is not here, it is the
+  Legend tab of Graph Properties, #510), then the line and symbol of the
   whole group: the first member is edited and what changes is copied into each
   member (`propagate_style`); the colors are not offered (the gradient gives
   them, #213). The **curve page** has the fields of one series

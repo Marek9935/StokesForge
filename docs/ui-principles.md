@@ -41,14 +41,14 @@ confirmation. Size and position are remembered per dialog.
   [`windows.md`](windows.md) (to be kept up to date with each window).
 - The behavior: standard, § Windows and dialogs, § Confirmations.
 - **A new window is mocked up and validated before the code.**
-- **Where a setting of a graph lives (#510).** In Graph Properties if it
-  would follow when the look of the graph is copied onto another graph with
-  other data (a theme, #514); otherwise in the Series window, with the curves.
-  The colour bar shows it: its look (value, scale, position, ticks, title) is
-  in Graph Properties, what ties a group to it (on the bar, range, break
-  label, chain) is on the group page of the Series window, and each page links
-  to the other. The Series window's list selection chooses the page (a group
-  header or a curve): no "scope" choice.
+- **Where a setting of a graph lives (#510).** Graph Properties sets the
+  objects drawn on the figure: the axes, the legend, the colour bar, including
+  which groups the bar colours (their range, their breaks, the chaining). The
+  Series window sets the curves and their groups: name, type, style,
+  gradient. The colour bar shows it: its whole page is the folded « Color
+  bar » section of the Legend tab; the group page of the Series window keeps
+  only the gradient. The Series window's list selection chooses the page (a
+  group header or a curve): no "scope" choice.
 
 ## 3. What can be undone is undone, what cannot is confirmed
 

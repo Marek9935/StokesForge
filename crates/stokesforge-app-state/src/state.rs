@@ -7043,14 +7043,6 @@ impl AppState {
         }
     }
 
-    /// The Series window asks the Legend page to unfold its colour bar
-    /// section (#510): the link of a group page to the look of the bar.
-    pub fn request_color_bar_unfold(&mut self) {
-        if let Some(settings) = self.plot_settings.as_mut() {
-            settings.color_bar_unfold = true;
-        }
-    }
-
     /// The Legend page has unfolded the colour bar section as asked: the
     /// request is spent.
     pub fn spend_color_bar_unfold(&mut self) {

@@ -226,6 +226,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Leave Group | Quitter le groupe | Detaches the series from its group, style kept (#177) | Dissocier, Sortir | G |
 | Sort | Trier | Puts a Project Manager folder back in automatic order: folders first, then natural name order (#425) | Order, Classer | G |
 | Color gradient | Nuancier | Gradient of colors spread over the series of a group: Blue to Red / Bleu vers Rouge… (#178; the arrow → is not in the interface font: a square is shown in its place, do not use it); can be saved in the project or for the user, with its name | Palette (qualitative, sans ordre), Dégradé | G |
+| Color bar: Groups / Breaks / Value / Look | Barre de couleurs : Groupes / Ruptures / Valeur / Aspect | The four sub-headings of the Color bar section of Graph Properties › Legend (#510): the groups on the bar (table: tick, gradient, range), the label of each break between two neighbours on the bar with the chaining (shown with two groups or more), where the value comes from and its scale, and the place, orientation, ticks and title of the bar | Placement / Emplacement (the Position of the bar sits in Look) | G |
 | Plot type | Type de tracé | Way of plotting a series | Mode | O |
 | Bins | Classes | Number of bars of a Histogram series, whole number 1 to 65536 (#359) | Intervalles, Bacs | O |
 | Width (X units) | Largeur (unités X) | Width of the bars of a Bar series, in X axis units; Auto by default, « Auto (0.8) » in gray (#359) | Épaisseur | O |

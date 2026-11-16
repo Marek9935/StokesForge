@@ -399,43 +399,6 @@ fn plot_settings_contents(
             ui.ctx().request_repaint();
         }
     }
-    // A link between the colour-bar rows of the two windows (#510) is a target
-    // pick like a tab: applied after the page it leaves is drawn, and only if
-    // no field refused its draft (#498). It only switches the page: the one
-    // history macro of the window runs on across the Series and Legend pages.
-    if let Some(link) = super::color_bar_settings::take_link(ui.ctx()) {
-        if crate::field_state::pick_allowed(ui.ctx()) {
-            use super::color_bar_settings::BarLink;
-            match link {
-                BarLink::ToBarLook => {
-                    chosen_tab = PlotSettingsTab::Legend;
-                    state.request_color_bar_unfold();
-                }
-                BarLink::ToSeries => {
-                    chosen_tab = PlotSettingsTab::Series;
-                    if let Some(edit) = state.plot_edit_mut() {
-                        if let Some(panel) = edit.spec.panels.get(edit.selected_panel) {
-                            let on_bar = |group: &u32| {
-                                panel
-                                    .color_bar
-                                    .as_ref()
-                                    .is_some_and(|bar| bar.segment_of(*group).is_some())
-                            };
-                            let ids = panel.group_ids();
-                            let target = ids.iter().copied().find(on_bar).or(ids.first().copied());
-                            if let Some(group) = target {
-                                edit.selected_group = Some(group);
-                                if let Some(first) = panel.group_members(group).first() {
-                                    edit.selected_series = *first;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            ui.ctx().request_repaint();
-        }
-    }
     for action in gradient_actions {
         state.dispatch(action);
     }
@@ -5285,32 +5248,196 @@ mod tests {
         harness
     }
 
-    /// #510: the « Color bar » section of the Legend tab names the groups on
-    /// the bar and keeps no per-group box: ticking is done on the group page.
-    /// Also the case of no group on the bar and of a layer with no group.
-    /// Witness: names taken from every group of the layer fails the first
-    /// assertion.
-    #[test]
-    fn the_color_bar_section_names_the_groups_on_the_bar() {
+    /// The texts of the Legend tab scrolled `up` points above its bottom, on
+    /// a layer of `grouped(2)` with `on_bar` ticked. The window is short: at
+    /// the bottom the Look block is in view, 100 points up the Groups table
+    /// (the Look block then leaves).
+    fn bar_page(on_bar: &[u32], up: f32) -> (egui::Context, Harness, Vec<Text>) {
         let context = test_support::context();
-        let mut harness = with_bar(&[1]);
+        let mut harness = with_bar(on_bar);
         harness.open(PlotSettingsTab::Legend, None);
         scroll_page(&context, &mut harness, -1000.0);
+        if up > 0.0 {
+            scroll_page(&context, &mut harness, up);
+        }
         let painted = paint_window(&context, &mut harness.state, Vec::new());
-        assert!(is_painted(
-            &painted,
-            &tr!("plot-color-bar-groups-on", names = "Group 1")
-        ));
-        assert!(!is_painted(&painted, &tr!("curve-on-color-bar")));
-        assert!(!is_painted(&painted, &tr!("plot-color-bar-range")));
-        assert!(is_painted(&painted, &tr!("plot-color-bar-to-series")));
+        (context, harness, painted)
+    }
 
-        let mut harness = with_bar(&[]);
-        harness.open(PlotSettingsTab::Legend, None);
-        scroll_page(&context, &mut harness, -1000.0);
+    /// The segments of the draft bar, as group numbers.
+    fn draft_bar_groups(harness: &Harness) -> Vec<u32> {
+        let mut spec = harness.draft();
+        first_panel(&mut spec)
+            .color_bar
+            .as_ref()
+            .map(|bar| bar.segments.iter().map(|s| s.group).collect())
+            .unwrap_or_default()
+    }
+
+    /// Types `text` into the field under `pos`, then leaves it: Enter for a
+    /// number field, a click on `elsewhere` for a text field (whose Enter is
+    /// also the dialog's OK).
+    fn type_at(
+        context: &egui::Context,
+        harness: &mut Harness,
+        pos: egui::Pos2,
+        text: &str,
+        elsewhere: Option<egui::Pos2>,
+    ) {
+        click(context, pos, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state)
+        });
+        one_frame(
+            context,
+            &mut harness.state,
+            vec![egui::Event::Text(text.into())],
+        );
+        match elsewhere {
+            None => one_frame(context, &mut harness.state, vec![key(egui::Key::Enter)]),
+            Some(away) => click(context, away, egui::PointerButton::Primary, |ui| {
+                plot_settings_window(ui.ctx(), &mut harness.state)
+            }),
+        }
+        one_frame(context, &mut harness.state, Vec::new());
+    }
+
+    /// The « Auto » hints of the range fields of the Groups table (the ones
+    /// on a row with a « From »), top to bottom then left to right.
+    fn range_hints(painted: &[Text]) -> Vec<egui::Pos2> {
+        let from = tr!("plot-axes-from");
+        let mut hints: Vec<egui::Pos2> = painted
+            .iter()
+            .filter(|t| t.text == tr!("common-auto"))
+            .map(|t| t.center)
+            .filter(|at| {
+                painted
+                    .iter()
+                    .any(|t| t.text == from && (t.center.y - at.y).abs() < 6.0)
+            })
+            .collect();
+        hints.sort_by(|a, b| {
+            (a.y.round() as i32, a.x.round() as i32).cmp(&(b.y.round() as i32, b.x.round() as i32))
+        });
+        hints
+    }
+
+    /// #510: the Groups table ticks a group onto the bar (the group gets a
+    /// gradient in the same edit) and off again. Witness: a tick handler that
+    /// skips `put_group_on_bar` leaves no segment, no gradient.
+    #[test]
+    fn ticking_a_group_in_the_table_puts_it_on_the_bar_and_takes_it_off() {
+        let (context, mut harness, _) = bar_page(&[], 100.0);
+        assert!(draft_bar_groups(&harness).is_empty());
+        click_label(&context, &mut harness.state, "Group 1");
+        assert_eq!(draft_bar_groups(&harness), [1]);
+        let mut spec = harness.draft();
+        assert!(
+            first_panel(&mut spec).group_gradient(1).is_some(),
+            "a gradient is given in the same edit"
+        );
+        click_label(&context, &mut harness.state, "Group 1");
+        assert!(draft_bar_groups(&harness).is_empty());
+    }
+
+    /// #510: a From typed on a ticked row reaches its segment; the range of
+    /// an unticked row is disabled (a click there takes no typing). Witness:
+    /// the range enabled on unticked rows paints the typed text.
+    #[test]
+    fn the_range_of_a_ticked_row_is_typed_and_that_of_an_unticked_row_is_disabled() {
+        let (context, mut harness, painted) = bar_page(&[1], 100.0);
+        let hints = range_hints(&painted);
+        assert_eq!(hints.len(), 4, "From and to of two rows");
+        // Row 2 is not on the bar: typing there goes nowhere.
+        click(&context, hints[2], egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state)
+        });
+        one_frame(
+            &context,
+            &mut harness.state,
+            vec![egui::Event::Text("7".into())],
+        );
         let painted = paint_window(&context, &mut harness.state, Vec::new());
-        assert!(is_painted(&painted, &tr!("plot-color-bar-groups-none")));
+        assert!(!is_painted(&painted, "7"), "disabled: no typing");
+        // Row 1 is: the value reaches the segment of group 1.
+        type_at(&context, &mut harness, hints[0], "3", None);
+        let mut spec = harness.draft();
+        let bar = first_panel(&mut spec).color_bar.clone().unwrap();
+        assert_eq!(bar.segments.len(), 1);
+        assert_eq!(bar.segments[0].from, Some(3.0));
+        assert_eq!(bar.segments[0].to, None);
+    }
 
+    /// #510: the Breaks block exists with two groups on the bar or more:
+    /// one row named by its two neighbours, its label kept by the left
+    /// group, and the chain box inside it. Absent with 0 or 1 group.
+    /// Witnesses: the block shown with one group, or the label written to
+    /// the right group, fails.
+    #[test]
+    fn the_breaks_block_is_for_two_groups_on_the_bar() {
+        let heading = tr!("plot-color-bar-breaks-section");
+        let named = tr!(
+            "plot-color-bar-break-between",
+            left = "Group 1",
+            right = "Group 2"
+        );
+        for on_bar in [&[][..], &[1][..]] {
+            let (_, _, painted) = bar_page(on_bar, 100.0);
+            assert!(!is_painted(&painted, &heading), "{on_bar:?}");
+            assert!(!is_painted(&painted, &tr!("plot-color-bar-chain")));
+            assert!(!is_painted(&painted, &tr!("plot-color-bar-group-break")));
+        }
+        let (context, mut harness, painted) = bar_page(&[1, 2], 100.0);
+        assert!(is_painted(&painted, &heading));
+        assert!(is_painted(&painted, &named), "named by its neighbours");
+        assert!(is_painted(&painted, &tr!("plot-color-bar-chain")));
+        let label = text_exact(&painted, &tr!("plot-color-bar-group-break")).center;
+        let away = text_exact(&painted, &tr!("plot-color-bar-breaks-section")).center;
+        type_at(
+            &context,
+            &mut harness,
+            label + egui::vec2(60.0, 0.0),
+            "k",
+            Some(away),
+        );
+        let mut spec = harness.draft();
+        let bar = first_panel(&mut spec).color_bar.clone().unwrap();
+        assert_eq!(bar.segments[0].label, "k", "kept by the left group");
+        assert_eq!(bar.segments[1].label, "");
+    }
+
+    /// #510: the four blocks follow one another: Groups, Breaks (when
+    /// shown), Value, Look. Witness: two blocks swapped fails.
+    #[test]
+    fn the_sub_headings_of_the_color_bar_follow_one_another() {
+        let order = |painted: &[Text], keys: &[&String]| {
+            let ys: Vec<f32> = keys
+                .iter()
+                .map(|key| text_exact(painted, key).center.y)
+                .collect();
+            assert!(
+                ys.windows(2).all(|pair| pair[0] < pair[1]),
+                "{keys:?} {ys:?}"
+            );
+        };
+        let groups = &tr!("plot-color-bar-groups-section");
+        let breaks = &tr!("plot-color-bar-breaks-section");
+        let value = &tr!("plot-color-bar-value-section");
+        let look = &tr!("plot-color-bar-look-section");
+        let (_, _, painted) = bar_page(&[1, 2], 100.0);
+        order(&painted, &[groups, breaks, value]);
+        let (_, _, painted) = bar_page(&[1, 2], 0.0);
+        order(&painted, &[breaks, value, look]);
+        // Without a second group the block is gone, the others keep order.
+        let (_, _, painted) = bar_page(&[1], 100.0);
+        order(&painted, &[groups, value]);
+        let (_, _, painted) = bar_page(&[1], 0.0);
+        order(&painted, &[value, look]);
+    }
+
+    /// #510: no group in the layer: one dimmed line says so.
+    #[test]
+    fn a_layer_without_groups_says_so_in_the_color_bar_section() {
+        let context = test_support::context();
         let mut harness = harness_without_groups_on_a_bar();
         harness.open(PlotSettingsTab::Legend, None);
         scroll_page(&context, &mut harness, -1000.0);
@@ -5319,6 +5446,7 @@ mod tests {
             &painted,
             &tr!("plot-color-bar-no-series-groups")
         ));
+        assert!(!is_painted(&painted, &tr!("plot-color-bar-breaks-section")));
     }
 
     /// A layer with a visible bar and no series group.
@@ -5331,78 +5459,6 @@ mod tests {
         });
         harness.open(PlotSettingsTab::Legend, None);
         harness
-    }
-
-    /// #510: the two links between the bar rows. « Series » opens the Series
-    /// window on the first group ON THE BAR (not the first of the layer); the
-    /// group page links back to the Legend tab with the bar section asked
-    /// unfolded, the request spent once painted. An unreadable draft blocks
-    /// the link (#498); the whole round trip is one history entry.
-    /// Witnesses: `selected_group` not set, the unfold not requested,
-    /// `pick_allowed` skipped, or the macro ended by the link, each fails.
-    #[test]
-    fn the_links_move_between_the_bar_look_and_the_group_page() {
-        let context = test_support::context();
-        let mut harness = with_bar(&[2]);
-        harness.open(PlotSettingsTab::Legend, None);
-        let original = harness.model();
-        // An edit on the Legend page, then the link to the Series window.
-        click_label(&context, &mut harness.state, &tr!("plot-legend-show"));
-        scroll_page(&context, &mut harness, -1000.0);
-        click_label(
-            &context,
-            &mut harness.state,
-            &tr!("plot-color-bar-to-series"),
-        );
-        let settings = harness.state.plot_settings().unwrap();
-        assert_eq!(settings.tab, PlotSettingsTab::Series);
-        let edit = harness.state.plot_edit().unwrap();
-        assert_eq!(edit.selected_group, Some(2), "first group on the bar");
-        assert_eq!(edit.selected_series, 2, "its first member");
-
-        // The group page: the bar rows are there, with the way back.
-        let painted = paint_window(&context, &mut harness.state, Vec::new());
-        assert!(is_painted(&painted, &tr!("plot-color-bar-range")));
-        // An unreadable number blocks the link.
-        let mut spec = harness.draft();
-        first_panel(&mut spec).color_bar.as_mut().unwrap().segments[0].from = Some(2.0);
-        harness.state.plot_edit_mut().unwrap().spec = spec;
-        focus_field(&context, &mut harness.state, "2");
-        one_frame(
-            &context,
-            &mut harness.state,
-            vec![egui::Event::Text("abc".into())],
-        );
-        click_label(&context, &mut harness.state, &tr!("curve-bar-to-look"));
-        assert_eq!(
-            harness.state.plot_settings().unwrap().tab,
-            PlotSettingsTab::Series,
-            "refused draft: the page stays"
-        );
-        // Giving the value back lets the link through.
-        one_frame(&context, &mut harness.state, vec![key(egui::Key::Escape)]);
-        one_frame(&context, &mut harness.state, Vec::new());
-        let painted = paint_window(&context, &mut harness.state, Vec::new());
-        let pos = text_exact(&painted, &tr!("curve-bar-to-look")).center;
-        click(&context, pos, egui::PointerButton::Primary, |ui| {
-            plot_settings_window(ui.ctx(), &mut harness.state)
-        });
-        let settings = harness.state.plot_settings().unwrap();
-        assert_eq!(settings.tab, PlotSettingsTab::Legend);
-        assert!(settings.color_bar_unfold, "the unfold is requested");
-        scroll_page(&context, &mut harness, -1000.0);
-        let painted = paint_window(&context, &mut harness.state, Vec::new());
-        assert!(is_painted(&painted, &tr!("plot-color-bar-show")));
-        assert!(
-            !harness.state.plot_settings().unwrap().color_bar_unfold,
-            "the unfold is spent"
-        );
-
-        // Both pages' edits are one history entry.
-        harness.state.close_plot_settings();
-        assert_ne!(harness.model(), original);
-        harness.state.dispatch(Action::Undo);
-        assert_eq!(harness.model(), original, "one Undo gives both back");
     }
 
     /// #499: the break label sits between two ticked groups only (none after

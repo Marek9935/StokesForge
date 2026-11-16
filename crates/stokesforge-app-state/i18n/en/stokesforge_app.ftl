@@ -1064,21 +1064,21 @@ plot-legend-row-gap = Row gap (pt)
 plot-legend-column-gap = Column gap (pt)
 plot-legend-swatch-length = Line sample length (pt)
 
-# Color Bar tab (#499)
+# Color bar section of the Legend tab (#499, #510)
 
 plot-color-bar-section = Color bar
 plot-color-bar-show =
     Show color bar
     .hint = Colors the curves of the groups on the bar by their value, and replaces their entries in the legend. Hidden, the curves get their own colors and legend entries back.
-plot-color-bar-groups-section = Series groups
+plot-color-bar-groups-section = Groups
+plot-color-bar-breaks-section = Breaks
+plot-color-bar-break-between = { $left } | { $right }
+plot-color-bar-group-on =
+    On the color bar
+    .hint = Colors the curves of this group by their value on the layer's color bar, and takes their entries out of the legend. A group with no gradient gets the first preset.
 plot-color-bar-group-break = Break label
     .hint = Typst text written under the bar, right of the value of the break between this group and the next one on the bar. Leave empty for none. Kept with this group.
-plot-color-bar-range = Range
 plot-color-bar-no-series-groups = This layer has no series group. Group its curves first, in the Series window.
-plot-color-bar-groups-on = Groups on the bar: { $names }
-plot-color-bar-groups-none = No group is on the bar yet. Tick « On the color bar » on a group, in the Series window.
-plot-color-bar-to-series = Groups on the bar: Series »
-    .hint = Opens the Series window on the first group on the bar. Each group's range, break label and chaining are set there.
 plot-color-bar-chain =
     Chain the segments
     .hint = Each segment starts where the previous one ends: groups of 0 to 57 and 0 to 25 are drawn from 0 to 57 and from 57 to 82. The colors do not change.
@@ -1095,7 +1095,7 @@ plot-color-bar-no-value =
         [one] { $count } curve has no value
        *[other] { $count } curves have no value
     }
-plot-color-bar-layout-section = Placement
+plot-color-bar-look-section = Look
 plot-color-bar-position = Position
 plot-color-bar-position-dragged = Dragged
 plot-color-bar-position-below = Below the frame
@@ -1111,13 +1111,9 @@ plot-color-bar-title = Title
     .hint = Typst text written under the bar. Leave empty for none.
 plot-color-bar-unknown = Default (setting of a newer version)
 disabled-color-bar-off = Turn on « Show color bar » first
-curve-on-color-bar =
-    On the color bar
-    .hint = Colors the curves of this group by their value on the layer's color bar, and takes their entries out of the legend.
-curve-bar-to-look = Look of the bar: Graph Properties »
-    .hint = Opens Graph Properties on the Legend tab, Color bar section: value, scale, position, orientation, ticks and title.
+disabled-color-bar-group-off = Tick the group first: only a group on the bar has a range
 curve-color-overrides-gradient = Overrides the group's gradient
-curve-color-by-bar = The color comes from the color bar of this layer. Take the group off the bar to set it here.
+curve-color-by-bar = The color comes from the color bar of this layer. Take the group off the bar to set it here (Graph Properties, Legend, Color bar).
 
 # Theme tab
 

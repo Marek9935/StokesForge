@@ -1,9 +1,11 @@
 //! The « Color bar » section of the Legend tab of the graph properties window
-//! (#499, step C): the source and scale of the value, the placement, the ticks
-//! and the title, the names of the groups on the bar and a link to the Series
-//! window. What belongs to one group (its box, range, break label and the
-//! chain option) is edited on its page of the Series window (#510): the look
-//! of the bar is a theme, the data it maps is not.
+//! (#499, step C; #510): a folded section with four sub-blocks. « Groups » (a
+//! table: the box that puts a group on the bar, its gradient and its range),
+//! « Breaks » (the label of the break between two neighbours on the bar and
+//! the chaining, only with two groups or more), « Value » (source and scale)
+//! and « Look » (position, orientation, ticks and title). Graph Properties
+//! sets the objects drawn on the figure, the bar included; the Series window
+//! keeps the gradient of a group.
 //!
 //! The page edits the draft (`PanelSpec::color_bar`) in place, like the legend
 //! tab; a bar edit alone is one history entry `history-plot-color-bar` (see
@@ -26,35 +28,11 @@ use stokesforge_app_state::tr;
 use super::form::{choice, form, ChoiceOption, Form};
 use super::plot_settings::formula_field;
 
-/// Where a link button between the two windows (#510) sends the user, stashed
-/// in the egui context and turned into an action by the properties window.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum BarLink {
-    /// Series window, on the first group on the bar.
-    ToSeries,
-    /// Graph Properties, Legend tab, Color bar section unfolded.
-    ToBarLook,
-}
-
-fn link_id() -> egui::Id {
-    egui::Id::new("color_bar_link_request")
-}
-
-/// Asks the properties window to follow `link` at the end of the frame. A link
-/// is a target pick like a tab (#498): a draft being typed is validated on its
-/// own page first, and refused, it keeps the page.
-pub(super) fn request_link(ctx: &egui::Context, link: BarLink) {
-    crate::field_state::pick_pending(ctx);
-    ctx.data_mut(|d| d.insert_temp(link_id(), link));
-}
-
-/// Takes the pending link request, if any.
-pub(super) fn take_link(ctx: &egui::Context) -> Option<BarLink> {
-    ctx.data_mut(|d| {
-        let link = d.get_temp::<BarLink>(link_id());
-        d.remove::<BarLink>(link_id());
-        link
-    })
+/// What the page asks of the panel once the form is painted.
+#[derive(Default)]
+struct Intent {
+    /// A group to put on the bar (`true`) or take off it (`false`).
+    toggle: Option<(u32, bool)>,
 }
 
 /// Puts `group` on the bar of `panel` (creating or showing the bar) and makes
@@ -202,8 +180,12 @@ pub(super) fn color_bar_editor(
     } else {
         0
     };
+    let mut intent = Intent::default();
+    let colors: Vec<Vec<String>> = groups
+        .iter()
+        .map(|(id, _)| group_swatch_colors(panel, *id))
+        .collect();
 
-    let ui_ctx = ui.ctx().clone();
     let commit = form(ui, "plot_color_bar_page", |form| {
         let mut commit = form.checkbox(
             &mut bar.visible,
@@ -212,7 +194,8 @@ pub(super) fn color_bar_editor(
         );
         let shown = bar.visible;
         let rows = form.enabled(shown, |form| {
-            groups_summary(form, &bar, &groups, ui_ctx);
+            groups_block(form, &mut bar, &groups, &colors, &mut intent, &mut commit);
+            breaks_block(form, &mut bar, &groups, &mut commit);
             value_section(form, &mut bar, row_columns, missing, &mut commit);
             layout_section(form, &mut bar, &mut commit);
             commit
@@ -225,11 +208,20 @@ pub(super) fn color_bar_editor(
         commit
     });
 
+    let mut commit = commit;
     // The segments follow the graph's order, whatever the file stored.
     let order: Vec<u32> = groups.iter().map(|(id, _)| *id).collect();
     let bar = bar.in_graph_order(&order).into_owned();
     if bar != baseline {
         panel.color_bar = Some(bar);
+    }
+    if let Some((group, on)) = intent.toggle {
+        if on {
+            put_group_on_bar(panel, group);
+        } else {
+            take_group_off_bar(panel, group);
+        }
+        commit = true;
     }
     commit
 }
@@ -250,77 +242,131 @@ pub(super) fn groups_with_a_break(bar: &ColorBarSpec, order: &[u32]) -> Vec<u32>
         .unwrap_or_default()
 }
 
-/// The groups on the bar, named on one line, and the link to the Series
-/// window where their range, break label and chaining are edited (#510).
-fn groups_summary(
+/// The colours a group is drawn with in the table: its gradient, else the
+/// colour of its first curve (a plain swatch).
+fn group_swatch_colors(panel: &PanelSpec, group: u32) -> Vec<String> {
+    match panel.group_gradient(group) {
+        Some(stops) => stokesforge_plot::gradient_colors(stops, SWATCH_STEPS),
+        None => panel
+            .group_members(group)
+            .first()
+            .map(|first| vec![panel.series[*first].line.color.clone()])
+            .unwrap_or_default(),
+    }
+}
+
+/// Slices of the gradient swatch of a group in the table.
+const SWATCH_STEPS: usize = 12;
+
+/// « Groups »: one row per group of the layer, in graph order: the box that
+/// puts it on the bar (with its name), its gradient, and its range, which
+/// only a group on the bar can have.
+fn groups_block(
     form: &mut Form<'_>,
-    bar: &ColorBarSpec,
+    bar: &mut ColorBarSpec,
     groups: &[(u32, String)],
-    ctx: egui::Context,
+    colors: &[Vec<String>],
+    intent: &mut Intent,
+    commit: &mut bool,
 ) {
     form.section(tr!("plot-color-bar-groups-section"));
-    let on_bar: Vec<&(u32, String)> = groups
-        .iter()
-        .filter(|(group, _)| bar.segment_of(*group).is_some())
-        .collect();
     if groups.is_empty() {
         form.note_dimmed(tr!("plot-color-bar-no-series-groups"));
-    } else if on_bar.is_empty() {
-        form.note_dimmed(tr!("plot-color-bar-groups-none"));
-    } else {
-        let names = on_bar
-            .iter()
-            .map(|(_, title)| title.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        form.note(tr!("plot-color-bar-groups-on", names = names));
+        return;
     }
-    form.field(|ui| {
-        if ui
-            .link(tr!("plot-color-bar-to-series"))
-            .on_hover_text(tr!("plot-color-bar-to-series", "hint"))
-            .clicked()
-        {
-            request_link(&ctx, BarLink::ToSeries);
-        }
+    let hint_auto = tr!("common-auto");
+    form.ui().push_id("color_bar_groups_table", |ui| {
+        egui::Grid::new("color_bar_groups")
+            .num_columns(3)
+            .spacing([12.0, 6.0])
+            .show(ui, |ui| {
+                for ((group, title), swatch) in groups.iter().zip(colors) {
+                    let group = *group;
+                    let on_bar = bar.segment_of(group).is_some();
+                    let mut ticked = on_bar;
+                    let tick = super::hover_help::help_beside(
+                        ui,
+                        tr!("plot-color-bar-group-on", "hint"),
+                        |ui| ui.checkbox(&mut ticked, title.as_str()).changed(),
+                    );
+                    if tick {
+                        intent.toggle = Some((group, ticked));
+                    }
+                    crate::color_picker::gradient_swatch(ui, swatch);
+                    let mut none = (None, None);
+                    let range = match bar.segments.iter_mut().find(|s| s.group == group) {
+                        Some(segment) => (&mut segment.from, &mut segment.to),
+                        None => (&mut none.0, &mut none.1),
+                    };
+                    let row = ui.add_enabled_ui(on_bar, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(tr!("plot-axes-from"));
+                            let first = auto_number_field(
+                                ui,
+                                ("color_bar_from", group),
+                                range.0,
+                                &quantities::COLOR_BAR_BOUND,
+                                &hint_auto,
+                            );
+                            ui.label(tr!("analysis-field-to"));
+                            let second = auto_number_field(
+                                ui,
+                                ("color_bar_to", group),
+                                range.1,
+                                &quantities::COLOR_BAR_BOUND,
+                                &hint_auto,
+                            );
+                            first.changed || second.changed
+                        })
+                        .inner
+                    });
+                    if !on_bar {
+                        row.response
+                            .on_disabled_hover_text(tr!("disabled-color-bar-group-off"));
+                    }
+                    *commit |= row.inner;
+                    ui.end_row();
+                }
+            });
     });
 }
 
-/// The colour-bar rows of one group on the bar, for the page of the group in
-/// the Series window (#510): its range, the label of its break with the next
-/// group, and the chain option. `order` is the graph's group order. True if
-/// the draft must be committed.
-pub(super) fn group_bar_rows(
+/// « Breaks »: only with two groups on the bar or more. One row per break,
+/// named by its two neighbours, with its label (kept with the left group);
+/// then the chaining of the segments.
+fn breaks_block(
     form: &mut Form<'_>,
     bar: &mut ColorBarSpec,
-    group: u32,
-    order: &[u32],
-) -> bool {
-    let mut commit = false;
-    let has_break = groups_with_a_break(bar, order).contains(&group);
-    let hint_from = tr!("common-auto");
-    if let Some(segment) = bar.segments.iter_mut().find(|s| s.group == group) {
-        commit |= form.row(tr!("plot-color-bar-range"), |ui| {
-            ui.label(tr!("plot-axes-from"));
-            let first = auto_number_field(
-                ui,
-                ("color_bar_from", group),
-                &mut segment.from,
-                &quantities::COLOR_BAR_BOUND,
-                &hint_from,
-            );
-            ui.label(tr!("analysis-field-to"));
-            let second = auto_number_field(
-                ui,
-                ("color_bar_to", group),
-                &mut segment.to,
-                &quantities::COLOR_BAR_BOUND,
-                &hint_from,
-            );
-            first.changed || second.changed
-        });
-        if has_break {
-            commit |= formula_field(
+    groups: &[(u32, String)],
+    commit: &mut bool,
+) {
+    let order: Vec<u32> = groups.iter().map(|(id, _)| *id).collect();
+    let lefts = groups_with_a_break(bar, &order);
+    if lefts.is_empty() {
+        return;
+    }
+    form.section(tr!("plot-color-bar-breaks-section"));
+    let on_bar: Vec<u32> = order
+        .iter()
+        .copied()
+        .filter(|group| bar.segment_of(*group).is_some())
+        .collect();
+    let title_of = |id: u32| {
+        groups
+            .iter()
+            .find(|(group, _)| *group == id)
+            .map(|(_, title)| title.clone())
+            .unwrap_or_default()
+    };
+    for (left, right) in lefts.iter().zip(on_bar.iter().skip(1)) {
+        let name = tr!(
+            "plot-color-bar-break-between",
+            left = title_of(*left),
+            right = title_of(*right)
+        );
+        form.ui().label(crate::theme::bold(name));
+        if let Some(segment) = bar.segments.iter_mut().find(|s| s.group == *left) {
+            *commit |= formula_field(
                 form,
                 &tr!("plot-color-bar-group-break"),
                 &tr!("plot-color-bar-group-break", "hint"),
@@ -328,12 +374,11 @@ pub(super) fn group_bar_rows(
             );
         }
     }
-    commit |= form.checkbox(
+    *commit |= form.checkbox(
         &mut bar.chain,
         tr!("plot-color-bar-chain"),
         Some(tr!("plot-color-bar-chain", "hint")),
     );
-    commit
 }
 
 /// Where the value comes from, how it maps onto the gradient, and the curves
@@ -430,7 +475,7 @@ fn value_section(
 
 /// Position, orientation, ticks and title.
 fn layout_section(form: &mut Form<'_>, bar: &mut ColorBarSpec, commit: &mut bool) {
-    form.section(tr!("plot-color-bar-layout-section"));
+    form.section(tr!("plot-color-bar-look-section"));
     // A dragged bar's anchor wins over the position: the list then shows
     // « Dragged », and choosing any place (even the one it names) drops it.
     let mut shown: Option<ColorBarPosition> = if bar.anchor.is_some() {

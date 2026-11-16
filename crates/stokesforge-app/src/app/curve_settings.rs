@@ -9,7 +9,7 @@
 //! validation, same history macro): [`PlotSettingsTab::Series`] no longer
 //! appears in the graph's tab strip, it chooses this page. **The selection in
 //! the list chooses the page** (#510): a group header opens the **group page**
-//! (its name, its colors, its place on the color bar, and the line and symbol
+//! (its name, its gradient, and the line and symbol
 //! of all its curves), a curve opens the **curve page** (its own fields, its
 //! group membership, and its own line and symbol). The common style is
 //! **written into each series**: no exception flag to keep track of, and
@@ -547,7 +547,7 @@ fn curve_page(
 }
 
 /// The group page (#510): its gestures (name, ungroup, delete), its colors
-/// (gradient, place on the color bar with its rows) and the line and symbol of
+/// (gradient) and the line and symbol of
 /// all its curves, written into each member. `selected` follows the first
 /// member; a group that disappears gives the page back to a curve.
 #[allow(clippy::too_many_arguments)]
@@ -575,7 +575,6 @@ fn group_page(
         return commit;
     }
     commit |= gradient_editor(ui, panel, group, env, actions);
-    commit |= group_bar_editor(ui, panel, layer, group);
     // What the curves share: the first member is shown, what changes is copied
     // into every member. Bins and Width only when EVERY curve has that type.
     let members = panel.group_members(group);
@@ -614,69 +613,6 @@ fn group_page(
         series_style_editor(ui, &mut panel.series[first], env, (None, None), false)
     });
     propagate_style(panel, group, &before, first);
-    commit
-}
-
-/// « On the color bar » of the group, the rows of its segment (range, break
-/// label, chain) when it is on the bar, and the way to the look of the bar.
-fn group_bar_editor(ui: &mut egui::Ui, panel: &mut PanelSpec, layer: usize, group: u32) -> bool {
-    let mut commit = false;
-    let order = panel.group_ids();
-    let ctx = ui.ctx().clone();
-    // The link is drawn below the range fields, which must know before they
-    // are drawn that a pick is pending (#498): the release over the link's
-    // rect of the previous frame says so.
-    let link_rect = egui::Id::new("curve_bar_link_rect");
-    let over_link = ctx
-        .data(|d| d.get_temp::<egui::Rect>(link_rect))
-        .is_some_and(|rect| {
-            ctx.input(|i| {
-                i.pointer.primary_released()
-                    && i.pointer.interact_pos().is_some_and(|at| rect.contains(at))
-            })
-        });
-    if over_link {
-        crate::field_state::pick_pending(&ctx);
-    }
-    // The range fields are drafts of this group's page: a click that leaves it
-    // validates them first (#498).
-    crate::field_state::for_target(ui, (layer, true, group), |ui| {
-        form(ui, "curve_group_bar", |f| {
-            let mut on_bar = panel
-                .color_bar
-                .as_ref()
-                .is_some_and(|bar| bar.segment_of(group).is_some());
-            if f.checkbox(
-                &mut on_bar,
-                tr!("curve-on-color-bar"),
-                Some(tr!("curve-on-color-bar", "hint")),
-            ) {
-                if on_bar {
-                    super::color_bar_settings::put_group_on_bar(panel, group);
-                } else {
-                    super::color_bar_settings::take_group_off_bar(panel, group);
-                }
-                commit = true;
-            }
-            if on_bar {
-                if let Some(bar) = panel.color_bar.as_mut() {
-                    commit |= super::color_bar_settings::group_bar_rows(f, bar, group, &order);
-                }
-                f.field(|ui| {
-                    let link = ui
-                        .link(tr!("curve-bar-to-look"))
-                        .on_hover_text(tr!("curve-bar-to-look", "hint"));
-                    ui.data_mut(|d| d.insert_temp(link_rect, link.rect));
-                    if link.clicked() {
-                        super::color_bar_settings::request_link(
-                            &ctx,
-                            super::color_bar_settings::BarLink::ToBarLook,
-                        );
-                    }
-                });
-            }
-        })
-    });
     commit
 }
 
@@ -1358,36 +1294,6 @@ mod tests {
         assert_eq!(group, None, "the page is a curve's now");
     }
 
-    /// #499: « On the color bar » on the group page puts the group on the
-    /// bar of the layer (creating it, retaining a gradient for the group) and
-    /// takes it off again. Witness: a checkbox that does nothing, or a segment
-    /// left behind, fails the first and last assertions.
-    #[test]
-    fn the_group_page_puts_the_group_on_the_color_bar_and_takes_it_off() {
-        let ctx = super::super::test_support::context();
-        let mut panel = layer_with_group();
-        let mut selected = 1;
-        let mut group: Option<u32> = Some(1);
-        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
-        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
-        let pos = center_of(&output, &tr!("curve-on-color-bar"));
-        assert!(click_at(&ctx, &mut panel, (&mut selected, &mut group), pos));
-        let bar = panel.color_bar.as_ref().expect("a bar was created");
-        assert!(bar.visible);
-        assert_eq!(bar.segments.len(), 1);
-        assert_eq!(bar.segments[0].group, 1);
-        assert!(
-            panel.group_gradient(1).is_some(),
-            "the group retains a gradient in the same edit"
-        );
-
-        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
-        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
-        let pos = center_of(&output, &tr!("curve-on-color-bar"));
-        assert!(click_at(&ctx, &mut panel, (&mut selected, &mut group), pos));
-        assert!(panel.color_bar.as_ref().unwrap().segments.is_empty());
-    }
-
     /// A line width typed for one series and a click on another series row:
     /// the width goes to the series it was typed for, the clicked one opens
     /// untouched (#498). Witness: `*selected = index` applied before the page.
@@ -1734,12 +1640,12 @@ mod tests {
         assert_eq!(group, None);
     }
 
-    /// #510: « On the color bar » shows the group's Range and Chain rows, and a
-    /// typed From reaches its segment; the Break label sits on the first of
-    /// two groups on the bar, not on the last. Witnesses: rows shown off the
-    /// bar, or a break label forced on, fail.
+    /// #510: the colour bar is not on the group page: a group that IS on the
+    /// bar shows its gradient editor and nothing of the bar (no box, no
+    /// range, no break label, no chain, no link). Graph Properties › Legend
+    /// holds them. Witness: the box (or any bar row) drawn again fails.
     #[test]
-    fn the_group_page_carries_the_rows_of_its_segment_on_the_bar() {
+    fn the_group_page_has_no_color_bar_rows() {
         let ctx = super::super::test_support::context();
         let mut panel = layer_with_group();
         for (n, name) in [(5, "E"), (6, "F")] {
@@ -1748,74 +1654,23 @@ mod tests {
             series.group = Some(2);
             panel.series.push(series);
         }
+        super::super::color_bar_settings::put_group_on_bar(&mut panel, 1);
+        super::super::color_bar_settings::put_group_on_bar(&mut panel, 2);
         let mut selected = 1;
         let mut group: Option<u32> = Some(1);
-        let shown = |output: &egui::FullOutput, key: String| {
-            super::super::test_support::texts(&output.shapes)
-                .iter()
-                .any(|t| t.text == key)
-        };
         page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
         let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
-        assert!(!shown(&output, tr!("plot-color-bar-range")), "off the bar");
-        assert!(!shown(&output, tr!("plot-color-bar-chain")));
-        assert!(
-            !shown(&output, tr!("curve-bar-to-look")),
-            "no link off the bar"
-        );
-        // Group 1 on the bar alone: no break.
-        let tick = center_of(&output, &tr!("curve-on-color-bar"));
-        assert!(click_at(
-            &ctx,
-            &mut panel,
-            (&mut selected, &mut group),
-            tick
-        ));
-        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
-        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
-        assert!(shown(&output, tr!("plot-color-bar-range")));
-        assert!(shown(&output, tr!("plot-color-bar-chain")));
-        assert!(!shown(&output, tr!("plot-color-bar-group-break")), "alone");
-        // A typed From reaches the segment (the hint "Auto" is painted twice).
-        let from = super::super::test_support::texts(&output.shapes)
-            .into_iter()
-            .filter(|t| t.text == tr!("common-auto"))
-            .min_by(|a, b| a.center.x.total_cmp(&b.center.x))
-            .expect("the From field")
-            .center;
-        click_at(&ctx, &mut panel, (&mut selected, &mut group), from);
-        page(
-            &ctx,
-            &mut panel,
-            (&mut selected, &mut group),
-            vec![egui::Event::Text("3".into())],
-        );
-        let key = egui::Event::Key {
-            key: egui::Key::Enter,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: egui::Modifiers::NONE,
-        };
-        page(&ctx, &mut panel, (&mut selected, &mut group), vec![key]);
-        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
-        assert_eq!(
-            panel.color_bar.as_ref().unwrap().segments[0].from,
-            Some(3.0)
-        );
-        // Both groups on the bar: the break label on the first one only.
-        super::super::color_bar_settings::put_group_on_bar(&mut panel, 2);
-        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
-        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
-        assert!(shown(&output, tr!("plot-color-bar-group-break")), "group 1");
-        group = Some(2);
-        page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
-        let (output, _) = page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
-        assert!(shown(&output, tr!("plot-color-bar-range")));
-        assert!(
-            !shown(&output, tr!("plot-color-bar-group-break")),
-            "group 2"
-        );
+        let painted = super::super::test_support::texts(&output.shapes);
+        let shown = |key: String| painted.iter().any(|t| t.text == key);
+        assert!(shown(tr!("curve-gradient-field")), "the page is drawn");
+        for key in [
+            tr!("plot-color-bar-group-on"),
+            tr!("plot-color-bar-chain"),
+            tr!("plot-color-bar-group-break"),
+            tr!("plot-axes-from"),
+        ] {
+            assert!(!shown(key.clone()), "{key}");
+        }
     }
 
     /// #510: a group that no longer exists under the draft (an Undo, a

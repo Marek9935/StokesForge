@@ -57,7 +57,7 @@
   {
     "image": "graphs-properties-color-bar.png",
     "page": "guide/graphs.md",
-    "shows": "The Graph Properties window on its Legend tab, scrolled to the open Color bar section: Show color bar ticked, the line Groups on the bar: Kinetics with its Series link, then the value, scale, placement, ticks and title settings."
+    "shows": "The Graph Properties window on its Legend tab, scrolled to the open Color bar section: Show color bar ticked, then four blocks: Groups (a table with a tick box, the gradient and the From and to range of each group, Kinetics ticked), Breaks (the label of each break and Chain the segments, shown with two groups on the bar), Value (Value from, Scale) and Look (Position, Orientation, Ticks, Title)."
   },
   {
     "image": "graphs-formula-title.png",
