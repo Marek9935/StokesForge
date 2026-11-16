@@ -12993,6 +12993,9 @@ impl AppState {
             .discarded_source
             .as_ref()
             .map(|source| source.path.clone());
+        // #546: the themes a script can name, read now and set before this run
+        // (the engine outlives the run, the library changes between runs).
+        let theme_library = self.script_theme_library();
         let (reply_tx, reply_rx) = mpsc::channel();
         let waker = self.waker.clone();
 
@@ -13007,6 +13010,7 @@ impl AppState {
                     Ok(engine) => {
                         engine.set_project_path(project_path);
                         engine.set_protected_path(protected_path);
+                        engine.set_theme_library(Some(theme_library));
                         let outcome = engine.run(&source);
                         (Some(engine), outcome)
                     }

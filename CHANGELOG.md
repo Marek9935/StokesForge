@@ -26,6 +26,7 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- `pyst.apply_theme(graph, theme, *, families=None, add_missing_layers=False)` applies a named graph theme (built-in, user or project) to a graph, undoable inside the script's group, and `pyst.themes()` lists the themes available; a missing name raises the new `pyst.UnknownThemeError`, and a name shared by several themes takes the project theme, then the user theme, then the built-in, with a warning. Graphs made by a script still take no default theme. A user theme exists on one machine and is unknown to the command line, so a script that names one is less portable (#546). The pyst API moves to 0.8.
 - Graph themes can be saved in the project (#540): the `.stf` file gains an additive `project_themes` field (format version unchanged), changed by one undoable command per add, rename, overwrite or delete; a duplicate name in the project is refused, case ignored. An older version that saves such a file again drops the themes without a message. The picker and the Save as theme form follow in the same package (#514).
 - A series added to a graph (dragging columns onto it, Add rows, an analysis
   result plotted on it) that goes beyond the written axis range widens only the

@@ -90,6 +90,8 @@ mod set_graph;
 mod sheet_edit;
 #[cfg(feature = "python")]
 mod surface;
+#[cfg(feature = "python")]
+mod themes;
 
 #[cfg(feature = "python")]
 pub use engine::ScriptEngine;
@@ -101,8 +103,11 @@ pub use outcome::ScriptOutcome;
 pub use selftest::{run_selftest, SelfTestReport, SelfTestStep};
 #[cfg(feature = "python")]
 pub use surface::{
-    BrokenReferenceError, Handle, InvalidValueError, UnknownPathError, PYST_API_VERSION,
+    BrokenReferenceError, Handle, InvalidValueError, UnknownPathError, UnknownThemeError,
+    PYST_API_VERSION,
 };
+#[cfg(feature = "python")]
+pub use themes::{ThemeLibrary, ThemeLibraryEntry, ThemeSource};
 
 /// Tells whether this binary embeds the script thread (feature `python`).
 ///

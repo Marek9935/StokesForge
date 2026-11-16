@@ -10,23 +10,69 @@
 //! itself ([`AppState::with_new_graph_defaults`]): one command, one history
 //! step. Graphs made by scripts never go through it.
 
-use stokesforge_plot::{GraphTheme, PlotSpec, ThemeFamilies, ThemeFamily};
+use stokesforge_plot::{GraphTheme, PlotSpec};
 
 use super::AppState;
 use crate::user_themes::{ReadOnlyReason, ThemeEntry, ThemeRef, UserThemeError, UserThemes};
 
-/// The families a default theme gives to a new graph: all but the texts and
-/// the axis ranges (a new graph keeps its own titles and its own ranges).
-pub fn default_theme_families() -> ThemeFamilies {
-    ThemeFamilies::all()
-        .without(ThemeFamily::Texts)
-        .without(ThemeFamily::AxisRanges)
-}
+pub use stokesforge_plot::default_theme_families;
 
 impl AppState {
     /// The user's theme library (read access).
     pub fn user_themes(&self) -> &UserThemes {
         &self.user_themes
+    }
+
+    /// The themes a script may name (#546): the built-ins as the user left them
+    /// (a modified one applies modified), each under its key, its English name
+    /// and its name in every catalogue language (never the pseudo-locale),
+    /// then the user's themes. Set on the engine before **every** run: the
+    /// library changes between two runs of the same engine. The themes of the
+    /// project are not here, a script reads them from the project it runs on.
+    #[cfg(feature = "python")]
+    pub(crate) fn script_theme_library(&self) -> stokesforge_script::ThemeLibrary {
+        use crate::i18n::{build_loader, Language};
+        use stokesforge_script::{ThemeLibrary, ThemeLibraryEntry, ThemeSource};
+        let loaders: Vec<_> = Language::ALL
+            .into_iter()
+            .filter(|language| *language != Language::PseudoEnglish)
+            .map(build_loader)
+            .collect();
+        let entries = self
+            .user_themes
+            .entries()
+            .into_iter()
+            .filter_map(|entry| match entry.reference {
+                ThemeRef::Builtin(index) => {
+                    let key = crate::builtin_themes::KEYS.get(index)?;
+                    let english = crate::builtin_themes::NAMES.get(index)?;
+                    let mut names = vec![(*key).to_owned(), (*english).to_owned()];
+                    names.extend(
+                        loaders
+                            .iter()
+                            .map(|loader| crate::builtin_themes::display_name_in(loader, index)),
+                    );
+                    Some(ThemeLibraryEntry::new(
+                        ThemeSource::Builtin,
+                        format!("builtin:{key}"),
+                        (*english).to_owned(),
+                        names,
+                        entry.theme,
+                        entry.modified,
+                    ))
+                }
+                ThemeRef::User(id) => Some(ThemeLibraryEntry::new(
+                    ThemeSource::User,
+                    format!("user:{id}"),
+                    entry.theme.name.clone(),
+                    vec![entry.theme.name.clone()],
+                    entry.theme,
+                    false,
+                )),
+                ThemeRef::Project(_) => None,
+            })
+            .collect();
+        ThemeLibrary::new(entries)
     }
 
     /// Why the library cannot be changed this session, if it cannot.

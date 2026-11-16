@@ -12,16 +12,22 @@ pub use stokesforge_plot::builtin_themes::{index_of, original, COUNT, KEYS, NAME
 /// The name shown for the built-in `index`, in the current language (catalog
 /// keys `plot-theme-<key>`). Empty past the catalogue.
 pub fn display_name(index: usize) -> String {
+    display_name_in(crate::i18n::loader(), index)
+}
+
+/// [`display_name`] in the language of `loader` (a script names a built-in in
+/// any language of the catalogues, #546).
+pub fn display_name_in(loader: &i18n_embed::fluent::FluentLanguageLoader, index: usize) -> String {
     match index {
-        0 => tr!("plot-theme-light"),
-        1 => tr!("plot-theme-dark"),
-        2 => tr!("plot-theme-publication"),
-        3 => tr!("plot-theme-publication-wide"),
-        4 => tr!("plot-theme-presentation"),
-        5 => tr!("plot-theme-fit-residuals"),
-        6 => tr!("plot-theme-kinetics"),
-        7 => tr!("plot-theme-side-by-side"),
-        8 => tr!("plot-theme-color-map"),
+        0 => tr!(in loader; "plot-theme-light"),
+        1 => tr!(in loader; "plot-theme-dark"),
+        2 => tr!(in loader; "plot-theme-publication"),
+        3 => tr!(in loader; "plot-theme-publication-wide"),
+        4 => tr!(in loader; "plot-theme-presentation"),
+        5 => tr!(in loader; "plot-theme-fit-residuals"),
+        6 => tr!(in loader; "plot-theme-kinetics"),
+        7 => tr!(in loader; "plot-theme-side-by-side"),
+        8 => tr!(in loader; "plot-theme-color-map"),
         _ => String::new(),
     }
 }

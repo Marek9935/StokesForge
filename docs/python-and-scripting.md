@@ -512,7 +512,7 @@ is `[]` on the grid. On a free graph it reports the image size, empty
 Outside `set_graph` for now (nothing technically prevents them, they
 were not judged safe enough for this batch): fonts and anchors of the titles,
 colors of the axes and of the legend, mirror axis and tick labels,
-top axis, themes, and every series setting (`plot`, `set_group_style`).
+top axis, and every series setting (`plot`, `set_group_style`).
 
 The workbook editing batch sends the commands the interface uses
 (`InsertRows`, `DeleteRows`, `SetColumnType`, `Move`, `DuplicateWorksheet` or
@@ -522,6 +522,62 @@ updates the version it had read of these columns (see "Read
 version"): its following writes do not refuse themselves. The calculation
 (`update_calculation`, `remove_calculation`) and the transposition are not
 exposed.
+
+### Graph themes (#546)
+
+`pyst.apply_theme(graph, theme, *, families=None, add_missing_layers=False)`
+applies a named graph theme (the themes of #514) to a graph, and
+`pyst.themes()` lists the themes a script can name. A graph made by `pyst.plot`
+**still takes no default theme**: the script keeps control, and a theme is
+applied only by this call.
+
+- **Writes** like `set_graph` (`themes.rs`): prepare, `begin_write`, prepare again
+  under the reservation, then `bridge::set_graph_spec` (frames fixed, ranges
+  frozen, #529): one `SetPlotSpec` in the `Script` group, and a theme that
+  changes nothing writes nothing. The copy itself is
+  `stokesforge_render_svg::themed_spec`, the function the application uses.
+  Neither the recent-theme order nor the use counters of the application move.
+- **Names.** A built-in by its key (`publication-wide`) or its name in any
+  catalogue language, whatever the interface language (`Publication Wide`,
+  `Publication large`); a user or project theme by its name. Case and extra
+  spaces are ignored. A `builtin:`, `user:` or `project:` prefix restricts the
+  source, and the `key` that `themes()` returns is accepted too. A built-in the
+  user modified on this machine applies **modified**, like in the application.
+- **Where the library comes from.** The engine holds plain data, never a
+  callback (invariant 9): the host calls `ScriptEngine::set_theme_library`
+  **before every run** (the engine is reused, the user's themes change between
+  runs; `AppState::script_theme_library`). Without it (the command line, the
+  script tests) the built-ins are the originals, known by key and English name
+  only, and there are no user themes. The themes of the project are always read
+  from the snapshot: they travel with the `.stf`.
+- **Families.** Left out, `families` is that of the default theme of new graphs
+  (every family but the texts and the axis ranges). A family is named by its key
+  (`title-fonts`), the same with underscores (`title_fonts`) or its English
+  displayed name (`Title fonts`); an empty list or an unknown name raises
+  `InvalidValueError` (the message lists the keys). `add_missing_layers` adds
+  empty layers up to the theme's count; off by default.
+- **Same name in several places (#546 T7).** Never an error. The order is
+  project theme, then user theme, then built-in: the first is applied and a
+  `UserWarning` (shown in the console, every time) says so, for example
+  `Theme 'Fig A': project:Fig A applied, user:Fig A ignored`. A `builtin:`,
+  `user:` or `project:` prefix searches one source only and gives no warning
+  (one only when several themes of that source match: the first in list order
+  wins). The policy is the single function `themes::choose_among`.
+- **Errors.** `UnknownThemeError` (a kind of `InvalidValueError`) when no theme
+  answers to the name. From the command line, the message for a
+  user theme says that user themes exist only in the application.
+  `BrokenReferenceError` for a stale handle, `InvalidValueError` for a handle
+  that is not a graph.
+- `themes()` returns dicts `name`, `key`, `source` (`builtin`, `user`,
+  `project`) and `modified`, built-ins first, then user, then project.
+
+**Portability, to say in every script that uses a theme.** A theme is not part
+of the script. A **user theme** exists on one machine and is unknown to the
+command line: the same script gives another result, or fails with
+`UnknownThemeError`, elsewhere. A **project theme** travels with the `.stf`. A
+**built-in** has the same name everywhere but the user may have modified it on a
+machine. A robust script draws its own style (`set_graph`, `plot` options) and
+uses no theme.
 
 ### Series groups (#196)
 
@@ -709,7 +765,7 @@ difference with the module actually built, saying which one.
 ### API version (#356)
 
 `pyst.__api_version__` is a string `"MAJOR.MINOR"`, the constant
-`PYST_API_VERSION` of `stokesforge-script/src/surface.rs` (currently `"0.7"`).
+`PYST_API_VERSION` of `stokesforge-script/src/surface.rs` (currently `"0.8"`).
 It is independent of the software version.
 
 - **Alpha, `0.x`**: any change of the list (addition or break) raises the minor
@@ -757,9 +813,11 @@ exception ConcurrentWriteError
 class Handle
 exception InvalidValueError
 exception UnknownPathError
+exception UnknownThemeError
 function add_shape(graph, kind, x1, y1, x2, y2, *, panel=(0, 0), axis='left', line_color='', line_width=1.5, fill_color='')
 module analysis
 function apply_gradient(graph, group, gradient, *, panel=(0, 0))
+function apply_theme(graph, theme, *, families=None, add_missing_layers=False)
 function children(handle=None)
 function color_bar(graph, groups=None, *, value_from=None, row_column=Ellipsis, chain=None, scale=None, orientation=None, position=None, ticks=None, title=None, labels=None, ranges=None, length=None, thickness=None, visible=None, panel=(0, 0))
 function column(handle)
@@ -796,14 +854,15 @@ function set_group_style(graph, group, *, panel=(0, 0), line_style=None, line_wi
 function set_note(note, text)
 function set_series_group(graph, index, group, *, panel=(0, 0))
 function set_values(handle, values, *, expected_version=None)
+function themes()
 function undo()
 function ungroup(graph, group, *, panel=(0, 0))
 function values(handle)
 ```
 
 A `Handle` has no public attribute or method (no constructor, no exposed
-integer): `dir(pyst.Handle)` without the `_` names is empty. The four
-exceptions derive from `Exception`.
+integer): `dir(pyst.Handle)` without the `_` names is empty. `UnknownThemeError` derives from
+`InvalidValueError`, the other four exceptions from `Exception`.
 
 ### Module `pyst.analysis`
 
@@ -952,6 +1011,13 @@ group
 color
 visible
 y
+```
+
+```pyst-api returns themes.item
+name
+key
+source
+modified
 ```
 
 ```pyst-api returns series_groups.item
@@ -1112,6 +1178,24 @@ short_name
 long_name_units
 long_name_comments
 custom
+```
+
+```pyst-api enum theme_family
+background
+texts
+title-fonts
+axes
+axis-ranges
+size-and-page
+legend
+curves
+color-bar
+```
+
+```pyst-api enum theme_source
+builtin
+user
+project
 ```
 
 ```pyst-api enum shape_kind
