@@ -842,7 +842,7 @@ plot-general-axes-color = Axes color
 plot-general-global-note = Text color and Axes color apply to every title, axis, tick and gridline, and replace the colors set in other tabs
 plot-general-text-scale =
     Text scale (%)
-    .hint = Multiplies the size of every text: titles, tick numbers, legend, color bar and free texts. A size set by hand is multiplied too
+    .hint = Multiplies the size of every text left on Auto: titles, tick numbers, legend, color bar and new free texts. A size set by hand keeps its value
 plot-general-dark-note = Auto colors turn white on a dark background
 plot-stale-warning = Warn about out-of-date data
     .hint = Greys out the curves of calculations that are out of date and marks them, on screen and in exports

@@ -49,18 +49,17 @@ impl<'a> GraphText<'a> {
     /// Accepted scale, as a multiplier (25 % to 400 %).
     pub const SCALE_RANGE: (f64, f64) = (0.25, 4.0);
 
-    /// The size of a text: `local` times the graph scale when it was set by
-    /// hand, else the built-in size of its role times the graph scale;
-    /// clamped to [`TextFont::SIZE_RANGE`]. A size that is not finite counts
-    /// as Auto.
+    /// The size of a text: `local` when it was set by hand, else the
+    /// built-in size of its role times the graph scale; clamped to
+    /// [`TextFont::SIZE_RANGE`]. A size that is not finite counts as Auto.
     ///
-    /// Decision (#545, form 545-2): the scale multiplies **every** text size,
-    /// hand-set ones included. A hand-set size is relative to the graph scale;
-    /// the size fields keep showing the typed value.
+    /// Decision (#545, after the trial): a hand-set size is **absolute**, the
+    /// scale does not multiply it; the field shows what was typed and the text
+    /// is drawn at exactly that size.
     pub fn size(&self, local: Option<f64>, built_in: f64) -> f64 {
         let (low, high) = TextFont::SIZE_RANGE;
         match local.filter(|size| size.is_finite()) {
-            Some(size) => (size * self.scale).clamp(low, high),
+            Some(size) => size.clamp(low, high),
             None => (built_in * self.scale).clamp(low, high),
         }
     }
@@ -143,16 +142,17 @@ mod tests {
         scale: 1.5,
     };
 
-    /// #545. Witness: the scale applies to the local size too (12 becomes 18).
+    /// #545. Witness: the scale applied to the local size too (12 would
+    /// become 18).
     #[test]
-    fn the_scale_multiplies_an_auto_size_and_a_hand_set_one() {
+    fn an_auto_size_follows_the_scale_and_a_hand_set_one_does_not() {
         let auto = TextFont::default();
         assert_eq!(auto.resolved_size(GRAPH_150, 24.0), 36.0);
         let by_hand = TextFont {
             size: Some(12.0),
             ..TextFont::default()
         };
-        assert_eq!(by_hand.resolved_size(GRAPH_150, 24.0), 18.0);
+        assert_eq!(by_hand.resolved_size(GRAPH_150, 24.0), 12.0);
         assert_eq!(auto.resolved_size(GraphText::NEUTRAL, 24.0), 24.0);
     }
 

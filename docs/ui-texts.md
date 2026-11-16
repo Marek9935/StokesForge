@@ -281,7 +281,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Zoom / Reset Zoom | Zoom / Réinitialiser le zoom | Framing of the view; return to the original ranges | Rescale, Recadrer | G |
 | Pan† | Panoramique | Move the framing | Déplacement | G |
 | Global colors | Couleurs globales | Text color and Axes color, on the General tab of Graph Properties (#542): each is written into every local color, the last one set wins | Theme colors | — |
-| Text scale (%) | Échelle du texte (%) | Row of Graph Properties › General under Text color and Axes color (#545, key `plot-general-text-scale`): multiplier of the size of every text (a hand-set size too), 25 to 400, Auto = 100 %. The row above it is **Font** (the format toolbar's word, key `format-font`) whose first entry is « Graph font » / « Police du graphe » | Zoom, Text size, Font scale | G |
+| Text scale (%) | Échelle du texte (%) | Row of Graph Properties › General under Text color and Axes color (#545, key `plot-general-text-scale`): multiplier of the size of every text left on Auto, 25 to 400, Auto = 100 %. The row above it is **Font** (the format toolbar's word, key `format-font`) whose first entry is « Graph font » / « Police du graphe » | Zoom, Text size, Font scale | G |
 | Palette | Palette | Set of colors offered | — | G |
 | Swatch | Nuance | One color of a palette | Échantillon | G |
 | Saved colors | Couleurs enregistrées | Colors kept in the project or for the user | Favoris | — |

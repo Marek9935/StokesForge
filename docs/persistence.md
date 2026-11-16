@@ -351,7 +351,7 @@ a page; the old-record case is in `schema.rs`, the hostile case in
 `#[serde(default, skip_serializing_if = …)]`, and `AnnotationSpecRecord` gained
 `follows_graph_size` (bool, `#[serde(default, skip_serializing_if = "Not::not")]`):
 a free text created since #545 follows the axis-title size times the scale, while
-every text read from an older file reads `false` and is drawn at its stored `size` (times the scale). A
+every text read from an older file reads `false` and keeps its stored `size`. A
 graph without them writes the same bytes as before, so **`FORMAT_VERSION` did
 not move**; `tests/witnesses/v1` was regenerated with non-default values and the
 previous witness is kept as `v1-before-text-settings` (it reads back with no font,

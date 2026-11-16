@@ -498,12 +498,10 @@ exactly the defect `text.rs` exists to prevent.
 left on Auto; `PlotSpec::graph_text()` (sanitized: a non-finite scale is 100 %,
 others clamped to 25-400 %) gives a `stokesforge_plot::GraphText`, and **that is
 the one place that decides** a text's size and family: `GraphText::size` (own
-size times the scale, else the built-in size of the role times the scale, clamped to
+size, else the built-in size of the role times the scale, clamped to
 `TextFont::SIZE_RANGE`) and `GraphText::family` (own family, else the graph's,
-else the embedded default). The scale multiplies **every** size, a hand-set one
-included (decision of form 545-2): a hand-set size is relative to the graph scale, the size
-fields keep showing the typed value, and a free text of an old file (absolute size) is scaled
-too, all through `GraphText::size`. The role
+else the embedded default). Today a size set by hand is absolute and the scale
+does not multiply it (decided after the trial of #545: what is typed is what is drawn). The role
 constants are `TITLE_SIZE`, `PANEL_TITLE_SIZE`, `AXIS_DESC_SIZE` (axis titles and
 free texts that follow the graph, `AnnotationSpec::follows_graph_size`) and
 `LABEL_SIZE` (ticks, legend, colour bar). Rich texts go through `font_style`;
@@ -515,7 +513,7 @@ are literal Typst text in that family like the colour-bar numbers.
 (`edge_reserves`, tick count, `text_band`, `Grow`, the drawing all read the same
 `GraphText`). The axis areas grow with the resolved sizes (`CellPlan::grow_*`,
 `grown_room`: today's tick depth and title zone times the ratio above the
-built-in size, never shrunk by a hand-set size, but grown by any resolved size, scale included), so the frame keeps its size and the figure
+built-in size, never shrunk by a hand-set size), so the frame keeps its size and the figure
 grows around it; at the built-in sizes every band is today's constant, to the
 pixel. Only a **graph scale** under 100 % shrinks the default bands
 (`BandShrink`: tick depth, title zone and area times the scale, the growth rule
