@@ -224,3 +224,96 @@ fn a_graph_color_applies_on_a_layer_with_a_dark_background() {
     let document = export(&spec).to_uppercase();
     assert!(document.contains("#654321"));
 }
+
+// -- Graph text colour on every text (#550, G1) ---------------------------
+
+/// A one-layer graph with a visible layer title and a legend entry, and the
+/// graph text colour set; nothing else carries text.
+fn with_layer_title_and_legend(adjust: impl FnOnce(&mut PlotSpec)) -> String {
+    use stokesforge_core::column::{Column, ColumnMeta, ColumnType, ValueBlock};
+    use stokesforge_plot::SeriesSpec;
+    let mut project = Project::new("Colors").expect("project");
+    let root = project.root();
+    let book = project.add_empty_workbook(root, None).expect("workbook");
+    let sheet = project.add_worksheet(book, None).expect("worksheet");
+    let mut add = |name: &str| {
+        let column = Column::from_block(
+            ColumnType::Numeric,
+            ValueBlock::Float(vec![0.0, 1.0, 2.0]),
+            ColumnMeta::default(),
+        )
+        .expect("column");
+        project
+            .add_column(sheet, None, Some(name), column)
+            .expect("column")
+    };
+    let (x, y) = (add("X"), add("Signal"));
+    let mut spec = graph("#ffffff");
+    spec.panels
+        .get_mut(0)
+        .unwrap()
+        .series
+        .push(SeriesSpec::new_xy(x, y));
+    adjust(&mut spec);
+    let plot = resolve_spec(project.tree(), &spec);
+    render_to_string_with_typst(
+        &plot,
+        (400, 300),
+        &TextMeasurer::default(),
+        &FontChoice::default(),
+        SvgTextMode::Text,
+    )
+    .expect("export")
+    .to_uppercase()
+}
+
+#[test]
+fn the_graph_text_color_draws_the_layer_title_left_on_automatic() {
+    let set = |spec: &mut PlotSpec| {
+        spec.title.clear();
+        let panel = spec.panels.get_mut(0).unwrap();
+        panel.title = "Layer".to_owned();
+        panel.title_visible = true;
+        panel.legend.visible = false;
+        panel.bottom.label.clear();
+        panel.left.label.clear();
+    };
+    let on = with_layer_title_and_legend(|spec| {
+        set(spec);
+        spec.text_color = "#123456".to_owned();
+    });
+    assert!(on.contains("#123456"), "layer title not recoloured");
+    let off = with_layer_title_and_legend(set);
+    assert!(!off.contains("#123456"));
+}
+
+#[test]
+fn the_graph_text_color_draws_the_legend_text_left_on_automatic() {
+    let set = |spec: &mut PlotSpec| {
+        spec.title.clear();
+        let panel = spec.panels.get_mut(0).unwrap();
+        panel.bottom.label.clear();
+        panel.left.label.clear();
+        panel.legend.visible = true;
+    };
+    let on = with_layer_title_and_legend(|spec| {
+        set(spec);
+        spec.text_color = "#123456".to_owned();
+    });
+    assert!(on.contains("#123456"), "legend text not recoloured");
+    let off = with_layer_title_and_legend(set);
+    assert!(!off.contains("#123456"));
+}
+
+#[test]
+fn an_own_legend_or_layer_title_color_beats_the_graph_text_color() {
+    let document = with_layer_title_and_legend(|spec| {
+        spec.text_color = "#123456".to_owned();
+        let panel = spec.panels.get_mut(0).unwrap();
+        panel.title = "Layer".to_owned();
+        panel.title_visible = true;
+        panel.title_color = "#ff0000".to_owned();
+        panel.legend.color = "#00ff00".to_owned();
+    });
+    assert!(document.contains("#FF0000") && document.contains("#00FF00"));
+}

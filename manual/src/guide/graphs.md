@@ -127,7 +127,9 @@ While the window is open, your changes show on the graph at once. Click **OK** t
 
 A new graph has no background color: the figure is transparent when exported, and white on screen. Choose a dark background and the automatic text turns white.
 
-**Text color** and **Axes color** set a color for the whole graph, but only for the parts still on automatic color: the graph title, the axis titles and the free texts for **Text color**, the axis line, ticks, numbers and gridlines for **Axes color**. A part whose color you set yourself in another tab keeps it, and changing the global color later recolors again every part left on automatic.
+**Text color** and **Axes color** set a color for the whole graph, but only for the parts still on automatic color: the graph title, the axis titles and the free texts for **Text color**, the axis line, ticks, numbers and gridlines for **Axes color**. A part whose color you set yourself in another tab keeps it, and changing the global color later recolors again every part left on automatic. **Text color** reaches every text of the graph: the graph title, the layer titles, the axis titles, the free texts, the legend text and the labels of the color bar; it does not change a frame, an outline or a curve.
+
+Under each row, a grey note such as « 1 part has its own color » tells you when some parts keep a color of their own. **Reset Parts to Graph Settings** clears those own colors, so every part follows the graph again; it never touches the colors of your curves, the **Title color** of the graph, the backgrounds or the legend frame, and it is greyed when no part has a color of its own. It is one step of **Undo** once you press **OK**. In the color choice of a title, an axis, the legend or a free text, **Auto (graph color)** means that this part follows the graph. Choosing the **Light** or **Dark** theme still puts every part back to automatic.
 
 ### Graph size
 

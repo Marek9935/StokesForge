@@ -390,9 +390,10 @@ pub fn figure_ink(spec: &PlotSpec) -> (u8, u8, u8) {
 ///
 /// One resolver per role. A part takes its own colour if it is readable, else
 /// the graph-level colour if it is set and readable, else the automatic ink.
-/// An unreadable graph-level value is as good as an empty one. Extending a
-/// role to another part (layer titles, legend, colour bar, shapes: pending
-/// decision G1) is one call of [`GraphInks::text`] or [`GraphInks::axes`].
+/// An unreadable graph-level value is as good as an empty one. The text
+/// role reaches every text (graph and layer titles, axis titles, free texts,
+/// legend text, colour bar labels); strokes (legend frame, shape and bar
+/// outlines) keep the automatic ink.
 #[derive(Debug, Clone, Copy, Default)]
 struct GraphInks {
     text: Option<(u8, u8, u8, u8)>,
@@ -3014,7 +3015,7 @@ fn draw_panel<DB: DrawingBackend>(
     let title_style = font_style(
         &spec.title_font,
         PANEL_TITLE_SIZE,
-        rgba_or(&spec.title_color, opaque(ink)),
+        graph_inks.text(&spec.title_color, ink),
         canvas.dim_in_pixel().0,
     );
     let area = if let Some(base) = base {
@@ -3964,7 +3965,7 @@ fn draw_panel<DB: DrawingBackend>(
         .chain(&overlay_prepared)
         .filter(|s| s.in_legend())
         .collect();
-    let legend_ink = rgba_or(&spec.legend.color, opaque(ink));
+    let legend_ink = graph_inks.text(&spec.legend.color, ink);
     let inscribed = legend::draw(
         canvas,
         origin,
@@ -4023,7 +4024,7 @@ fn draw_panel<DB: DrawingBackend>(
     if let Some(bar) = spec.color_bar_in_order().filter(|bar| bar.visible) {
         let bar = &*bar;
         let segments = crate::color_bar::bar_segments(panel);
-        let bar_ink = opaque(ink);
+        let bar_ink = graph_inks.text("", ink);
         let placed = crate::color_bar::draw(
             canvas,
             bar,

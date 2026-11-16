@@ -826,6 +826,7 @@ plot-target-color-bar = Barre de couleurs
 # Valeurs automatiques des champs de couleur
 
 plot-color-auto-contrast = Auto (contraste avec le fond)
+plot-color-auto-graph = Auto (couleur du graphe)
 plot-color-auto-white = Auto (blanc)
 plot-color-same-as-line = Comme le trait
 
@@ -838,7 +839,12 @@ plot-title-color = Couleur du titre
 plot-general-background = Fond
 plot-general-text-color = Couleur du texte
 plot-general-axes-color = Couleur des axes
-plot-general-global-note = Couleur du texte et Couleur des axes s'appliquent à chaque titre, axe, graduation et quadrillage, et remplacent les couleurs réglées dans les autres onglets
+plot-general-reset-parts = Réinitialiser les parties aux réglages du graphe
+    .hint = Efface les couleurs propres des titres, axes, légende et textes libres, qui suivent de nouveau le graphe. Les courbes ne changent pas
+plot-general-own-colors-note = { $count ->
+    [one] { $count } partie a sa propre couleur
+   *[other] { $count } parties ont leur propre couleur
+}
 plot-general-dark-note = Les couleurs auto passent au blanc sur fond sombre
 plot-stale-warning = Avertir si des données ne sont pas à jour
     .hint = Grise les courbes des calculs pas à jour et les marque, à l'écran et dans les exports
@@ -2093,6 +2099,7 @@ number-presets = Valeurs courantes
 ## Raisons de grisage (#226) : un élément grisé dit pourquoi et quoi faire
 
 disabled-object-gone = Cet élément n'existe plus
+disabled-reset-parts = Aucune partie n'a sa propre couleur
 disabled-move-first = Déjà en premier
 disabled-move-last = Déjà en dernier
 disabled-visibility-empty = Rien à afficher ou masquer

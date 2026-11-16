@@ -537,7 +537,7 @@ pub(super) fn annotation_editor_ui(
                         ("annotation_color", id),
                         &mut editor.draft.color,
                         ColorUsage::Text,
-                        Some(&tr!("plot-color-auto-contrast")),
+                        Some(&tr!("plot-color-auto-graph")),
                         &mut env,
                     );
                     ui.label(tr!("plot-text-size"));

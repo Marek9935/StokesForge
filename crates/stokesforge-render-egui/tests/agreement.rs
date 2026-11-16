@@ -1888,12 +1888,20 @@ fn the_two_backends_draw_the_graph_level_colors_alike() {
     let mut fixture = minimal();
     fixture.spec.axes_color = "#654321".to_owned();
     fixture.spec.text_color = "#123456".to_owned();
+    // A layer title takes the graph text colour too (#550, G1).
+    let layer = fixture.spec.panels.get_mut(0).unwrap();
+    layer.title = "Layer".to_owned();
+    layer.title_visible = true;
     agree(fixture.project.tree(), &fixture.spec, SIZE, "graph colours");
     let screen = text_colors_egui(&fixture.spec, fixture.project.tree());
     let export = text_colors_svg(&fixture.spec, fixture.project.tree());
     assert!(
         screen.iter().any(|color| color == "#654321"),
         "the screen ignores the graph axes colour: {screen:?}"
+    );
+    assert!(
+        screen.iter().any(|color| color == "#123456"),
+        "the screen ignores the graph text colour: {screen:?}"
     );
     assert_eq!(screen, export, "text colours differ between the backends");
 }

@@ -7,6 +7,10 @@
 //! its own color if set, else the graph-level color if set and readable, else
 //! the automatic ink (`stokesforge_render::color::auto_ink`, white on a dark
 //! background). An empty color is "automatic" everywhere.
+//!
+//! Light and Dark are the exception by design (#550): they put every part back
+//! to automatic (local colors cleared) so a theme always gives a readable
+//! graph; Ctrl+Z restores.
 
 use crate::{AxisSide, PlotSpec};
 
@@ -76,11 +80,13 @@ impl PlotSpec {
         self.axes_color = color.to_string();
     }
 
-    /// Empties every local text color: graph title, title of each axis, free
-    /// texts. Used by the colour-only themes (pending decision G2, #550).
-    pub(crate) fn clear_local_text_colors(&mut self) {
-        self.title_color.clear();
+    /// Empties the own text color of every part that follows the graph text
+    /// color: title of each layer, title of each axis, legend text, free texts.
+    /// The graph title keeps its own « Title color ».
+    fn clear_part_text_colors(&mut self) {
         for panel in self.panels.iter_mut() {
+            panel.title_color.clear();
+            panel.legend.color.clear();
             for side in SIDES {
                 panel.axis_mut(side).title_color.clear();
             }
@@ -90,9 +96,8 @@ impl PlotSpec {
         }
     }
 
-    /// Empties the scale color of every axis of every panel (see
-    /// [`PlotSpec::clear_local_text_colors`]).
-    pub(crate) fn clear_local_axes_colors(&mut self) {
+    /// Empties the own scale color of every axis of every layer.
+    fn clear_part_axes_colors(&mut self) {
         for panel in self.panels.iter_mut() {
             for side in SIDES {
                 panel.axis_mut(side).tick_color.clear();
@@ -100,13 +105,69 @@ impl PlotSpec {
         }
     }
 
+    /// « Reset Parts to Graph Settings » (#550): empties the own text and axes
+    /// colors of every part, so they follow the graph colors again. Never
+    /// touches the series, the graph title's own color, the backgrounds, the
+    /// legend frame or the tick mark colors.
+    pub fn reset_parts_to_graph(&mut self) {
+        self.clear_part_text_colors();
+        self.clear_part_axes_colors();
+    }
+
+    /// How many parts have their own text color (the graph title, which has
+    /// its own row, is not counted). Same field set as
+    /// [`PlotSpec::reset_parts_to_graph`].
+    pub fn parts_with_own_text_color(&self) -> usize {
+        let own = |color: &str| usize::from(!color.is_empty());
+        self.panels
+            .iter()
+            .map(|panel| {
+                own(&panel.title_color)
+                    + own(&panel.legend.color)
+                    + SIDES
+                        .iter()
+                        .map(|&side| own(&panel.axis(side).title_color))
+                        .sum::<usize>()
+                    + panel
+                        .annotations
+                        .iter()
+                        .map(|annotation| own(&annotation.color))
+                        .sum::<usize>()
+            })
+            .sum()
+    }
+
+    /// How many axes have their own scale color.
+    pub fn parts_with_own_axes_color(&self) -> usize {
+        self.panels
+            .iter()
+            .map(|panel| {
+                SIDES
+                    .iter()
+                    .filter(|&&side| !panel.axis(side).tick_color.is_empty())
+                    .count()
+            })
+            .sum()
+    }
+
+    /// The Light and Dark rule (#550, decision G2): a colour-only theme puts
+    /// every part back to automatic, so a theme always gives a readable graph
+    /// (the graph title's own color included).
+    pub(crate) fn clear_local_text_colors(&mut self) {
+        self.clear_part_text_colors();
+        self.title_color.clear();
+    }
+
+    /// See [`PlotSpec::clear_local_text_colors`], for the scales.
+    pub(crate) fn clear_local_axes_colors(&mut self) {
+        self.clear_part_axes_colors();
+    }
+
     /// Applies a predefined theme in full.
     pub fn apply_theme(&mut self, theme: &Theme) {
         self.background = theme.background.to_string();
         self.set_text_color(theme.text);
         self.set_axes_color(theme.axes);
-        // #550: pending decision G2 (do Light and Dark clear the local colors?):
-        // today's effect is kept.
         self.clear_local_text_colors();
         self.clear_local_axes_colors();
     }
@@ -174,5 +235,61 @@ mod tests {
         assert_eq!(spec.panels.as_slice()[1].right.title_color, "");
         spec.apply_theme(&THEMES[0]);
         assert_eq!(spec.background, "#ffffff");
+    }
+
+    fn spec_with_own_colors() -> PlotSpec {
+        let mut spec = two_panel_spec();
+        spec.title_color = "#010101".into();
+        spec.background = "#fefefe".into();
+        spec.text_color = "#123456".into();
+        let first = spec.panels.get_mut(0).unwrap();
+        first.title_color = "#ff0000".into();
+        first.legend.color = "#ff0001".into();
+        first.legend.frame_color = "#ff0002".into();
+        first.left.title_color = "#ff0003".into();
+        first.left.tick_color = "#00ff00".into();
+        first.bottom.tick_color = "#00ff01".into();
+        first.bottom.tick_mark_color = "#00ff02".into();
+        first
+            .series
+            .push(crate::SeriesSpec::new(stokesforge_id::NodeId::from_raw(1)));
+        first.series[0].line.color = "#0000ff".into();
+        first
+            .annotations
+            .push(crate::AnnotationSpec::new("Note", 0.0, 0.0));
+        first.annotations[0].color = "#ff0004".into();
+        spec
+    }
+
+    #[test]
+    fn dark_clears_an_own_axis_title_color() {
+        let mut spec = spec_with_own_colors();
+        spec.apply_theme(&THEMES[1]);
+        assert_eq!(spec.panels.as_slice()[0].left.title_color, "");
+        assert_eq!(spec.panels.as_slice()[0].title_color, "");
+        assert_eq!(spec.panels.as_slice()[0].legend.color, "");
+        assert_eq!(spec.title_color, "");
+    }
+
+    #[test]
+    fn resetting_the_parts_touches_only_text_and_axes_colors_of_parts() {
+        let mut spec = spec_with_own_colors();
+        assert_eq!(spec.parts_with_own_text_color(), 4);
+        assert_eq!(spec.parts_with_own_axes_color(), 2);
+        spec.reset_parts_to_graph();
+        assert_eq!(spec.parts_with_own_text_color(), 0);
+        assert_eq!(spec.parts_with_own_axes_color(), 0);
+        let mut expected = spec_with_own_colors();
+        let first = expected.panels.get_mut(0).unwrap();
+        first.title_color.clear();
+        first.legend.color.clear();
+        first.left.title_color.clear();
+        first.left.tick_color.clear();
+        first.bottom.tick_color.clear();
+        first.annotations[0].color.clear();
+        assert_eq!(
+            spec, expected,
+            "series, title color, backgrounds, frame, marks and graph colors survive"
+        );
     }
 }

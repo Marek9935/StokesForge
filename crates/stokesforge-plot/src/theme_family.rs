@@ -557,13 +557,10 @@ impl PlotSpec {
         }
         if families.contains(ThemeFamily::TitleFonts) {
             self.set_text_color(theme.theme_text_color());
-            // #550: pending decision G2 (should Light and Dark leave the parts
-            // with their own colour alone?): today's effect is kept.
             self.clear_local_text_colors();
         }
         if families.contains(ThemeFamily::Axes) {
             self.set_axes_color(theme.theme_axes_color());
-            // #550: pending decision G2, as above.
             self.clear_local_axes_colors();
         }
     }
