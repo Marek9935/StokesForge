@@ -72,7 +72,19 @@ impl AppState {
                 ThemeRef::Project(_) => None,
             })
             .collect();
-        ThemeLibrary::new(entries)
+        let family_names = stokesforge_plot::ThemeFamily::ALL
+            .into_iter()
+            .flat_map(|family| {
+                loaders.iter().map(move |loader| {
+                    (family, crate::theme_window::family_name_in(loader, family))
+                })
+            })
+            .collect();
+        let style_names = loaders
+            .iter()
+            .map(crate::theme_window::style_name_in)
+            .collect();
+        ThemeLibrary::new(entries).with_family_names(family_names, style_names)
     }
 
     /// Why the library cannot be changed this session, if it cannot.
