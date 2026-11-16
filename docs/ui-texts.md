@@ -89,6 +89,12 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Template | Modèle | Import settings saved under a name | Recette, Preset, Filtre | O |
 | Wizard | Assistant | Window with steps | Wizard, Guide | G |
 | Theme | Thème | Set of global colors of a graph | Style, Palette | O |
+| Publication / Publication Wide | Publication / Publication large | Built-in graph themes (#544, keys `plot-theme-publication`, `plot-theme-publication-wide`): the plot area is 8.5 cm or 17 cm wide | — | O |
+| Presentation | Présentation | Built-in graph theme with large texts and thick lines (#544) | Diaporama | O |
+| Fit + Residuals | Ajustement + résidus | Built-in graph theme of two stacked layers: the data with its fit, the residuals below (#544) | Fit | O |
+| Kinetics | Cinétique | Built-in graph theme of a group of curves on a gradient with a colour bar (#544) | — | O |
+| Side by Side | Côte à côte | Built-in graph theme of two equal layers in one row (#544) | — | O |
+| Color Map | Carte de couleurs | Built-in graph theme of gradient curves with a colour bar and no legend (#544) | — | O |
 | Shortcut | Raccourci | Keys that run a command | Raccourci clavier | G |
 
 ### 2.3 Workbook and grid
