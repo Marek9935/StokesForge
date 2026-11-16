@@ -235,20 +235,32 @@ fn number_field_core<T: Number>(
     } else {
         0.0
     };
+    let mut width = if quantity.short {
+        FIELD_WIDTH
+    } else if quantity.is_compact() {
+        crate::theme::FIELD_WIDTH_DIGITS
+    } else if quantity.is_compact_signed() {
+        crate::theme::FIELD_WIDTH_SIGNED_DIGITS
+    } else if quantity.wide {
+        crate::theme::FIELD_WIDTH_VALUE
+    } else {
+        FIELD_WIDTH
+    };
+    // The Auto hint reads in full, in any language (#545): the field widens to
+    // the hint (margins and arrow included) when a longer text needs it.
+    if let Some(hint) = auto_hint {
+        let font = egui::TextStyle::Body.resolve(ui.style());
+        let hint_width = ui
+            .painter()
+            .layout_no_wrap(hint.to_owned(), font, egui::Color32::PLACEHOLDER)
+            .size()
+            .x;
+        width = width.max(hint_width + 8.0 + arrow_room + 2.0);
+    }
     let edited = field_state::edit_text_with_arrow(
         ui,
         id_salt,
-        if quantity.short {
-            FIELD_WIDTH
-        } else if quantity.is_compact() {
-            crate::theme::FIELD_WIDTH_DIGITS
-        } else if quantity.is_compact_signed() {
-            crate::theme::FIELD_WIDTH_SIGNED_DIGITS
-        } else if quantity.wide {
-            crate::theme::FIELD_WIDTH_VALUE
-        } else {
-            FIELD_WIDTH
-        },
+        width,
         &shown,
         auto_hint.unwrap_or(""),
         arrow_room,
