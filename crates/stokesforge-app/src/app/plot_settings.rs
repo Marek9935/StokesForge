@@ -4281,6 +4281,66 @@ mod tests {
         assert_eq!(after.panels[0].series[1].name, "Second");
     }
 
+    /// #510: the page chosen in the Series list is handed to the app once per
+    /// change, as the graph selection (the group, then a curve), and closing
+    /// the window forgets it so that reopening selects again. Witness: drop
+    /// the `publish_list_selection` call after `curve_settings_page`.
+    #[test]
+    fn the_series_list_choice_becomes_the_selection_of_the_graph() {
+        use stokesforge_app_state::object_manager::VisibilityTarget as T;
+        let mut harness = harness(|spec| {
+            let panel = first_panel(spec);
+            let model = panel.series[0].clone();
+            panel.series.clear();
+            panel.push_series_batch(vec![model.clone(), model]);
+        });
+        let context = test_support::context();
+        let graph = harness.graph;
+        harness.open(PlotSettingsTab::Series, None);
+        {
+            let edit = harness.state.plot_edit_mut().unwrap();
+            edit.selected_series = 0;
+            edit.selected_group = Some(1);
+        }
+        paint_window(&context, &mut harness.state, Vec::new());
+        let group = stokesforge_plot::SeriesGroupRef { panel: 0, group: 1 };
+        assert_eq!(
+            super::take_list_selection(&context),
+            Some((graph, T::SeriesGroup(group)))
+        );
+        paint_window(&context, &mut harness.state, Vec::new());
+        assert_eq!(
+            super::take_list_selection(&context),
+            None,
+            "once per change"
+        );
+        {
+            let edit = harness.state.plot_edit_mut().unwrap();
+            edit.selected_series = 1;
+            edit.selected_group = None;
+        }
+        paint_window(&context, &mut harness.state, Vec::new());
+        let curve = stokesforge_plot::SeriesRef { panel: 0, index: 1 };
+        assert_eq!(
+            super::take_list_selection(&context),
+            Some((graph, T::Series(curve)))
+        );
+        harness.state.close_plot_settings();
+        paint_window(&context, &mut harness.state, Vec::new());
+        harness.open(PlotSettingsTab::Series, None);
+        {
+            let edit = harness.state.plot_edit_mut().unwrap();
+            edit.selected_series = 1;
+            edit.selected_group = None;
+        }
+        paint_window(&context, &mut harness.state, Vec::new());
+        assert_eq!(
+            super::take_list_selection(&context),
+            Some((graph, T::Series(curve))),
+            "reopening selects the row again"
+        );
+    }
+
     /// #177–#179: the series have their window — the graph's strip no longer
     /// offers them — whose group page (#510) shows the group of the chosen
     /// header; choosing a color gradient spreads it at once over its own

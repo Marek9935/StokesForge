@@ -217,7 +217,7 @@ Double-click a curve, or choose **Graph ▸ Properties ▸ Series…**.
 
 <img src="../images/graphs-properties-series.png" alt="The Series Properties window of Graph1: the list of series on the left, the curve page of the selected series on the right: name, plot type, Y axis, error columns, group, line and symbol settings." width="640">
 
-What you select in the list chooses the page on the right: a curve opens its **curve page**, a group header opens its **group page** (see [Series groups](#series-groups)). The curve page has:
+What you select in the list chooses the page on the right: a curve opens its **curve page**, a group header opens its **group page** (see [Series groups](#series-groups)). The graph selects it too, as a click in the Object Manager does. The curve page has:
 
 - **Name**. If you leave it empty, the series uses the name of its column.
 - **Plot type**: **Scatter**, **Line**, **Line + Symbol**, **Bar**, **Histogram** or **Line + Error Bars**.
