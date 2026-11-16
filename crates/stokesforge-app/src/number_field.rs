@@ -292,6 +292,11 @@ fn number_field_core<T: Number>(
         let button = ui
             .interact(arrow, list_id.with("arrow"), egui::Sense::click())
             .on_hover_text(tr!("number-presets"));
+        // The arrow is a button, not text (#553): the `TextEdit` above set the
+        // text cursor over its whole frame, the last setting of the frame wins.
+        if button.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Default);
+        }
         list_frame::paint_arrow(ui, arrow, &button);
         if button.clicked() {
             presets.open = !presets.open;
@@ -1108,6 +1113,23 @@ mod tests {
             });
         let arrow = arrow.expect("filled triangle");
         assert!(field.contains_rect(arrow), "{arrow:?} outside {field:?}");
+    }
+
+    #[test]
+    fn the_arrow_shows_the_default_pointer_and_the_typing_area_the_text_cursor() {
+        let mut bench = Bench::new(2.0, quantities::LINE_WIDTH);
+        bench.image(Vec::new(), false);
+        let field = bench.field.expect("rect of the field");
+        let arrow = list_frame::arrow_rect(field);
+        // Two frames per position: egui resolves the hover from the previous one.
+        let mut cursor_at = |pos: egui::Pos2| {
+            bench.image(vec![egui::Event::PointerMoved(pos)], false);
+            let (output, _) = bench.image(Vec::new(), false);
+            output.platform_output.cursor_icon
+        };
+        assert_eq!(cursor_at(arrow.center()), egui::CursorIcon::Default);
+        let typing = egui::pos2(field.left() + 4.0, field.center().y);
+        assert_eq!(cursor_at(typing), egui::CursorIcon::Text);
     }
 
     #[test]
