@@ -231,7 +231,7 @@ impl StokesForgeApp {
 // Keys
 // ---------------------------------------------------------------------------
 
-fn field_focus_id(ctx: &egui::Context) -> egui::Id {
+pub(super) fn field_focus_id(ctx: &egui::Context) -> egui::Id {
     egui::Id::new(("stokesforge_layout_field_focus", ctx.viewport_id()))
 }
 
