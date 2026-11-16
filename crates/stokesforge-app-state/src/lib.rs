@@ -58,6 +58,7 @@ pub mod spring_load;
 pub mod startup;
 pub mod state;
 pub mod text_format;
+pub mod theme_apply;
 pub mod tree_drop;
 pub mod user_colors;
 pub mod widen;

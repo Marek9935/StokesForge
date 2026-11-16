@@ -24,6 +24,8 @@ Object copy (#105–107) and definitive analysis corrections (#212) reuse existi
 
 A size or layout edit of a graph (#394) is an `EditPlotSpec` (`PlotEditKind::ResizeCell`, `AddCell`, `RemoveCell`; Left / Top edits go through the Graph Properties draft, #405): a graph without stored frames is given the ones it is drawn with **inside the same command** (`AppState::with_fixed_frames`, `stokesforge_app_state::frame_sizes`; `bridge::set_graph_spec` for `pyst`), never at load and never as a step of its own, so one Undo returns to the legacy file. Stacking and background of free layers (#398) are `EditPlotSpec` too (`BringLayerToFront`, `SendLayerToBack`, `LayerBackground`, and the Layout menu's `AlignLayers`, `MatchLayerSize`, `DistributeLayers`, `LayerPlacement`, via `compose::bring_to_front` / `send_to_back` / `set_layer_background`, which refuse the grid). A graph in free placement (#398) is never given grid frames: switching placement, the Left / Top / Width / Height fields and the frame of a layer added beside are all part of one `EditPlotSpec` (`frame_sizes::set_placement_in_draft`, `set_free_field_in_draft`, `place_beside`).
 
+Applying a graph theme to several graphs (#538) is `Action::ApplyTheme`: one `MacroKind::ApplyTheme` group holding one `SetPlotSpec` per graph that really changes (none, hence no group, when nothing changes); the spec comes from `theme_apply::themed_spec`, and `execute` already fixes frames and freezes ranges.
+
 ## Tests
 
 | Link | Test |

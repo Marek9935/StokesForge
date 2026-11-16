@@ -327,6 +327,16 @@ Manager; a drop between two rows is a `MoveObjects` group made of `SetFolderOrde
 single `execute` with no macro for one column); an intermediate failure aborts
 the whole group. These labels stay data and are not recorded in the `.stf`.
 
+Applying a graph theme to N graphs is the group `MacroKind::ApplyTheme` (#538):
+`Action::ApplyTheme` computes, for each graph, the spec the theme gives
+(`stokesforge_app_state::theme_apply::themed_spec`), keeps the graphs whose spec
+really changes and sends one `Command::SetPlotSpec` per graph inside the group,
+so one Undo restores them all. Nothing changes, nothing is pushed (no empty
+group). `SetPlotSpec` already fixes the frames of a legacy graph and freezes the
+automatic ranges when it executes (`with_fixed_frames`): the theme code does not
+redo it. The group is closed in the same call, so it never stays open next to
+the Graph Properties macro (`begin_macro` refuses and the error is shown).
+
 What is inside the copy reads the copy (#391): after the node loop,
 `insert_copy` renumbers the series of copied graphs (x, y, errors), the formulas
 (#321, #403), the calculations (`NodeCopy::calculations`: output columns inside
