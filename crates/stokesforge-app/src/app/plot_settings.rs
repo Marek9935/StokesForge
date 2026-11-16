@@ -5302,17 +5302,17 @@ mod tests {
     }
 
     /// The « Auto » hints of the range fields of the Groups table (the ones
-    /// on a row with a « From »), top to bottom then left to right.
+    /// on the row of a group), top to bottom then left to right.
     fn range_hints(painted: &[Text]) -> Vec<egui::Pos2> {
-        let from = tr!("plot-axes-from");
+        let auto = tr!("common-auto");
         let mut hints: Vec<egui::Pos2> = painted
             .iter()
-            .filter(|t| t.text == tr!("common-auto"))
+            .filter(|t| t.text == auto)
             .map(|t| t.center)
             .filter(|at| {
                 painted
                     .iter()
-                    .any(|t| t.text == from && (t.center.y - at.y).abs() < 6.0)
+                    .any(|t| t.text.starts_with("Group ") && (t.center.y - at.y).abs() < 6.0)
             })
             .collect();
         hints.sort_by(|a, b| {

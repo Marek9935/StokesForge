@@ -277,9 +277,15 @@ fn groups_block(
     let hint_auto = tr!("common-auto");
     form.ui().push_id("color_bar_groups_table", |ui| {
         egui::Grid::new("color_bar_groups")
-            .num_columns(3)
+            .num_columns(4)
             .spacing([12.0, 6.0])
             .show(ui, |ui| {
+                // The column heads of the two range fields, once.
+                ui.label("");
+                ui.label("");
+                ui.label(crate::theme::secondary_text(tr!("plot-axes-from")));
+                ui.label(crate::theme::secondary_text(tr!("analysis-field-to")));
+                ui.end_row();
                 for ((group, title), swatch) in groups.iter().zip(colors) {
                     let group = *group;
                     let on_bar = bar.segment_of(group).is_some();
@@ -298,33 +304,25 @@ fn groups_block(
                         Some(segment) => (&mut segment.from, &mut segment.to),
                         None => (&mut none.0, &mut none.1),
                     };
-                    let row = ui.add_enabled_ui(on_bar, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(tr!("plot-axes-from"));
-                            let first = auto_number_field(
+                    let fields = [("color_bar_from", range.0), ("color_bar_to", range.1)];
+                    for (salt, value) in fields {
+                        let field = ui.add_enabled_ui(on_bar, |ui| {
+                            auto_number_field(
                                 ui,
-                                ("color_bar_from", group),
-                                range.0,
+                                (salt, group),
+                                value,
                                 &quantities::COLOR_BAR_BOUND,
                                 &hint_auto,
-                            );
-                            ui.label(tr!("analysis-field-to"));
-                            let second = auto_number_field(
-                                ui,
-                                ("color_bar_to", group),
-                                range.1,
-                                &quantities::COLOR_BAR_BOUND,
-                                &hint_auto,
-                            );
-                            first.changed || second.changed
-                        })
-                        .inner
-                    });
-                    if !on_bar {
-                        row.response
-                            .on_disabled_hover_text(tr!("disabled-color-bar-group-off"));
+                            )
+                            .changed
+                        });
+                        if !on_bar {
+                            field
+                                .response
+                                .on_disabled_hover_text(tr!("disabled-color-bar-group-off"));
+                        }
+                        *commit |= field.inner;
                     }
-                    *commit |= row.inner;
                     ui.end_row();
                 }
             });
