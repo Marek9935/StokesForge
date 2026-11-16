@@ -62,6 +62,9 @@ use stokesforge_core::{
     MixedCell, Node, NodeCopy, NodeId, Tree, ValueBlock,
 };
 use stokesforge_importer::{import_items, plan_import, ImportItem, ImportPlan, PlannedColumn};
+
+use self::import_folder::import_item_label;
+use self::import_plans::{BookApply, BookTarget, Naming, SheetApply};
 use stokesforge_plot::{
     AnnotationRef, AnnotationSpec, ColorBarSpec, ColorUsage, FreeFrame, FreePage, OverlaySpec,
     PanelSpec, Panels, PlotSpec, PlotType, SavedColors, SeriesRef, ShapeRef, ShapeSpec, TextAnchor,
@@ -91,7 +94,9 @@ mod import_advanced;
 mod import_apply;
 mod import_auto;
 mod import_check;
+mod import_folder;
 mod import_grid;
+mod import_plans;
 mod import_template;
 mod import_tocheck;
 mod server;
@@ -124,7 +129,10 @@ pub use analysis::{CalculationDelete, StaleExport};
 pub use autosave::{AutosaveJob, Garbage, RecoveryRow, ServerTick, AUTOSAVE_RETRY};
 pub use column_use::FullColumnsCopy;
 pub use import_apply::ImportRun;
-pub use origin_import::{OriginBookView, OriginFileView, OriginSheetView};
+pub use origin_import::{
+    OriginBookView, OriginColumnView, OriginFileView, OriginSheetView, OriginTick,
+};
+pub use stokesforge_importer::OriginWhere;
 
 /// How long a command waits for the formula recalculation it started to
 /// finish before handing control back to the interface (#239): a recalculation
@@ -621,6 +629,8 @@ pub enum Action {
     /// screen keeps one per kind of file and per template).
     StartImportEach {
         destination: ImportDestination,
+        /// Folder of the new workbooks (#537).
+        folder: ImportFolder,
         each: Vec<(PathBuf, stokesforge_import::ImportRecipe)>,
         /// Refused files that were left out: the status bar says how many.
         skipped: usize,
@@ -639,6 +649,55 @@ pub enum Action {
         /// Rank of the sheet in the book.
         sheet: usize,
     },
+    /// Origin chooser (#537): ticks or unticks one column. A sheet and a
+    /// workbook box show three states (all, none, some).
+    ToggleOriginColumn {
+        /// Rank of the file in the chooser.
+        file: usize,
+        /// Rank of the book in the file.
+        book: usize,
+        /// Rank of the sheet in the book.
+        sheet: usize,
+        /// Rank of the column in the sheet.
+        column: usize,
+    },
+    /// Origin chooser: sets the columns from `from` to `to` (either order,
+    /// both included) of one sheet: the Shift+click.
+    SetOriginColumnRange {
+        /// Rank of the file in the chooser.
+        file: usize,
+        /// Rank of the book in the file.
+        book: usize,
+        /// Rank of the sheet in the book.
+        sheet: usize,
+        /// First end of the range.
+        from: usize,
+        /// Second end of the range.
+        to: usize,
+        /// The new state of the range.
+        ticked: bool,
+    },
+    /// Origin chooser: ticks or unticks the columns that have the long name
+    /// (else the short name) of the given one, in every sheet of the file.
+    SetOriginColumnInAllSheets {
+        /// Rank of the file in the chooser.
+        file: usize,
+        /// Rank of the book of the column.
+        book: usize,
+        /// Rank of its sheet.
+        sheet: usize,
+        /// Rank of the column.
+        column: usize,
+        /// The new state of those columns.
+        ticked: bool,
+    },
+    /// Origin chooser: where the workbooks go (per Origin workbook, or one).
+    SetOriginWhere(OriginWhere),
+    /// Origin chooser: how the Origin sheets share worksheets.
+    SetOriginLayout(stokesforge_import::FilesLayout),
+    /// The folder of the new workbooks, in the window that is painted (the
+    /// Import window, else the Origin chooser).
+    SetImportFolder(ImportFolder),
     /// Origin chooser: ticks or unticks every sheet (with columns) of a book.
     SetOriginBookTicked {
         /// Rank of the file in the chooser.
@@ -3110,6 +3169,35 @@ pub enum ImportDestination {
     NewBookForAll,
 }
 
+/// Where an import puts its new workbooks (#537): next to
+/// [`ImportDestination`], which says how many workbooks and what they hold.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImportFolder {
+    /// An existing folder of the project, the root included. A folder that is
+    /// gone when Import runs (script, undo) means the root, and a message says
+    /// so.
+    Existing(NodeId),
+    /// A folder made when Import runs, inside `parent`, in the same single
+    /// history entry as the workbooks. `parent` falls back to the root as above.
+    New {
+        /// The folder that will hold the new one.
+        parent: NodeId,
+        /// Its name, typed in the window.
+        name: String,
+    },
+}
+
+/// One row of the list of folders the window offers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportFolderChoice {
+    /// The folder.
+    pub id: NodeId,
+    /// Depth below the root (0 for the root).
+    pub depth: usize,
+    /// Its path from the root, "A / B" ("Project" for the root).
+    pub label: String,
+}
+
 /// What a file drop asks to do — see [`file_drop_plan`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DropPlan {
@@ -3159,6 +3247,7 @@ fn reads_well(bytes: &[u8], recipe: &stokesforge_import::ImportRecipe) -> bool {
 #[derive(Debug, Clone)]
 struct LastImport {
     destination: ImportDestination,
+    folder: ImportFolder,
     /// The files imported, each with the recipe it was read with.
     each: Vec<(PathBuf, stokesforge_import::ImportRecipe)>,
 }
@@ -3193,6 +3282,7 @@ struct ImportReply {
 /// by [`AppState::poll_import`] when everything is ready.
 struct ImportJob {
     destination: ImportDestination,
+    folder: ImportFolder,
     /// `Some(target workbook)` for a drop, `None` for the menu import.
     dropped: Option<Option<NodeId>>,
     total: usize,
@@ -3219,6 +3309,8 @@ pub struct ImportState {
     pub active_book: Option<NodeId>,
     /// Chosen destination; the active workbook is offered if it exists.
     pub destination: ImportDestination,
+    /// Folder of the new workbooks (#537); the creation folder at opening.
+    pub folder: ImportFolder,
     /// Recipe being edited in the window.
     pub recipe: stokesforge_import::ImportRecipe,
     /// Chosen files ("Choose Files to Import"), in the order of the
@@ -3620,6 +3712,10 @@ pub struct AppState {
     /// Workbooks created by an import that the thread applied: the paint pass
     /// opens them as windows (#475).
     books_to_open: Vec<NodeId>,
+    /// Workbooks `create_import_book` made since the last
+    /// `take_created_books`, in order (#537): imports find their workbooks
+    /// here, never by counting the children of a folder.
+    created_books: Vec<NodeId>,
     /// Start of a formula recalculation the interface did not wait for (#239);
     /// `None` when none is running. As long as it is set, the snapshot is
     /// not refreshed (the actor would answer only at the end) and the status bar
@@ -3645,7 +3741,7 @@ pub struct AppState {
     last_import: Option<LastImport>,
     /// Last successful Origin import (#490), when it is more recent than
     /// `last_import`: the chooser reopens on the same files and ticks.
-    last_origin_import: Option<Vec<origin_import::OriginFile>>,
+    last_origin_import: Option<origin_import::OriginChooser>,
     /// The Origin chooser (#490), when open. It is painted only while the
     /// import wizard is closed ([`AppState::origin_import_open`]).
     origin_import: Option<origin_import::OriginChooser>,
@@ -3802,6 +3898,7 @@ impl AppState {
             import_applying: false,
             waker: None,
             books_to_open: Vec::new(),
+            created_books: Vec::new(),
             recalc_since: None,
             garbage: autosave::Garbage::default(),
             defer_garbage: false,
@@ -6397,14 +6494,23 @@ impl AppState {
                 destination,
                 recipe,
                 paths,
-            } => self.start_import(destination, ImportSource::Menu(Box::new(recipe)), paths),
+            } => {
+                let folder = self.import_default_folder();
+                self.start_import(
+                    destination,
+                    folder,
+                    ImportSource::Menu(Box::new(recipe)),
+                    paths,
+                );
+            }
             Action::StartImportEach {
                 destination,
+                folder,
                 each,
                 skipped,
             } => {
                 let paths = each.iter().map(|(path, _)| path.clone()).collect();
-                self.start_import(destination, ImportSource::Each(each), paths);
+                self.start_import(destination, folder, ImportSource::Each(each), paths);
                 if skipped > 0 {
                     if let Some(job) = &mut self.import_job {
                         job.skipped = skipped;
@@ -6412,6 +6518,30 @@ impl AppState {
                 }
             }
             Action::ReopenLastImport => self.reopen_last_import(),
+            Action::ToggleOriginColumn {
+                file,
+                book,
+                sheet,
+                column,
+            } => self.toggle_origin_column(file, book, sheet, column),
+            Action::SetOriginColumnRange {
+                file,
+                book,
+                sheet,
+                from,
+                to,
+                ticked,
+            } => self.set_origin_column_range(file, book, sheet, from, to, ticked),
+            Action::SetOriginColumnInAllSheets {
+                file,
+                book,
+                sheet,
+                column,
+                ticked,
+            } => self.set_origin_column_in_all_sheets(file, book, sheet, column, ticked),
+            Action::SetOriginWhere(where_) => self.set_origin_where(where_),
+            Action::SetOriginLayout(layout) => self.set_origin_layout(layout),
+            Action::SetImportFolder(folder) => self.set_import_folder(folder),
             Action::ToggleOriginSheet { file, book, sheet } => {
                 self.toggle_origin_sheet(file, book, sheet);
             }
@@ -7363,6 +7493,7 @@ impl AppState {
                 ImportDestination::NewBookForAll,
                 ImportDestination::ActiveBook,
             ),
+            folder: ImportFolder::Existing(self.creation_folder()),
             paths: Vec::new(),
             store,
             preview_index: 0,
@@ -7425,8 +7556,10 @@ impl AppState {
         if plan.data.is_empty() {
             return;
         }
+        let folder = self.import_default_folder();
         self.start_import(
             plan.destination,
+            folder,
             ImportSource::Drop { target_book },
             plan.data,
         );
@@ -7438,6 +7571,7 @@ impl AppState {
     fn start_import(
         &mut self,
         destination: ImportDestination,
+        folder: ImportFolder,
         source: ImportSource,
         paths: Vec<PathBuf>,
     ) {
@@ -7550,6 +7684,7 @@ impl AppState {
             Ok(_) => {
                 self.import_job = Some(ImportJob {
                     destination,
+                    folder,
                     dropped,
                     total,
                     done,
@@ -7658,6 +7793,7 @@ impl AppState {
             let (destination, dropped, skipped) = (job.destination, job.dropped, job.skipped);
             self.import_batch(
                 destination,
+                job.folder,
                 dropped.is_some(),
                 skipped,
                 reply.items,
@@ -7687,13 +7823,14 @@ impl AppState {
     fn import_batch(
         &mut self,
         destination: ImportDestination,
+        folder: ImportFolder,
         dropped: bool,
         skipped: usize,
         items: Vec<ImportItem>,
         models: &[String],
     ) {
         let count = items.len();
-        self.apply_import(destination, items);
+        self.apply_import(destination, &folder, items);
         if skipped > 0 {
             self.warn(tr!("status-import-skipped", count = skipped));
         }
@@ -7929,6 +8066,7 @@ impl AppState {
             ImportDestination::ActiveBook(book) => Some(book),
             _ => None,
         };
+        let last_folder = self.reopened_folder(&last.folder);
         self.open_import(book);
         // Every file comes back and is read again (detector, templates), then
         // gets back the recipe it was imported with.
@@ -7958,6 +8096,7 @@ impl AppState {
             {
                 import.destination = last.destination;
             }
+            import.folder = last_folder;
         }
         self.notice(if undone {
             tr!("status-import-reopened-undone")
@@ -11775,7 +11914,8 @@ impl AppState {
             .iter()
             .flat_map(|path| import_items(path, &recipe))
             .collect();
-        self.apply_import(destination, items);
+        let folder = self.import_default_folder();
+        self.apply_import(destination, &folder, items);
     }
 
     /// Creates the sheets and columns of a batch **already parsed** (by
@@ -11787,7 +11927,14 @@ impl AppState {
     /// the **mode** in the active workbook ([`stokesforge_import::ImportMode`]), and the
     /// destination. The plan (which columns of which files, on which
     /// sheet) is computed first ([`plan_import`]), then executed.
-    fn apply_import(&mut self, destination: ImportDestination, items: Vec<ImportItem>) {
+    fn apply_import(
+        &mut self,
+        destination: ImportDestination,
+        folder: &ImportFolder,
+        items: Vec<ImportItem>,
+    ) {
+        let mut folder_gone = false;
+        let mut own_x: Vec<String> = Vec::new();
         // Distinct files (a file with several blocks counts as one).
         let mut paths: Vec<PathBuf> = Vec::new();
         for item in &items {
@@ -11817,6 +11964,14 @@ impl AppState {
         }) = first_ok
         {
             let plans = plan_import(&items, first_recipe.files_layout);
+            for plan in &plans {
+                for &item in &plan.own_x {
+                    let label = import_item_label(&items[item]);
+                    if !own_x.contains(&label) {
+                        own_x.push(label);
+                    }
+                }
+            }
             let merge_sheet = match (destination, first_recipe.import_mode) {
                 (_, stokesforge_import::ImportMode::NewSheet) => None,
                 (ImportDestination::ActiveBook(book), _) => self
@@ -11839,7 +11994,6 @@ impl AppState {
                     }
                 }
             } else {
-                let mut shared_book = None;
                 // One file into « New Workbook » is one new workbook for that
                 // file: it is named and filled like « One Workbook per File ».
                 let destination =
@@ -11853,40 +12007,58 @@ impl AppState {
                 // until a value of an imported column changes (#488).
                 let raw_data_sheet = matches!(destination, ImportDestination::NewBookPerFile)
                     && first_recipe.files_layout == stokesforge_import::FilesLayout::SheetPerFile;
-                for plan in &plans {
-                    let Some(book) =
-                        self.book_for_plan(destination, plan, &mut shared_book, &mut failures)
-                    else {
-                        continue;
-                    };
-                    let sheet_name = if raw_data_sheet {
+                let sheet_of = |plan: &ImportPlan| SheetApply {
+                    name: if raw_data_sheet {
                         tr!("import-sheet-raw-data")
                     } else {
                         plan.name.clone()
-                    };
-                    let Some(sheet) = self.add_named_sheet(book, &sheet_name, &mut failures) else {
-                        continue;
-                    };
-                    for &planned in &plan.columns {
-                        if let Some(column) =
-                            stokesforge_importer::make_import_column(&items, planned, 0)
-                        {
-                            self.execute(Command::AddColumn {
-                                sheet,
-                                index: None,
-                                name: None,
-                                column,
-                            });
-                        }
-                    }
-                    if raw_data_sheet {
-                        self.execute(Command::SetSheetRawMark {
-                            sheet,
-                            mark: Some(stokesforge_core::RawSheetMark {
-                                modified_base: tr!("import-sheet-modified-base"),
-                            }),
-                        });
-                    }
+                    },
+                    columns: plan.columns.clone(),
+                    raw: raw_data_sheet,
+                };
+                let books: Vec<BookApply<PlannedColumn>> = match destination {
+                    ImportDestination::ActiveBook(book) => plans
+                        .iter()
+                        .map(|plan| BookApply {
+                            target: BookTarget::Existing(book),
+                            sheets: vec![sheet_of(plan)],
+                        })
+                        .collect(),
+                    ImportDestination::NewBookForAll => vec![BookApply {
+                        target: BookTarget::New {
+                            name: None,
+                            failed_names: plans.iter().map(|plan| plan.name.clone()).collect(),
+                        },
+                        sheets: plans.iter().map(sheet_of).collect(),
+                    }],
+                    ImportDestination::NewBookPerFile => plans
+                        .iter()
+                        .map(|plan| BookApply {
+                            target: BookTarget::New {
+                                name: Some(plan.name.clone()),
+                                failed_names: vec![plan.name.clone()],
+                            },
+                            sheets: vec![sheet_of(plan)],
+                        })
+                        .collect(),
+                };
+                let parent = match destination {
+                    ImportDestination::ActiveBook(_) => self.snapshot.tree.root(),
+                    _ => self.import_parent(folder, &mut folder_gone),
+                };
+                let outcomes = self.apply_book_plans(
+                    parent,
+                    Naming::Classic,
+                    books,
+                    &mut failures,
+                    &mut |&planned| stokesforge_importer::make_import_column(&items, planned, 0),
+                );
+                // The plans, in the order of the books and sheets above.
+                let created: Vec<bool> = outcomes
+                    .iter()
+                    .flat_map(|outcome| outcome.sheets.iter().copied())
+                    .collect();
+                for (plan, _) in plans.iter().zip(created).filter(|(_, ok)| *ok) {
                     for &item in &plan.items {
                         if !done_paths.contains(&items[item].path) {
                             done_paths.push(items[item].path.clone());
@@ -11913,7 +12085,11 @@ impl AppState {
                 .collect();
             if !each.is_empty() {
                 self.last_origin_import = None;
-                self.last_import = Some(LastImport { destination, each });
+                self.last_import = Some(LastImport {
+                    destination,
+                    folder: folder.clone(),
+                    each,
+                });
             }
         }
         // `self.execute` refreshes the snapshot at each command, but always
@@ -11934,37 +12110,11 @@ impl AppState {
                 failures = failures.join(" ; ")
             ));
         }
-    }
-
-    /// The workbook that receives `plan`: the active workbook, or a new
-    /// workbook (one per plan, or a single shared one).
-    fn book_for_plan(
-        &mut self,
-        destination: ImportDestination,
-        plan: &ImportPlan,
-        shared_book: &mut Option<NodeId>,
-        failures: &mut Vec<String>,
-    ) -> Option<NodeId> {
-        match destination {
-            ImportDestination::ActiveBook(book) => Some(book),
-            ImportDestination::NewBookForAll => {
-                if let Some(book) = *shared_book {
-                    return Some(book);
-                }
-                let book = self.create_import_book(None);
-                if book.is_none() {
-                    failures.push(tr!("error-import-create-book", name = plan.name.clone()));
-                }
-                *shared_book = book;
-                book
-            }
-            ImportDestination::NewBookPerFile => {
-                let book = self.create_import_book(Some(&plan.name));
-                if book.is_none() {
-                    failures.push(tr!("error-import-create-book", name = plan.name.clone()));
-                }
-                book
-            }
+        if failures.is_empty() && !own_x.is_empty() {
+            self.warn(tr!("status-import-own-x", names = own_x.join(", ")));
+        }
+        if folder_gone {
+            self.warn(tr!("status-import-folder-gone"));
         }
     }
 
@@ -12126,17 +12276,22 @@ impl AppState {
 
     /// `AddEmptyWorkbook` avoids the "Sheet1" sheet that `AddWorkbook` would
     /// add on top of the imported sheets.
-    fn create_import_book(&mut self, file_stem: Option<&str>) -> Option<NodeId> {
-        let root = self.snapshot.tree.root();
-        let previous = self.snapshot.tree.node(root)?.children().last().copied();
-        self.execute(Command::AddEmptyWorkbook {
-            parent: root,
-            name: None,
-        });
-        let book = self.snapshot.tree.node(root)?.children().last().copied()?;
+    /// The new workbook goes into `parent` and its id is recorded in
+    /// `created_books` (#537).
+    fn create_import_book(&mut self, parent: NodeId, file_stem: Option<&str>) -> Option<NodeId> {
+        let previous = self.snapshot.tree.node(parent)?.children().last().copied();
+        self.execute(Command::AddEmptyWorkbook { parent, name: None });
+        let book = self
+            .snapshot
+            .tree
+            .node(parent)?
+            .children()
+            .last()
+            .copied()?;
         if Some(book) == previous {
             return None;
         }
+        self.created_books.push(book);
         if let Some(stem) = file_stem {
             self.execute(Command::Rename {
                 id: book,

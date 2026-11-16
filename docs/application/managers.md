@@ -36,8 +36,10 @@ inside that folder.
 Manager selection: one folder, inside it; one window, in its folder; nothing or
 several rows, the root. The shell hands the selected nodes to the state
 (`AppState::set_project_manager_selection`, in `dispatch_action`) and reveals the
-folder afterwards (`project_manager::reveal_folder`). Unchanged: import and
-*Plot* from columns, which keep their own destination. A new window takes its
+folder afterwards (`project_manager::reveal_folder`). The Import and Import from
+Origin windows open on the same folder (#537): their Folder field defaults to
+`AppState::creation_folder` and can be changed (`ImportFolder`, see
+`project-and-import.md`). *Plot* from columns keeps its own destination. A new window takes its
 place in an automatic folder and goes to the end of a manual one. The empty
 area under the last row (always at least two rows tall) gives the root's menu
 (`root_entries`), and a click or right-click there clears the selection (the

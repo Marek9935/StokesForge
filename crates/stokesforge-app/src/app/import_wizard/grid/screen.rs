@@ -18,6 +18,7 @@ use super::{
     make_geom, metrics, refused_card, store_gs, GridOut, GridUi, Sel, View, LETTER_H, SB,
 };
 use crate::app::cursors;
+use crate::app::import_to::{self, menu_button, to_menu, LayoutOptions, ToPick, WhereOption};
 use crate::app::import_wizard::ImportWizardRequests;
 use crate::app::menu_sections::{menu_choice, MenuSections};
 use crate::app::tab_strip::{tab_strip, TabStripSide, TAB_STRIP_HEIGHT};
@@ -576,19 +577,6 @@ fn import_screen_inner(
 
 // -- The footer buttons ------------------------------------------------------------------------
 
-/// A secondary button of the footer that opens a menu, with its caret.
-fn menu_button(ui: &mut egui::Ui, text: String) -> egui::Response {
-    // The caret is an icon at the right of the label; the label leaves room for it.
-    let response = ui.add(egui::Button::new(format!("{text}\u{2003}\u{2002}")));
-    let size = crate::icons::ICON_SIZE;
-    let rect = egui::Rect::from_center_size(
-        pos2(response.rect.right() - size, response.rect.center().y),
-        vec2(size, size),
-    );
-    icon_image(Icon::CaretUp, IconRole::Neutral).paint_at(ui, rect);
-    cursors::clickable(response)
-}
-
 /// `To: New Workbook` and `Template: Auto · JASCO V-770`, each with its menu
 /// (S-F6: the secondary buttons of a draft sit on the left of the footer).
 pub(in crate::app::import_wizard) fn footer_buttons(
@@ -609,97 +597,117 @@ pub(in crate::app::import_wizard) fn footer_buttons(
         ),
         _ => tr!("common-auto"),
     };
-    let button = menu_button(ui, tr!("import-footer-to", value = destination));
+    let button = menu_button(
+        ui,
+        tr!("import-footer-to", value = destination),
+        Icon::CaretUp,
+    );
     egui::Popup::from_toggle_button_response(&button)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| destination_menu(ui, state));
-    let button = menu_button(ui, tr!("import-footer-template", value = template));
+    // The folder of the new workbooks: unused when importing into the active
+    // workbook, so greyed out then.
+    let choices = state.import_folder_choices();
+    let folder = state.import_folder().cloned();
+    let into_active = matches!(
+        state.import_state().map(|i| i.destination),
+        Some(ImportDestination::ActiveBook(_))
+    );
+    if let Some(folder) = folder {
+        let label = tr!(
+            "import-footer-folder",
+            value = import_to::folder_label(&choices, &folder)
+        );
+        let shown = ui.add_enabled_ui(!into_active, |ui| {
+            let button = menu_button(ui, label, Icon::CaretUp);
+            egui::Popup::from_toggle_button_response(&button)
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                .show(|ui| import_to::folder_menu(ui, &choices, &folder))
+                .and_then(|menu| menu.inner)
+        });
+        shown
+            .response
+            .on_disabled_hover_text(tr!("disabled-import-folder-active-book"));
+        let picked = shown.inner;
+        if let Some(picked) = picked {
+            state.dispatch(Action::SetImportFolder(picked));
+        }
+    }
+    let button = menu_button(
+        ui,
+        tr!("import-footer-template", value = template),
+        Icon::CaretUp,
+    );
     egui::Popup::from_toggle_button_response(&button)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| template_menu(ui, state, requests));
 }
 
 fn destination_menu(ui: &mut egui::Ui, state: &mut AppState) {
-    use stokesforge_import::{FilesLayout, ImportMode};
+    use stokesforge_import::ImportMode;
     let Some(import) = state.import_state_mut() else {
         return;
     };
-    let mut sections = MenuSections::new();
-    sections.section(ui, true, |ui| {
-        let current = import.destination;
-        if menu_choice(
-            ui,
-            current == ImportDestination::NewBookForAll,
-            tr!("import-destination-new"),
-        )
-        .clicked()
-        {
-            import.destination = ImportDestination::NewBookForAll;
-            ui.close();
-        }
-        if menu_choice(
-            ui,
-            current == ImportDestination::NewBookPerFile,
-            tr!("import-destination-each"),
-        )
-        .clicked()
-        {
-            import.destination = ImportDestination::NewBookPerFile;
-            ui.close();
-        }
-        match import.active_book {
-            Some(book) => {
-                if menu_choice(
-                    ui,
-                    matches!(current, ImportDestination::ActiveBook(_)),
-                    tr!("import-destination-active"),
-                )
-                .clicked()
-                {
-                    import.destination = ImportDestination::ActiveBook(book);
-                    ui.close();
-                }
-            }
-            None => {
-                ui.add_enabled_ui(false, |ui| {
-                    menu_choice(ui, false, tr!("import-destination-active"));
-                })
-                .response
-                .on_disabled_hover_text(tr!("disabled-import-no-active-book"));
-            }
-        }
-    });
-    sections.section(
-        ui,
-        matches!(import.destination, ImportDestination::ActiveBook(_)),
-        |ui| {
-            ui.label(theme::dimmed_text(tr!("import-destination-mode")));
-            for (mode, text) in [
-                (ImportMode::NewSheet, tr!("import-mode-new-sheet")),
-                (ImportMode::ReplaceSheet, tr!("import-mode-replace")),
-                (ImportMode::AddColumns, tr!("import-mode-add-columns")),
-                (ImportMode::AddRows, tr!("import-mode-add-rows")),
-            ] {
-                if menu_choice(ui, import.recipe.import_mode == mode, text).clicked() {
-                    import.recipe.import_mode = mode;
-                    ui.close();
-                }
-            }
+    let current = import.destination;
+    let mut wheres = vec![
+        WhereOption {
+            value: ImportDestination::NewBookForAll,
+            label: tr!("import-destination-new"),
+            selected: current == ImportDestination::NewBookForAll,
+            unavailable: None,
         },
-    );
-    sections.section(ui, import.paths.len() > 1, |ui| {
-        ui.label(theme::dimmed_text(tr!("import-destination-multiple")));
-        for (layout, text) in [
-            (FilesLayout::SheetPerFile, tr!("import-layout-per-file")),
-            (FilesLayout::SideBySide, tr!("import-layout-side-by-side")),
-            (FilesLayout::SharedX, tr!("import-layout-shared-x")),
+        WhereOption {
+            value: ImportDestination::NewBookPerFile,
+            label: tr!("import-destination-each"),
+            selected: current == ImportDestination::NewBookPerFile,
+            unavailable: None,
+        },
+    ];
+    wheres.push(WhereOption {
+        value: import
+            .active_book
+            .map_or(current, ImportDestination::ActiveBook),
+        label: tr!("import-destination-active"),
+        selected: matches!(current, ImportDestination::ActiveBook(_)),
+        unavailable: import
+            .active_book
+            .is_none()
+            .then(|| tr!("disabled-import-no-active-book")),
+    });
+    let layouts = (import.paths.len() > 1).then(|| LayoutOptions {
+        heading: tr!("import-destination-multiple"),
+        labels: [
+            tr!("import-layout-per-file"),
+            tr!("import-layout-side-by-side"),
+            tr!("import-layout-shared-x"),
+        ],
+        current: import.recipe.files_layout,
+    });
+    let mut modes = |ui: &mut egui::Ui| {
+        ui.label(theme::dimmed_text(tr!("import-destination-mode")));
+        for (mode, text) in [
+            (ImportMode::NewSheet, tr!("import-mode-new-sheet")),
+            (ImportMode::ReplaceSheet, tr!("import-mode-replace")),
+            (ImportMode::AddColumns, tr!("import-mode-add-columns")),
+            (ImportMode::AddRows, tr!("import-mode-add-rows")),
         ] {
-            if menu_choice(ui, import.recipe.files_layout == layout, text).clicked() {
-                import.recipe.files_layout = layout;
+            if menu_choice(ui, import.recipe.import_mode == mode, text).clicked() {
+                import.recipe.import_mode = mode;
                 ui.close();
             }
         }
-    });
+    };
+    let between: Option<&mut dyn FnMut(&mut egui::Ui)> =
+        matches!(current, ImportDestination::ActiveBook(_)).then_some(&mut modes);
+    let pick = to_menu(ui, &wheres, between, layouts.as_ref());
+    let Some(import) = state.import_state_mut() else {
+        return;
+    };
+    match pick {
+        Some(ToPick::Where(destination)) => import.destination = destination,
+        Some(ToPick::Layout(layout)) => import.recipe.files_layout = layout,
+        None => {}
+    }
 }
 
 fn template_menu(ui: &mut egui::Ui, state: &mut AppState, requests: &mut ImportWizardRequests) {
