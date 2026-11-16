@@ -903,6 +903,27 @@ reads `Abs (a.u.)`, a unit alone reads `(s)`, and the unit of the loaded axis is
 empty. An empty title stays empty: nothing is filled at load, so an old graph
 keeps its look. Tests: `convert.rs` and `tests/witness_files.rs`.
 
+## Project themes: additive field (#540)
+
+`FileBody::project_themes` (`Vec<ThemeRecord>`, `#[serde(default)]`, placed before
+`window_geometries` and `save_counter`): the graph themes of the project
+(`Tree::project_themes`, `stokesforge_plot::GraphTheme`), in order. A theme is
+`{ name, colors_only, style }` where `style` is a `PlotSpecRecord`, exactly the
+record of a graph spec (`themes.rs`, the same module offers `encode_theme`,
+`decode_theme`, `encode_themes`, `decode_themes` for the themes of the user's
+machine). **`FORMAT_VERSION` did not move.** A file without the field reads with
+no theme; an older reader ignores it and drops it at its next save.
+
+Read degrades (invariant 10): each theme is decoded on its own, so one the reader
+cannot decode (a newer variant, a wrong type, an out-of-range layer) is dropped
+alone and the project opens; a nameless theme is dropped, a later theme whose
+name repeats an earlier one (case ignored) is dropped, a name is cut at
+`MAX_THEME_NAME_CHARS`, the list at `MAX_THEMES`. Witnesses:
+`tests/witnesses/v1/project.stf` regenerated with two themes;
+`tests/witnesses/v1-before-themes/project.stf` is the previous bytes, frozen,
+read back with no theme (`witness_files.rs`); `b3_hostile_project_themes`,
+`b13_project_themes_are_bounded`.
+
 ## Accepted limits (2026-10-20, after #302-#305)
 
 Do not re-raise: import recipes stored with `"data_end":"Auto"` keep cutting (no migration); a Stop after a no-effect command ends in `Done` with no status message (no `RecalcEnd::Interrupted`).

@@ -1346,3 +1346,26 @@ fn a_body_without_the_order_field_opens_all_automatic() {
     let loaded = load(&path).expect("load");
     assert!(loaded.tree().manual_order_folders().is_empty());
 }
+
+/// #540: the themes saved in the project survive `save`/`load`, in order, and
+/// the tree read back stays identical.
+#[test]
+fn project_themes_survive_save_and_load() {
+    use stokesforge_plot::{GraphTheme, PlotSpec, THEMES};
+    let mut project = fixture_project();
+    let mut spec = PlotSpec::empty("T");
+    spec.background = "#123456".into();
+    project
+        .set_project_themes(vec![
+            GraphTheme::capture("Zed", &spec),
+            GraphTheme::from_colors("Alpha", &THEMES[1]),
+        ])
+        .expect("themes");
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let path = dir.path().join("themes.stf");
+    save(&project, &path).expect("save succeeded");
+    let loaded = load(&path).expect("load succeeded");
+    assert_eq!(loaded.tree().project_themes().len(), 2);
+    assert_eq!(loaded.tree().project_themes()[0].name, "Zed");
+    assert!(*loaded.tree() == *project.tree());
+}

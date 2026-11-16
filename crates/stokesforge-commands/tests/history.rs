@@ -3186,3 +3186,74 @@ fn the_versions_drawn_by_an_undo_do_not_depend_on_the_iteration_order() {
     }
     assert_eq!(run(), run());
 }
+
+fn theme(name: &str, background: &str) -> stokesforge_plot::GraphTheme {
+    let mut spec = PlotSpec::empty("t");
+    spec.background = background.into();
+    stokesforge_plot::GraphTheme::capture(name, &spec)
+}
+
+/// #540: the project themes change through one undoable data command; every
+/// kind of change (add, rename, overwrite, delete) is one step back.
+#[test]
+fn set_project_themes_round_trip_one_step_per_change() {
+    let mut f = fixture();
+    let mut history = History::new();
+    let start = snapshot(&f.project);
+    let steps = [
+        vec![theme("A", "#111111")],
+        vec![theme("A", "#111111"), theme("B", "#222222")],
+        vec![theme("A", "#111111"), theme("Bee", "#222222")],
+        vec![theme("A", "#333333"), theme("Bee", "#222222")],
+        vec![theme("Bee", "#222222")],
+    ];
+    let mut states = vec![start];
+    for themes in &steps {
+        history
+            .execute(
+                &mut f.project,
+                Command::SetProjectThemes {
+                    themes: themes.clone(),
+                },
+            )
+            .expect("themes set");
+        assert_eq!(history.undo_label(), Some(&HistoryLabel::SetProjectThemes));
+        assert_eq!(f.project.tree().project_themes(), themes.as_slice());
+        states.push(snapshot(&f.project));
+    }
+    for expected in states.iter().rev().skip(1) {
+        assert_eq!(history.undo(&mut f.project), Ok(true));
+        assert_eq!(**f.project.tree(), **expected);
+    }
+    assert!(f.project.tree().project_themes().is_empty());
+    for expected in states.iter().skip(1) {
+        assert_eq!(history.redo(&mut f.project), Ok(true));
+        assert_eq!(**f.project.tree(), **expected);
+    }
+}
+
+/// #540: a name taken twice (case and outer spaces ignored), an empty name, a
+/// too long one and too many themes are refused, with no history entry.
+#[test]
+fn set_project_themes_refuses_bad_lists() {
+    let mut f = fixture();
+    let mut history = History::new();
+    let before = snapshot(&f.project);
+    let long = "x".repeat(stokesforge_plot::MAX_THEME_NAME_CHARS + 1);
+    let many: Vec<_> = (0..=stokesforge_plot::MAX_THEMES)
+        .map(|i| theme(&format!("t{i}"), "#000000"))
+        .collect();
+    let bad = [
+        vec![theme("Same", "#1"), theme(" same ", "#2")],
+        vec![theme("  ", "#1")],
+        vec![theme(&long, "#1")],
+        many,
+    ];
+    for themes in bad {
+        assert!(history
+            .execute(&mut f.project, Command::SetProjectThemes { themes })
+            .is_err());
+        assert_eq!(**f.project.tree(), *before);
+        assert_eq!(history.undo_label(), None);
+    }
+}

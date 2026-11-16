@@ -26,6 +26,7 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- Graph themes can be saved in the project (#540): the `.stf` file gains an additive `project_themes` field (format version unchanged), changed by one undoable command per add, rename, overwrite or delete; a duplicate name in the project is refused, case ignored. An older version that saves such a file again drops the themes without a message. The picker and the Save as theme form follow in the same package (#514).
 - A series added to a graph (dragging columns onto it, Add rows, an analysis
   result plotted on it) that goes beyond the written axis range widens only the
   exceeded side, at once, with the margins of Preferences > Display > Graphs

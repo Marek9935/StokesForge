@@ -10,7 +10,7 @@
 //! [`MAX_THEMES`]; a name is cut at [`MAX_THEME_NAME_CHARS`].
 
 use serde::{Deserialize, Serialize};
-use stokesforge_plot::{GraphTheme, MAX_THEMES, MAX_THEME_NAME_CHARS};
+use stokesforge_plot::{GraphTheme, MAX_THEME_NAME_CHARS};
 
 use crate::convert::{self, ConvertError};
 use crate::schema::PlotSpecRecord;
@@ -64,6 +64,17 @@ pub(crate) fn themes_to_records(themes: &[GraphTheme]) -> Vec<ThemeRecord> {
     themes.iter().map(theme_to_record).collect()
 }
 
+/// The themes of a list of records: undecodable or nameless ones dropped,
+/// the list bounded like any store of themes.
+pub(crate) fn records_to_themes(records: Vec<ThemeRecord>) -> Vec<GraphTheme> {
+    stokesforge_plot::bounded_themes(
+        records
+            .into_iter()
+            .filter_map(|record| record_to_theme(record).ok())
+            .collect(),
+    )
+}
+
 fn to_bytes<T: Serialize>(value: &T) -> PersistenceResult<Vec<u8>> {
     let mut bytes = Vec::new();
     value
@@ -110,19 +121,34 @@ pub fn decode_themes(bytes: &[u8]) -> PersistenceResult<Vec<GraphTheme>> {
     check_size(bytes)?;
     let values: Vec<rmpv::Value> =
         rmp_serde::from_slice(bytes).map_err(|err| corrupt(err.to_string()))?;
-    Ok(values
+    Ok(records_to_themes(values_to_records(values)))
+}
+
+/// The records a list of loose values holds: a value that is not a theme
+/// record (a field of a type this reader does not know, a variant it has not
+/// heard of) is dropped, the others stay. Goes through bytes: `rmpv`'s own
+/// deserializer reads a unit variant written as a string differently from
+/// `rmp_serde`.
+fn values_to_records(values: Vec<rmpv::Value>) -> Vec<ThemeRecord> {
+    values
         .into_iter()
         .filter_map(|value| {
-            // Through bytes: `rmpv`'s own deserializer reads a unit variant
-            // written as a string differently from `rmp_serde`.
             let mut bytes = Vec::new();
             rmpv::encode::write_value(&mut bytes, &value).ok()?;
             rmp_serde::from_slice::<ThemeRecord>(&bytes).ok()
         })
-        .filter_map(|record| record_to_theme(record).ok())
-        .filter(|theme| !theme.name.is_empty())
-        .take(MAX_THEMES)
-        .collect())
+        .collect()
+}
+
+/// `deserialize_with` of `FileBody::project_themes`: one theme the reader
+/// cannot decode (written by a newer version, or hostile) does not make the
+/// project unreadable; it is dropped alone.
+pub(crate) fn lenient_records<'de, D>(deserializer: D) -> Result<Vec<ThemeRecord>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let values = Vec::<rmpv::Value>::deserialize(deserializer)?;
+    Ok(values_to_records(values))
 }
 
 #[cfg(test)]

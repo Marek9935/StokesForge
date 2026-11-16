@@ -39,7 +39,7 @@ use std::sync::Arc;
 
 use stokesforge_core::{ColumnMeta, ColumnType, ColumnValues, MixedCell, RawSheetMark, WindowMeta};
 use stokesforge_core::{CoreError, CoreResult, NodeId, Project, Staleness, Tree, ValueBlock};
-use stokesforge_plot::{PlotSpec, SavedColors};
+use stokesforge_plot::{GraphTheme, PlotSpec, SavedColors};
 
 use crate::command::Command;
 use crate::error::{CommandError, CommandResult};
@@ -201,6 +201,14 @@ pub enum DataDelta {
         before: SavedColors,
         /// Colors after.
         after: SavedColors,
+    },
+    /// Replacing the graph themes saved in the project (#540) — a list of
+    /// specs without data, `before`/`after` directly like the saved colors.
+    ProjectThemes {
+        /// Themes before.
+        before: Vec<GraphTheme>,
+        /// Themes after.
+        after: Vec<GraphTheme>,
     },
     /// Manual or automatic order of a folder (#425): a flag per folder.
     FolderOrder {
@@ -1231,6 +1239,8 @@ impl History {
             | Command::SetPlotSpec { .. }
             | Command::EditPlotSpec { .. }
             | Command::SetSavedColors { .. }
+            | Command::SetProjectThemes { .. }
+            | Command::SetProjectThemes { .. }
             | Command::SetFolderOrder { .. } => {
                 unreachable!("apply_structural called with a data command")
             }
@@ -1511,6 +1521,16 @@ impl History {
                     label,
                 })
             }
+            Command::SetProjectThemes { themes } => {
+                let before = project.set_project_themes(themes.clone())?;
+                Ok(Entry::Data {
+                    delta: Box::new(DataDelta::ProjectThemes {
+                        before,
+                        after: themes,
+                    }),
+                    label,
+                })
+            }
             Command::SetFolderOrder { folder, manual } => {
                 let before = project.set_folder_manual_order(folder, manual)?;
                 Ok(Entry::Data {
@@ -1685,6 +1705,10 @@ impl History {
                 project.set_saved_colors(before.clone());
                 Ok(())
             }
+            DataDelta::ProjectThemes { before, .. } => {
+                project.set_project_themes(before.clone())?;
+                Ok(())
+            }
             DataDelta::FolderOrder { folder, before, .. } => {
                 project.set_folder_manual_order(*folder, *before)?;
                 Ok(())
@@ -1773,6 +1797,10 @@ impl History {
                 project.set_saved_colors(after.clone());
                 Ok(())
             }
+            DataDelta::ProjectThemes { after, .. } => {
+                project.set_project_themes(after.clone())?;
+                Ok(())
+            }
             DataDelta::FolderOrder { folder, after, .. } => {
                 project.set_folder_manual_order(*folder, *after)?;
                 Ok(())
@@ -1834,6 +1862,8 @@ fn entry_has_no_effect(entry: &Entry) -> bool {
             | DataDelta::ColumnMeta { .. }
             | DataDelta::PlotSpec { .. }
             | DataDelta::SavedColors { .. }
+            | DataDelta::ProjectThemes { .. }
+            | DataDelta::ProjectThemes { .. }
             | DataDelta::FolderOrder { .. } => false,
         },
         Entry::Macro { .. } => false,
@@ -2317,6 +2347,7 @@ fn data_delta_footprint(delta: &DataDelta) -> Footprint {
         | DataDelta::NoteText { .. }
         | DataDelta::PlotSpec { .. }
         | DataDelta::SavedColors { .. }
+        | DataDelta::ProjectThemes { .. }
         | DataDelta::FolderOrder { .. } => {}
         // `ColumnMeta` joins `ColumnType` as soon as it carries `values_before`
         // (see its doc): it is then, too, a `ColumnValues`
@@ -2409,6 +2440,7 @@ fn prior_columns(tree: &Tree, command: &Command) -> PriorColumns {
         | Command::SetPlotSpec { .. }
         | Command::EditPlotSpec { .. }
         | Command::SetSavedColors { .. }
+        | Command::SetProjectThemes { .. }
         | Command::SetFolderOrder { .. } => {}
     }
     out
@@ -2454,6 +2486,7 @@ fn just_orphaned_by_write(prior: &PriorColumns, delta: &DataDelta) -> Footprint 
         | DataDelta::ColumnMeta { .. }
         | DataDelta::PlotSpec { .. }
         | DataDelta::SavedColors { .. }
+        | DataDelta::ProjectThemes { .. }
         | DataDelta::FolderOrder { .. } => {}
     }
     out

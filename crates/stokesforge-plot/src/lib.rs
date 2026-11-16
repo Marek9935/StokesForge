@@ -132,6 +132,6 @@ pub use text_anchor::{TextAnchor, TextTarget};
 pub use text_font::TextFont;
 pub use theme::{Theme, THEMES};
 pub use theme_family::{
-    same_theme_name, GraphTheme, ThemeFamilies, ThemeFamily, MAX_THEMES, MAX_THEME_NAME_CHARS,
-    SURPLUS_GAP,
+    bounded_themes, same_theme_name, GraphTheme, ThemeFamilies, ThemeFamily, MAX_THEMES,
+    MAX_THEME_NAME_CHARS, SURPLUS_GAP,
 };

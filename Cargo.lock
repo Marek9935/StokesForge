@@ -5379,6 +5379,7 @@ version = "1.1.0"
 dependencies = [
  "proptest",
  "rmp-serde",
+ "rmpv",
  "serde",
  "serde_bytes",
  "stokesforge-analysis",
