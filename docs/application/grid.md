@@ -126,7 +126,7 @@ in progress (`grid_drag_in_progress`). `grid_autoscroll`, called last in
 reads the pointer (`latest_pos`), turns it into the **push** past the edge of each
 axis the zone scrolls (cell: both; letter or header field: horizontal; row number:
 vertical; header-row labels never mark a drag) and the push into a speed
-(`stokesforge_app_state::grid_autoscroll`: pure functions, points per second
+(`stokesforge_app_state::grid_autoscroll` over the pure `stokesforge_render::edge_push`: points per second
 growing with the push, capped, times the frame time; not finite gives 0). The scroll
 goes through the follow path of #534 (`take_follow_scroll`). The selection extends
 to the column (`column_at`, the inverse of `column_x_range`, over the full column

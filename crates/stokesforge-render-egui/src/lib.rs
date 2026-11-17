@@ -78,11 +78,10 @@
 pub mod backend;
 mod bar_resize;
 pub mod cache;
-mod corner_follow;
-mod corner_lock;
 pub mod drawings;
 pub mod edge_band;
 pub mod feathering;
+mod handle_follow;
 mod layout_mode;
 pub mod scaled;
 mod shape_tools;
@@ -187,25 +186,23 @@ pub enum GraphEvent {
     },
     /// A boundary or a corner of a regular grid was pulled in the Page Layout
     /// Mode, then released (#426): the new frame widths and heights of the whole
-    /// grid, in points, to commit as **one** change of the model. The sums are
-    /// those the gesture began with (the figure keeps its size). The preview
+    /// grid, in points, to commit as **one** change of the model. The sums
+    /// are those the gesture began with, except for an outer edge or an Alt
+    /// line pulled outward past the empty space: the page grows by the rest
+    /// (#512). The preview
     /// stays displayed until the model changes ([`GraphView::hold_preview`]).
     GridFramesEdited {
         /// Frame width of every column.
         widths: Vec<f64>,
         /// Frame height of every row.
         heights: Vec<f64>,
-        /// An L corner was pulled, a page corner that adds or removes empty
-        /// space (else a boundary or a graph corner was pulled).
+        /// Always `false` since the page corners were removed (#512, L1): a
+        /// boundary, a graph corner or an outer edge was pulled.
         figure: bool,
         /// The empty space around the grid after an outer edge was pulled
         /// (#505); `None` for every other gesture (the slack stays as it is).
         slack: Option<stokesforge_plot::GridSlack>,
     },
-    /// An outer edge (or an Alt-dragged line) is pulled outward and the page
-    /// has no room left: signalled **once per drag**, while it bumps (#505,
-    /// F3), so the application can say how to enlarge the page.
-    PageEdgeReached,
     /// A graph of a regular grid was dragged to another place, or moved by an
     /// arrow key, in the Page Layout Mode (#491): the base layer of the graph
     /// and where it goes, to commit as **one** change of the model. Nothing is
@@ -218,7 +215,7 @@ pub enum GraphEvent {
         target: stokesforge_core::compose::MoveTarget,
     },
     /// A gesture of the Page Layout Mode ended on a free figure (#426): a graph
-    /// box moved or resized, the page corner pulled, or a burst of arrow-key
+    /// box moved or resized, or a burst of arrow-key
     /// nudges. Every moved frame (by base layer, stack kept) and the page the
     /// figure keeps, to commit as **one** change of the model. Nothing is
     /// signalled during the gesture. The preview stays displayed until the
@@ -227,7 +224,7 @@ pub enum GraphEvent {
         /// New frame of each moved or resized layer, by base layer.
         frames: Vec<(usize, FreeFrame)>,
         /// The page, in stored page coordinates (frozen during a box gesture,
-        /// the new one for a page corner drag).
+        /// the new one when a later lot makes a gesture grow it).
         page: Option<stokesforge_plot::FreePage>,
     },
     /// Double click on a title: edit it in place (issue #53).
@@ -340,8 +337,7 @@ struct FramePreview {
     /// outer edge to (#505); with `grid`.
     slack: Option<stokesforge_plot::GridSlack>,
     /// The frames the Page Layout Mode is moving or scaling (#426): base
-    /// layer and frame, several at once for a page corner drag or a nudge of
-    /// a selection.
+    /// layer and frame, several at once for a nudge of a selection.
     frees: Vec<(usize, FreeFrame)>,
     /// The page the Page Layout Mode previews (frozen during a box gesture).
     page: Option<stokesforge_plot::FreePage>,
@@ -1741,8 +1737,7 @@ impl GraphView {
     ) -> Result<bool, RenderError> {
         let spec = graph_spec(&snapshot.tree, graph)?;
         let context = ui.ctx().clone();
-        // The page corner handles of the Page Layout Mode sit outside the page
-        // (#426): the area reaches farther in the mode.
+        // The area reaches farther than the page in the Page Layout Mode (#426).
         let grab = if self.layout.mode {
             LAYOUT_GRAB_MARGIN
         } else {

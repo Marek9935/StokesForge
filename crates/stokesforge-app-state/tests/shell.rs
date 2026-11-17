@@ -16832,6 +16832,60 @@ fn the_size_lock_is_session_state() {
     assert_eq!(state.size_lock(graph), None);
 }
 
+/// #512: an outer edge pulled past the empty space grows the page with the
+/// padlock of Figure size closed: the gesture ignores the padlock (the frame
+/// grows by the whole pull, the other axis does not follow), the padlock stays
+/// closed and takes the new proportions from the new image, and the undo step
+/// is the gesture's own, Resize Plot Area. Witness: `adopt_size_lock` called
+/// for this edit (the lock would keep the old ratio).
+#[test]
+fn an_outer_edge_growing_the_page_with_the_padlock_closed_makes_the_lock_adopt_the_new_ratio() {
+    use stokesforge_commands::PlotEditKind as K;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    let before = graph_spec(&state, graph);
+    let image = |state: &AppState| {
+        stokesforge_app_state::frame_sizes::figure_extent(state.tree(), &graph_spec(state, graph))
+            .expect("extent")
+    };
+    let start = image(&state);
+    let lock = stokesforge_app_state::frame_sizes::SizeLock::close(start).expect("lock");
+    state.dispatch(Action::SetSizeLock {
+        graph,
+        lock: Some(lock),
+    });
+    let mut widths = before.frame_widths.clone();
+    widths[0] += 120.0;
+    state.dispatch(Action::SetGridFrames {
+        graph,
+        widths: widths.clone(),
+        heights: before.frame_heights.clone(),
+        figure: false,
+        slack: Some(stokesforge_plot::GridSlack::default()),
+    });
+    let after = graph_spec(&state, graph);
+    assert_eq!(after.frame_widths, widths, "the padlock is ignored");
+    assert_eq!(after.frame_heights, before.frame_heights);
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(K::ResizeCell))
+    );
+    let grown = image(&state);
+    assert!(
+        (grown.0 - start.0 - 120.0).abs() < 1.0,
+        "{start:?} {grown:?}"
+    );
+    let mut followed = state.size_lock(graph).expect("still closed");
+    followed.follow(grown);
+    assert!(
+        (followed.ratio - grown.1 / grown.0).abs() < 1e-12
+            && (followed.ratio - lock.ratio).abs() > 1e-3,
+        "the lock adopts the new proportions: {} vs {}",
+        followed.ratio,
+        lock.ratio
+    );
+}
+
 /// #394: deleting a cell that empties its column removes that column; the
 /// figure shrinks by the column's outer width, and undo brings both back in
 /// one step.
@@ -17196,7 +17250,8 @@ fn layer_stacking_and_background_are_single_steps_in_free_and_nothing_on_the_gri
 }
 
 /// #426: `SetFreeLayout` writes frames and page as ONE undo step; the kind
-/// follows what changed (page size, frame size, position only); Undo gives
+/// follows what changed (frame size, position only; a page that grows keeps the
+/// gesture's label, #512; the typed size is `SetFreeFigure`); Undo gives
 /// back the page and every frame; unchanged or grid = nothing sent.
 /// Witness: two steps, or the page left out of the undo.
 #[test]
@@ -17287,12 +17342,54 @@ fn setting_the_free_layout_is_one_undoable_step_with_the_page() {
     assert_eq!(page_of(&state), Some(page));
     assert_eq!(
         label(&state),
-        Some(HistoryLabel::EditPlotSpec(K::ResizeFigure))
+        Some(HistoryLabel::EditPlotSpec(K::ResizeLayer)),
+        "the gesture keeps its own label even when the page changes (#512)"
     );
     state.dispatch(Action::Undo);
     assert_eq!(frames_of(&state), (a, b));
     assert_eq!(page_of(&state), Some(drawn));
-    state.dispatch(Action::Redo);
+    // The typed Figure size has its own action and its own label.
+    state.dispatch(Action::SetFreeFigure {
+        graph,
+        frames: vec![(0, na), (1, nb)],
+        page,
+    });
+    assert_eq!(frames_of(&state), (na, nb));
+    assert_eq!(page_of(&state), Some(page));
+    assert_eq!(
+        label(&state),
+        Some(HistoryLabel::EditPlotSpec(K::ResizeFigure))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(page_of(&state), Some(drawn));
+    state.dispatch(Action::SetFreeLayout {
+        graph,
+        frames: vec![(0, na), (1, nb)],
+        page: Some(page),
+    });
+
+    // A move that grows the page keeps the Move Layer label (#512).
+    let grown = FreePage {
+        left: page.left - 40.0,
+        width: page.width + 40.0,
+        ..page
+    };
+    let slid = FreeFrame {
+        left: na.left - 40.0,
+        ..na
+    };
+    state.dispatch(Action::SetFreeLayout {
+        graph,
+        frames: vec![(0, slid)],
+        page: Some(grown),
+    });
+    assert_eq!(page_of(&state), Some(grown));
+    assert_eq!(
+        label(&state),
+        Some(HistoryLabel::EditPlotSpec(K::MoveLayer))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(page_of(&state), Some(page));
 
     // Nothing changes: nothing is sent. A missing layer too.
     let revision = state.snapshot().revision;
