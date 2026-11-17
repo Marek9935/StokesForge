@@ -33,8 +33,7 @@
 //! for the whole drag, the opposite corner does not move on the screen
 //! ([`GraphView::page_corner_rect`] is where the host draws the figure), and
 //! at the edge of the drawing area ([`GraphView::set_layout_contain`]) the
-//! display zooms out while the page keeps growing. To reach past the screen
-//! the mouse is locked for the gesture only, with a lease (`corner_lock`).
+//! display zooms out while the page keeps growing.
 //!
 //! In both, the primary drag does nothing else (no pan, no zoom, no object
 //! drag). This module only maps pointer events to the geometry, previews the
@@ -58,12 +57,11 @@ use stokesforge_render::{
     MAGNET_THRESHOLD_POINTS, MIN_PAGE_EXTENT,
 };
 
-use crate::corner_follow::{follow_step, glide_step, pointer_step, AxisFollow, PointerSource};
+use crate::corner_follow::{follow_step, glide_step, AxisFollow};
 
 /// Figure points by which the side that follows the ratio (Ctrl) is kept short
 /// of it: the leading side stays the leading one when the two sides tie.
 const RATIO_MARGIN: f32 = 0.01;
-use crate::corner_lock;
 use crate::{FramePreview, GraphEvent, GraphView};
 
 /// Room the host must leave around the figure, and let its clip rectangle
@@ -273,16 +271,8 @@ struct CornerFollow {
     far: (bool, bool),
     /// Height of the title band above the page, in figure points.
     band: f32,
-    /// What moves the pointer, found by the probe (see [`pointer_step`]).
-    source: PointerSource,
-    /// A frame of this drag was already followed (the first one has no raw
-    /// motion of its own).
-    started: bool,
     /// The absolute pointer of the previous frame of this drag.
     last_abs: Pos2,
-    /// The page corner at the pointer, unsnapped: where the cursor is drawn.
-    /// It follows the raw movement, never the snapped page.
-    cursor: Pos2,
     /// The page size shown now, gliding toward the snapped one, in points.
     eased: (f64, f64),
     /// The preview with the snapped page: what the release commits.
@@ -1129,7 +1119,6 @@ impl GraphView {
             return;
         };
         if response.drag_stopped_by(PointerButton::Primary) {
-            let corner = self.page_corner_cursor();
             // The page glided toward the snapped size; the release commits the
             // snapped one, exactly.
             let settled = self
@@ -1142,7 +1131,6 @@ impl GraphView {
                 self.set_frame_preview(settled);
             }
             self.finish_layout_drag();
-            corner_lock::release(context, corner);
             return;
         }
         let pointer = response.interact_pointer_pos();
@@ -1165,28 +1153,16 @@ impl GraphView {
         if response.dragged_by(PointerButton::Primary) {
             self.layout_drag(response, context, spec, &view);
         }
-        // #512: a page-corner drag locks the mouse and shows its own cursor;
-        // the lock lives only as long as every pass renews it.
+        // #512: the system cursor stays free during a page-corner drag.
         let following = self
             .layout
             .drag
             .as_ref()
             .is_some_and(|drag| drag.follow.is_some());
-        // The mouse is locked only for a relative device (the probe decided);
-        // with an absolute one the system cursor stays and shows the resize.
-        let locked = self.layout.drag.as_ref().is_some_and(|drag| {
-            drag.follow
-                .as_ref()
-                .is_some_and(|follow| follow.source.locks())
-        });
-        if locked {
-            corner_lock::renew(context);
-        }
         if following {
             context.request_repaint();
         }
         let cursor = match &self.layout.drag {
-            Some(_) if locked => None,
             Some(drag) => Some(match &drag.kind {
                 DragKind::Free { handle, .. } => handle_cursor(handle),
                 DragKind::Grid { handle, .. } => grid_cursor(handle),
@@ -1580,10 +1556,7 @@ impl GraphView {
             start: [length.0 as f32, length.1 as f32],
             far: corner,
             band,
-            source: PointerSource::probing(),
-            started: false,
             last_abs: press,
-            cursor: Pos2::new(axes[0].corner(scale), axes[1].corner(scale)),
             eased: (f64::from(length.0 as f32), f64::from(length.1 as f32)),
             settled: None,
         })
@@ -1597,7 +1570,6 @@ impl GraphView {
     /// display scale, the cursor. The snap only shapes the page that is shown
     /// ([`Self::glide_page_corner`]), so the figure never rescales by steps.
     fn follow_page_corner(&mut self, context: &Context, pos: Pos2) -> Option<(f64, f64)> {
-        let motion = context.input(|input| input.pointer.motion());
         let ctrl = context.input(|input| input.modifiers.ctrl);
         let contain = self.layout.contain;
         let drag = self.layout.drag.as_mut()?;
@@ -1608,22 +1580,13 @@ impl GraphView {
             _ => None,
         };
         let follow = drag.follow.as_mut()?;
-        let absolute = if pos.x.is_finite() && pos.y.is_finite() {
+        let step = if pos.x.is_finite() && pos.y.is_finite() {
             let moved = pos - follow.last_abs;
             follow.last_abs = pos;
             moved
         } else {
             Vec2::ZERO
         };
-        // The frame that starts the drag holds the motion made before the
-        // press was recognised: its absolute movement is the true one, and it
-        // is no part of the probe.
-        let step = if follow.started {
-            pointer_step(&mut follow.source, motion, absolute)
-        } else {
-            absolute
-        };
-        follow.started = true;
         if let Some(contain) = contain {
             follow.axes[0].bounds = (contain.min.x, contain.max.x);
             follow.axes[1].bounds = (contain.min.y, contain.max.y);
@@ -1656,7 +1619,6 @@ impl GraphView {
             }
         }
         follow.scale = scale;
-        follow.cursor = Pos2::new(follow.axes[0].corner(scale), follow.axes[1].corner(scale));
         Some(pulled)
     }
 
@@ -1726,14 +1688,6 @@ impl GraphView {
     pub fn page_corner_rect(&self, figure: (f32, f32)) -> Option<Rect> {
         let follow = self.layout.drag.as_ref()?.follow.as_ref()?;
         Some(follow.rect(figure))
-    }
-
-    /// The screen position of the pointer during a page-corner drag: the page
-    /// corner at the raw, unsnapped pointer, so the cursor drawn there moves
-    /// smoothly whatever the snap does to the page. `None` outside such a drag.
-    pub fn page_corner_cursor(&self) -> Option<Pos2> {
-        let follow = self.layout.drag.as_ref()?.follow.as_ref()?;
-        Some(follow.cursor)
     }
 
     /// Freezes the handle under the press; `false` if there is none.
@@ -2072,33 +2026,6 @@ impl GraphView {
                 self.paint_move_target(painter, drag.moving, drag.moving_band, accent);
             }
         }
-        // #512: the system cursor is hidden and the mouse locked during a
-        // page-corner drag, so the cursor is drawn here, on the corner.
-        if let (Some(at), Some(follow)) = (
-            self.page_corner_cursor().filter(|_| {
-                self.layout
-                    .drag
-                    .as_ref()
-                    .and_then(|drag| drag.follow.as_ref())
-                    .is_some_and(|follow| follow.source.locks())
-            }),
-            self.layout
-                .drag
-                .as_ref()
-                .and_then(|drag| drag.follow.as_ref()),
-        ) {
-            // On a foreground layer of its own, clipped to the whole viewport:
-            // never under the figure's clip, never behind another widget.
-            let context = painter.ctx();
-            let layer = egui::LayerId::new(
-                egui::Order::Foreground,
-                egui::Id::new(("page_corner_cursor", self.id)),
-            );
-            let painter = context
-                .layer_painter(layer)
-                .with_clip_rect(context.content_rect());
-            paint_corner_cursor(&painter, at, follow.far.0 == follow.far.1);
-        }
         let in_selection = |graph: &GraphBox| view.selected.contains(&graph.base);
         let dragging = self.layout.drag.is_some();
         for selected in [false, true] {
@@ -2408,37 +2335,6 @@ fn paint_page_corners(
                 ],
                 Stroke::new(2.5, colour),
             ));
-        }
-    }
-}
-
-/// The cursor of a page-corner drag, drawn by the application (#512): a
-/// double arrow along the diagonal of the corner (`main`: top-left to
-/// bottom-right), a light halo under a dark stroke.
-fn paint_corner_cursor(painter: &Painter, at: Pos2, main: bool) {
-    const HALF: f32 = 9.0;
-    const HEAD: f32 = 4.0;
-    let along = if main {
-        egui::vec2(1.0, 1.0)
-    } else {
-        egui::vec2(1.0, -1.0)
-    } / std::f32::consts::SQRT_2;
-    let across = egui::vec2(-along.y, along.x);
-    let mut lines = vec![vec![at - along * HALF, at + along * HALF]];
-    for end in [-1.0_f32, 1.0] {
-        let tip = at + along * HALF * end;
-        lines.push(vec![
-            tip - along * HEAD * end + across * HEAD,
-            tip,
-            tip - along * HEAD * end - across * HEAD,
-        ]);
-    }
-    for (width, colour) in [
-        (4.5, Color32::from_white_alpha(230)),
-        (1.8, Color32::from_rgb(20, 20, 30)),
-    ] {
-        for points in &lines {
-            painter.add(Shape::line(points.clone(), Stroke::new(width, colour)));
         }
     }
 }
