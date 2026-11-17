@@ -452,10 +452,11 @@ pub fn resized_frames(
 /// **Only the row or column of that edge changes.** Pulled inward by `p`, its
 /// frame shrinks by `p` and the slack of that side grows by `p`: frame plus
 /// slack is constant, so the page keeps its size. Pulled outward by `q`, the
-/// frame grows by `q`, taking it from the slack of that side; it **stops when
-/// the slack is used up**: the page size changes only through the page tools
-/// (P1). The movement is rounded to whole points and bounded
-/// so that the frame stays in `[MIN_FRAME_SIZE, MAX_FRAME_SIZE]`. A `delta`
+/// frame grows by `q`, taking it from the slack of that side first; **the page
+/// grows by the rest** (page = frames + bands + slack), so an edge never stops
+/// at the page edge (#512). The movement is rounded to whole points and bounded
+/// so that the frame stays in `[MIN_FRAME_SIZE, MAX_FRAME_SIZE]` and the sum of
+/// the frames of the axis in `[.., MAX_FIGURE_EXTENT]`. A `delta`
 /// that is not finite, or an `index` out of range, returns the start untouched.
 pub fn resized_edge(
     edge: OuterEdge,
@@ -484,9 +485,12 @@ pub fn resized_edge(
         EdgeSide::Right => slack.right,
         EdgeSide::Bottom => slack.bottom,
     };
-    // Outward the frame stops when the slack is used up: the page never grows.
+    // Outward the slack of that side is eaten first, then the page grows by the
+    // rest. The stops are the frame maximum and the extent of the whole axis
+    // (the sanitizer would silently scale every frame beyond it).
     let low = (MIN_FRAME_SIZE - frame).min(0.0);
-    let high = (MAX_FRAME_SIZE - frame).max(0.0).min(side_slack.max(0.0));
+    let room = (MAX_FIGURE_EXTENT - sizes.iter().sum::<f64>()).max(0.0);
+    let high = (MAX_FRAME_SIZE - frame).max(0.0).min(room);
     let moved = outward.round().clamp(low, high);
     let new_slack = (side_slack - moved).max(0.0);
     let mut sizes = sizes.to_vec();
@@ -509,7 +513,7 @@ pub fn resized_edge(
 /// grabbed line takes the whole change, every other row (column) keeps its
 /// size, and the empty space on the far edge (bottom, right) absorbs the
 /// difference exactly as for [`resized_edge`] of that far edge: the slack
-/// shrinks or grows first, the page grows only when the slack is used up.
+/// shrinks or grows first, the page grows when the slack is used up (#512).
 /// A corner holding a column and a row line applies the rule to both axes.
 pub fn resized_line_alone(
     handle: &GridHandle,
@@ -568,34 +572,6 @@ pub fn scaled_axis(sizes: &[f64], bands: f64, delta: f64, far: bool) -> Vec<f64>
         .iter()
         .map(|size| ((size * factor * 100.0).round() / 100.0).clamp(MIN_FRAME_SIZE, MAX_FRAME_SIZE))
         .collect()
-}
-
-/// Whether a drag of `handle` asks for more room than the page has left on
-/// the side it pulls outward (#505, F3): an outer edge pulled outward, or an
-/// internal line pulled with Alt (`alone`) toward the slack on the bottom
-/// (rows) or the right (columns). `delta` is the pointer movement in points.
-/// An edge pulled inward, an ordinary line and a non-finite delta never bump.
-pub fn page_edge_bumped(
-    handle: &GridHandle,
-    alone: bool,
-    slack: GridSlack,
-    delta: (f64, f64),
-) -> bool {
-    if !(delta.0.is_finite() && delta.1.is_finite()) {
-        return false;
-    }
-    let beyond = |outward: f64, side: f64| outward.round() > side.max(0.0);
-    if let Some(edge) = handle.edge {
-        return match edge.side {
-            EdgeSide::Left => beyond(-delta.0, slack.left),
-            EdgeSide::Right => beyond(delta.0, slack.right),
-            EdgeSide::Top => beyond(-delta.1, slack.top),
-            EdgeSide::Bottom => beyond(delta.1, slack.bottom),
-        };
-    }
-    alone
-        && ((handle.column.is_some() && beyond(delta.0, slack.right))
-            || (handle.row.is_some() && beyond(delta.1, slack.bottom)))
 }
 
 /// The frames and the slack after **Fit Layout to Page** (#505, K1), the
@@ -913,8 +889,9 @@ mod tests {
     }
 
     /// #505 G9: Alt on an internal line changes only the row before it; the
-    /// bottom slack absorbs the difference; outward past the slack it stops
-    /// (the page never grows). Witness: `splitter` instead (the next row would trade).
+    /// bottom slack absorbs the difference; outward past the slack the page
+    /// grows (#512). Witness: `splitter` instead (the next row would trade);
+    /// capping the row at the slack.
     #[test]
     fn a_line_dragged_alone_changes_one_row_and_the_slack_absorbs() {
         let row = GridHandle {
@@ -928,13 +905,20 @@ mod tests {
             resized_line_alone(&row, &[200.0], &heights, GridSlack::default(), (0.0, -30.0));
         assert_eq!((w, h), (vec![200.0], vec![70.0, 100.0, 100.0]));
         assert_eq!(slack.bottom, 30.0);
-        // Back out beyond the slack: the row grows by the slack only.
+        // Out beyond the slack: the row takes it all, the page grows by the rest.
         let start = GridSlack {
             bottom: 10.0,
             ..GridSlack::default()
         };
         let (_, h, slack) = resized_line_alone(&row, &[200.0], &heights, start, (0.0, 25.0));
-        assert_eq!(h, vec![110.0, 100.0, 100.0], "clamped at the slack");
+        assert_eq!(h, vec![125.0, 100.0, 100.0], "slack 10 eaten, page +15");
+        assert_eq!(slack.bottom, 0.0);
+        let start = GridSlack {
+            bottom: 30.0,
+            ..GridSlack::default()
+        };
+        let (_, h, slack) = resized_line_alone(&row, &[200.0], &heights, start, (0.0, 50.0));
+        assert_eq!(h, vec![150.0, 100.0, 100.0], "row +50, page +20");
         assert_eq!(slack.bottom, 0.0);
         // A column line takes the same rule on the right.
         let column = GridHandle {
@@ -953,41 +937,68 @@ mod tests {
         assert_eq!(slack.right, 20.0);
     }
 
-    /// #505 (P1): pulled outward, the edge eats the slack and stops at the
-    /// page. Witness: letting the frame keep growing past the slack.
+    /// #512: pulled outward, the edge eats the slack of its side, then the
+    /// page grows by the rest. Witness: capping the frame at the slack.
     #[test]
-    fn an_outer_edge_pulled_outward_stops_at_the_page() {
+    fn an_outer_edge_pulled_outward_eats_the_slack_then_grows_the_page() {
         let edge = OuterEdge {
-            side: EdgeSide::Bottom,
+            side: EdgeSide::Right,
             index: 1,
         };
         let start = GridSlack {
-            bottom: 30.0,
+            right: 30.0,
             ..GridSlack::default()
         };
-        let (_, h, slack) =
-            resized_edge(edge, &[220.0, 130.0], &[140.0, 160.0], start, (0.0, 80.0));
-        assert_eq!(h, vec![140.0, 190.0], "frame +30 only");
-        assert_eq!(slack.bottom, 0.0);
-        // Frame + slack is unchanged: the page keeps its size.
-        assert_eq!(h[1] + slack.bottom, 160.0 + 30.0);
-        // With no slack at all the edge does not move outward.
-        let (_, h, _) = resized_edge(
+        let (w, _, slack) = resized_edge(edge, &[220.0, 130.0], &[140.0], start, (50.0, 0.0));
+        assert_eq!(w, vec![220.0, 180.0], "frame +50");
+        assert_eq!(slack.right, 0.0);
+        // Page = frames + slack: +20 over the start.
+        assert_eq!(w.iter().sum::<f64>() + slack.right, 350.0 + 30.0 + 20.0);
+        // With no slack at all the page grows by the whole movement.
+        let (w, _, _) = resized_edge(
             edge,
             &[220.0, 130.0],
-            &[140.0, 160.0],
+            &[140.0],
             GridSlack::default(),
-            (0.0, 80.0),
+            (80.0, 0.0),
         );
-        assert_eq!(h, vec![140.0, 160.0]);
+        assert_eq!(w, vec![220.0, 210.0]);
         let start = GridSlack {
-            bottom: 50.0,
+            right: 50.0,
             ..GridSlack::default()
         };
         // Within the slack the figure keeps its size.
-        let (_, h, slack) =
-            resized_edge(edge, &[220.0, 130.0], &[140.0, 160.0], start, (0.0, 20.0));
-        assert_eq!((h[1], slack.bottom), (180.0, 30.0));
+        let (w, _, slack) = resized_edge(edge, &[220.0, 130.0], &[140.0], start, (20.0, 0.0));
+        assert_eq!((w[1], slack.right), (150.0, 30.0));
+        // Inward is unchanged: the frame shrinks and the freed space is slack.
+        let (w, _, slack) = resized_edge(edge, &[220.0, 130.0], &[140.0], start, (-20.0, 0.0));
+        assert_eq!((w[1], slack.right), (110.0, 70.0));
+    }
+
+    /// #512: the page stops growing where the frames would be scaled by the
+    /// sanitizer: the sum of the frames of the axis never passes
+    /// `MAX_FIGURE_EXTENT`. Witness: removing the sum stop.
+    #[test]
+    fn the_page_stops_at_the_figure_extent() {
+        let edge = OuterEdge {
+            side: EdgeSide::Right,
+            index: 10,
+        };
+        let mut widths = vec![1900.0; 10];
+        widths.push(900.0);
+        let (w, _, _) = resized_edge(edge, &widths, &[100.0], GridSlack::default(), (500.0, 0.0));
+        assert!(w.iter().sum::<f64>() <= MAX_FIGURE_EXTENT);
+        assert!(w.iter().all(|w| *w <= MAX_FRAME_SIZE));
+        assert_eq!(w[10], 1000.0, "the last 100 points of room");
+        // Already at the extent: the edge does not move outward.
+        let (w, _, _) = resized_edge(
+            edge,
+            &[1900.0; 11],
+            &[100.0],
+            GridSlack::default(),
+            (500.0, 0.0),
+        );
+        assert_eq!(w[10], 1900.0);
     }
 
     /// #505: bad input and the frame bounds.
@@ -1141,65 +1152,6 @@ mod tests {
             right,
             bottom,
         }
-    }
-
-    /// F3 (#505): an edge pulled outward past the room left bumps; inward, or
-    /// within the room, or an ordinary line, does not. Witness: the function
-    /// always returning false.
-    #[test]
-    fn a_pull_past_the_page_edge_bumps() {
-        let edge = |side| GridHandle {
-            edge: Some(OuterEdge { side, index: 0 }),
-            column: None,
-            row: None,
-            corner: false,
-        };
-        let line = GridHandle {
-            edge: None,
-            column: Some(0),
-            row: Some(0),
-            corner: false,
-        };
-        let room = slack(5.0, 5.0, 5.0, 5.0);
-        assert!(page_edge_bumped(
-            &edge(EdgeSide::Right),
-            false,
-            room,
-            (6.0, 0.0)
-        ));
-        assert!(!page_edge_bumped(
-            &edge(EdgeSide::Right),
-            false,
-            room,
-            (5.0, 0.0)
-        ));
-        assert!(!page_edge_bumped(
-            &edge(EdgeSide::Right),
-            false,
-            room,
-            (-50.0, 0.0)
-        ));
-        assert!(page_edge_bumped(
-            &edge(EdgeSide::Left),
-            false,
-            room,
-            (-9.0, 0.0)
-        ));
-        assert!(page_edge_bumped(
-            &edge(EdgeSide::Top),
-            false,
-            room,
-            (0.0, -9.0)
-        ));
-        assert!(page_edge_bumped(
-            &edge(EdgeSide::Bottom),
-            false,
-            room,
-            (0.0, 9.0)
-        ));
-        assert!(page_edge_bumped(&line, true, room, (0.0, 9.0)));
-        assert!(!page_edge_bumped(&line, false, room, (0.0, 90.0)));
-        assert!(!page_edge_bumped(&line, true, room, (f64::NAN, -3.0)));
     }
 
     /// K1: Fit Layout to Page scales each axis by its own factor, the empty

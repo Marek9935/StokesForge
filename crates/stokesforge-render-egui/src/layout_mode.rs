@@ -14,9 +14,8 @@
 //!   corners lying on one of them, are the handles (they keep priority). The
 //!   **outer edge** of the first and last row and column, over a graph, is a
 //!   handle too (#505): pulling it changes that row or column alone, and the
-//!   empty space it leaves (or eats) is the page's slack, and pulling it out
-//!   stops at the page edge (the page changes only through page tools); the figure does not
-//!   follow. A drag
+//!   empty space it leaves (or eats) is the page's slack; pulling it out eats
+//!   that space first, then the page grows by the rest (#512). A drag
 //!   that starts **inside a graph**, off a handle, **moves that graph** (#491):
 //!   the cell under the pointer is outlined (a graph there swaps places, a hole
 //!   takes the graph), the right and bottom edge bands of the figure make a new
@@ -28,13 +27,15 @@
 //!
 //! There are no page corners: the four L-shaped corner handles that once
 //! resized the page were removed on purpose (#512, the user's decision, never
-//! to be reimplemented). The follow mechanism of `corner_follow` (the dragged
-//! point stays under the cursor, the display zooms out at the edge of the
-//! drawing area, the page grows 1:1 with the outward movement of the absolute
-//! pointer, no cursor lock or warp) and its host plumbing
-//! ([`GraphView::page_corner_rect`], [`GraphView::set_layout_contain`],
-//! [`GraphView::advance_page_corner_drag`]) are kept for the later lots of
-//! #512, where the outer edges of the graphs grow the page.
+//! to be reimplemented). The page grows through the graphs instead: an outer
+//! edge pulled outward, or an internal line pulled outward with Alt, eats the
+//! empty space of its side and then grows the page. Such a drag follows the
+//! pointer by the rules of `handle_follow` (the handle stays under the cursor,
+//! the display zooms out at the edge of the drawing area, the page grows 1:1
+//! with the outward movement of the absolute pointer, no cursor lock or warp);
+//! the host draws the figure in [`GraphView::handle_drag_rect`] meanwhile and
+//! feeds [`GraphView::set_layout_contain`] and
+//! [`GraphView::advance_handle_drag`].
 //!
 //! In both, the primary drag does nothing else (no pan, no zoom, no object
 //! drag). This module only maps pointer events to the geometry, previews the
@@ -51,13 +52,12 @@ use stokesforge_plot::{FreeFrame, FreePage, GridSlack, LayerPlacement, LengthUni
 use stokesforge_render::pipeline::FigureLayout;
 use stokesforge_render::{
     boundary_group, figure_to_stored, graph_boxes, grid_cell_at, grid_corners, grid_handle_at,
-    layout_handle_at, moved_boundary, moved_box, nudged_box, page_edge_bumped, resized_edge,
-    resized_frames, resized_line_alone, stored_to_figure, BoundaryGroup, EdgeSide, GraphBox,
-    GridCorner, GridHandle, Guide, LayoutHandle, LayoutReach, Snap, EDGE_REACH_PX,
-    MAGNET_THRESHOLD_POINTS,
+    layout_handle_at, moved_boundary, moved_box, nudged_box, resized_edge, resized_frames,
+    resized_line_alone, stored_to_figure, BoundaryGroup, EdgeSide, GraphBox, GridCorner,
+    GridHandle, Guide, LayoutHandle, LayoutReach, Snap, EDGE_REACH_PX, MAGNET_THRESHOLD_POINTS,
 };
 
-use crate::corner_follow::{follow_step, glide_step, AxisFollow};
+use crate::handle_follow::{follow_step, glide_step, AxisFollow};
 
 use crate::{FramePreview, GraphEvent, GraphView};
 
@@ -170,7 +170,7 @@ enum DragKind {
     },
 }
 
-/// A box, boundary or page-corner drag in progress. Everything is frozen at
+/// A box, boundary or edge drag in progress. Everything is frozen at
 /// the press: the display scale (the figure may grow under the pointer), the
 /// placement and the geometry.
 #[derive(Debug, Clone)]
@@ -185,12 +185,11 @@ pub(crate) struct LayoutDrag {
     moving: Option<MoveTarget>,
     /// The edge band the pointer is in during a [`DragKind::MoveCell`], to fill.
     moving_band: Option<(CellSide, usize)>,
-    /// The page-edge message was already signalled in this drag (#505, F3).
-    bumped: bool,
-    /// A page-corner drag (#512) follows the pointer by its own rules: the
-    /// corner under the cursor, the display zooming out at the edge of the
-    /// drawing area. Born with the drag, so a second drag never inherits it.
-    follow: Option<CornerFollow>,
+    /// A drag of a handle that may grow the page (#512) follows the pointer by
+    /// its own rules: the handle under the cursor, the display zooming out at
+    /// the edge of the drawing area. Born with the drag, so a second drag never
+    /// inherits it.
+    follow: Option<HandleFollow>,
 }
 
 /// A burst of arrow-key nudges not yet committed.
@@ -207,11 +206,11 @@ struct Nudge {
 #[derive(Debug, Default)]
 pub(crate) struct LayoutState {
     pub(crate) mode: bool,
-    /// The pass in which the running page-corner drag was already advanced by
-    /// [`GraphView::advance_page_corner_drag`] (the paint must not step twice).
+    /// The pass in which the running handle drag was already advanced by
+    /// [`GraphView::advance_handle_drag`] (the paint must not step twice).
     advanced_pass: Option<u64>,
     /// The drawing area the host contains the figure in, fed each frame: where
-    /// a dragged page corner stops and the display zooms out (#512).
+    /// a dragged handle stops and the display zooms out (#512).
     contain: Option<Rect>,
     grid: Option<f64>,
     unit: LengthUnit,
@@ -239,48 +238,51 @@ impl LayoutState {
     }
 }
 
-/// The state of a page-corner drag (#512): the corner stays under the cursor,
-/// the opposite corner (the anchor) does not move on the screen, and the
-/// display scale only shrinks, when the corner reaches the edge of the drawing
-/// area. Everything the drag needs is frozen here at the press.
-// No gesture builds it since L1 of #512 removed the page corners; kept, with
-// the plumbing around it, for L2/L3, which reuse the follow.
-#[allow(dead_code)]
+/// The state of a drag of a handle that may grow the page (#512): the handle
+/// stays under the cursor, the opposite page edge (the anchor) does not move on
+/// the screen, and the display scale only shrinks, when the handle reaches the
+/// edge of the drawing area. Everything the drag needs is frozen here at the
+/// press. A length is the distance from the anchor to the handle, in points.
 #[derive(Debug, Clone)]
-struct CornerFollow {
-    /// Per axis (across, down): the page length and the rules it follows.
+struct HandleFollow {
+    /// Per axis (across, down): the handle distance and the rules it follows.
     axes: [AxisFollow; 2],
+    /// Which axes the handle drags: the other one keeps its length.
+    dragged: [bool; 2],
     /// The display scale now: the press scale, then smaller.
     scale: f32,
-    /// The page lengths at the press, in points.
+    /// The handle distances at the press, in points.
     start: [f32; 2],
-    /// The longest page the geometry accepts per axis, read from it at the
+    /// The longest distance the geometry accepts per axis, read from it at the
     /// press (#512): the growth stops there and the display scale freezes.
     max: [f32; 2],
-    /// `(right, bottom)`: the corner is on the far side of the anchor.
+    /// `(right, bottom)`: the handle is on the far side of the anchor.
     far: (bool, bool),
     /// Height of the title band above the page, in figure points.
     band: f32,
     /// The absolute pointer of the previous frame of this drag.
     last_abs: Pos2,
-    /// The page size shown now, gliding toward the snapped one, in points.
+    /// The distances shown now, gliding toward the snapped ones, in points.
     eased: (f64, f64),
     /// The preview with the snapped page: what the release commits.
     settled: Option<FramePreview>,
 }
 
-impl CornerFollow {
+impl HandleFollow {
     /// The pointer delta, in points, that the geometry of the drag gets: how
-    /// far the page corner was pulled outward, per axis.
+    /// far the handle was pulled, per axis (negative toward the page on its
+    /// side).
     ///
-    /// An axis held at the shortest page (the graphs) is pulled "far inward":
-    /// the geometry clamps it to the graphs exactly. The real, clamped length
-    /// would let the snap round the edge up to the next grid line, and the page
-    /// would grow when it is pushed against the graphs.
+    /// An axis held at the shortest distance is pulled "far inward": the
+    /// geometry clamps it exactly. The real, clamped length would let the snap
+    /// round the edge up to the next grid line.
     fn delta(&self) -> (f64, f64) {
         const FAR_INWARD: f32 = 1.0e6;
         let pulled = |i: usize| {
             let axis = &self.axes[i];
+            if !self.dragged[i] {
+                return 0.0;
+            }
             let length = if axis.length <= axis.min + 1.0e-3 {
                 self.start[i] - FAR_INWARD
             } else {
@@ -292,8 +294,8 @@ impl CornerFollow {
     }
 
     /// The rectangle the figure is drawn in during the drag: anchored at the
-    /// opposite corner, scaled by the display scale, for a figure of `figure`
-    /// points.
+    /// opposite page edge of each axis, scaled by the display scale, for a
+    /// figure of `figure` points.
     fn rect(&self, figure: (f32, f32)) -> Rect {
         let s = self.scale;
         let min_x = if self.far.0 {
@@ -1103,7 +1105,7 @@ impl GraphView {
         if response.dragged_by(PointerButton::Primary) {
             self.layout_drag(response, context, spec, &view);
         }
-        // #512: the system cursor stays free during a page-corner drag.
+        // #512: the system cursor stays free during a handle drag.
         let following = self
             .layout
             .drag
@@ -1188,9 +1190,9 @@ impl GraphView {
         let Some(drag) = self.layout.drag.clone() else {
             return;
         };
-        // #512: a page corner is followed by its own rules, in points of page;
+        // #512: a handle is followed by its own rules, in points of page;
         // every other drag converts the absolute pointer at the press scale.
-        let delta = match self.follow_page_corner(pos) {
+        let delta = match self.follow_handle(pos) {
             Some(delta) => delta,
             None => {
                 let delta = (pos - drag.press) / drag.scale;
@@ -1201,16 +1203,16 @@ impl GraphView {
         // The snapped preview first: it is the page the release commits.
         let shown = self.preview_drag(&drag, pos, delta, shift);
         if let Some(shown) = shown {
-            self.glide_page_corner(context, &drag, pos, shown, shift);
+            self.glide_handle(context, &drag, pos, shown, shift);
         }
     }
 
-    /// Advances a running page-corner drag by this frame's pointer, before the
+    /// Advances a running handle drag by this frame's pointer, before the
     /// host sizes the figure, so the figure it draws is the one of this frame
     /// and not of the previous one (#512). The paint of the same pass then does
     /// not step again. Does nothing outside such a drag (the press itself is
     /// handled by the paint).
-    pub fn advance_page_corner_drag(&mut self, context: &Context) {
+    pub fn advance_handle_drag(&mut self, context: &Context) {
         if !self.layout.mode
             || !self
                 .layout
@@ -1239,8 +1241,8 @@ impl GraphView {
     }
 
     /// The preview of a drag for a pointer movement of `delta` points of page.
-    /// For a page-corner follow, returns the page size it gave (snapped,
-    /// rounded); `None` for every drag today.
+    /// For a handle follow, returns the distances it gave (snapped,
+    /// rounded); `None` for every other drag.
     /// `shift` switches the snap off (read live, so a key pressed or released
     /// during the drag acts at once: the geometry is recomputed from the press
     /// every frame).
@@ -1286,13 +1288,6 @@ impl GraphView {
                     None => moved,
                 };
                 let delta = (snapped(line.0, delta.0), snapped(line.1, delta.1));
-                let bumps = page_edge_bumped(handle, *alone, *slack, delta);
-                if bumps && self.layout.drag.as_ref().is_some_and(|drag| !drag.bumped) {
-                    if let Some(active) = self.layout.drag.as_mut() {
-                        active.bumped = true;
-                    }
-                    self.events.push(GraphEvent::PageEdgeReached);
-                }
                 let (new_widths, new_heights, new_slack) = match handle.edge {
                     Some(edge) => {
                         let (w, h, slack) = resized_edge(edge, widths, heights, *slack, delta);
@@ -1313,22 +1308,31 @@ impl GraphView {
                     slack: new_slack,
                     ..FramePreview::default()
                 }));
+                // A handle that may grow the page reports the distances the
+                // snapped pull gives: the page shown glides toward them.
+                if let Some(follow) = drag.follow.as_ref() {
+                    let shown = |i: usize, moved: f64| {
+                        f64::from(follow.start[i]) + f64::from(follow.axes[i].sign) * moved
+                    };
+                    return Some((shown(0, delta.0), shown(1, delta.1)));
+                }
             }
         }
         None
     }
 
-    /// One frame of a page-corner drag (#512): the pointer movement turned into
-    /// a page length and a display scale, as the pull of the corner in points.
-    /// `None` when the drag in progress is not a page corner.
+    /// One frame of a handle drag (#512): the pointer movement turned into
+    /// a handle distance and a display scale, as the pull of the handle in
+    /// points. `None` when the drag in progress is not a handle that may grow
+    /// the page.
     ///
     /// Everything here is driven by the **unsnapped** absolute pointer: the
     /// lengths and the display scale. The movement since the previous frame is
     /// the only thing that grows the page (a still pointer grows nothing, time
     /// plays no part), and a pointer that is not finite moves nothing. The snap
-    /// only shapes the page that is shown ([`Self::glide_page_corner`]), so the
+    /// only shapes the page that is shown ([`Self::glide_handle`]), so the
     /// figure never rescales by steps.
-    fn follow_page_corner(&mut self, pos: Pos2) -> Option<(f64, f64)> {
+    fn follow_handle(&mut self, pos: Pos2) -> Option<(f64, f64)> {
         let contain = self.layout.contain;
         let drag = self.layout.drag.as_mut()?;
         let follow = drag.follow.as_mut()?;
@@ -1342,22 +1346,25 @@ impl GraphView {
             Vec2::ZERO
         };
         if let Some(contain) = contain {
-            follow.axes[0].bounds = (contain.min.x, contain.max.x);
-            follow.axes[1].bounds = (contain.min.y, contain.max.y);
+            if follow.dragged[0] {
+                follow.axes[0].bounds = (contain.min.x, contain.max.x);
+            }
+            if follow.dragged[1] {
+                follow.axes[1].bounds = (contain.min.y, contain.max.y);
+            }
         }
-        let (lengths, scale) = follow_step(follow.axes, follow.scale, step);
-        follow.axes[0].length = lengths[0];
-        follow.axes[1].length = lengths[1];
+        let (axes, scale) = follow_step(follow.axes, follow.scale, step);
+        follow.axes = axes;
         let pulled = follow.delta();
         follow.scale = scale;
         Some(pulled)
     }
 
-    /// The page of a page-corner drag glides to the snapped size `shown`: the
+    /// The page of a handle drag glides to the snapped size `shown`: the
     /// preview is recomputed for the eased size, with no snap. Without a snap
     /// (Shift, no grid) the page follows at once. The snapped preview is kept
     /// for the release, which commits it whatever the glide had reached.
-    fn glide_page_corner(
+    fn glide_handle(
         &mut self,
         context: &Context,
         drag: &LayoutDrag,
@@ -1405,17 +1412,17 @@ impl GraphView {
     }
 
     /// The drawing area of the figure on the screen (the host's `contain`): the
-    /// edge a page corner reaches before the display zooms out (#512).
+    /// edge a handle reaches before the display zooms out (#512).
     pub fn set_layout_contain(&mut self, contain: Rect) {
         self.layout.contain = Some(contain);
     }
 
-    /// During a page-corner drag, the rectangle the figure of `figure` points
-    /// is drawn in: anchored at the opposite corner of the page, at the display
-    /// scale of the drag. The host draws the figure there instead of centring
-    /// it, so the corner stays under the cursor (#512). `None` outside such a
-    /// drag.
-    pub fn page_corner_rect(&self, figure: (f32, f32)) -> Option<Rect> {
+    /// During a handle drag, the rectangle the figure of `figure` points
+    /// is drawn in: anchored at the opposite page edge of each dragged axis, at
+    /// the display scale of the drag. The host draws the figure there instead of
+    /// centring it, so the handle stays under the cursor (#512). `None` outside
+    /// such a drag.
+    pub fn handle_drag_rect(&self, figure: (f32, f32)) -> Option<Rect> {
         let follow = self.layout.drag.as_ref()?.follow.as_ref()?;
         Some(follow.rect(figure))
     }
@@ -1458,7 +1465,6 @@ impl GraphView {
                         guides: Vec::new(),
                         moving: None,
                         moving_band: None,
-                        bumped: false,
                         follow: None,
                     });
                     return true;
@@ -1537,6 +1543,7 @@ impl GraphView {
             (None, None) => return false,
         };
         self.commit_nudge();
+        let follow = self.handle_follow(&kind, origin, scale);
         self.layout.drag = Some(LayoutDrag {
             kind,
             press: origin,
@@ -1545,10 +1552,169 @@ impl GraphView {
             guides: Vec::new(),
             moving: None,
             moving_band: None,
-            bumped: false,
-            follow: None,
+            follow,
         });
         true
+    }
+
+    /// The follow state of a drag at the press (#512): born for an outer edge
+    /// and for an internal line pulled with Alt (the handles that may grow the
+    /// page); `None` for every other drag (an ordinary line trades with its
+    /// neighbour, a graph is moved, a Free handle).
+    fn handle_follow(&self, kind: &DragKind, press: Pos2, scale: f32) -> Option<HandleFollow> {
+        let DragKind::Grid {
+            handle,
+            widths,
+            heights,
+            line,
+            slack,
+            alone,
+        } = kind
+        else {
+            return None;
+        };
+        let display = self.display_rect?;
+        let (_, layout) = self.figure_memo.as_ref()?;
+        let band = layout.title_band as f32;
+        let page = (
+            f64::from(layout.size.0),
+            f64::from(layout.size.1.saturating_sub(layout.title_band)),
+        );
+        // Per axis: `(index, far)` of the dragged frame, with `far` the side of
+        // the page the handle is on (right, bottom).
+        let mut dragged: [Option<(usize, bool)>; 2] = [None, None];
+        match (handle.edge, *alone) {
+            (Some(edge), _) => match edge.side {
+                EdgeSide::Left => dragged[0] = Some((edge.index, false)),
+                EdgeSide::Right => dragged[0] = Some((edge.index, true)),
+                EdgeSide::Top => dragged[1] = Some((edge.index, false)),
+                EdgeSide::Bottom => dragged[1] = Some((edge.index, true)),
+            },
+            (None, true) => {
+                dragged[0] = handle.column.map(|n| (n, true));
+                dragged[1] = handle.row.map(|n| (n, true));
+            }
+            (None, false) => return None,
+        }
+        // The geometry as the drag asks it: a pull, in points, per axis.
+        let geometry = |pull: (f64, f64)| match handle.edge {
+            Some(edge) => {
+                let (w, h, _) = resized_edge(edge, widths, heights, *slack, pull);
+                (w, h)
+            }
+            None => {
+                let (w, h, _) = resized_line_alone(handle, widths, heights, *slack, pull);
+                (w, h)
+            }
+        };
+        // The longest and the shortest distance are what the geometry returns
+        // for a huge pull each way: asked of the same functions the drag uses,
+        // never re-derived.
+        const PROBE_PULL: f64 = 1.0e9;
+        let reach = |axis: usize, index: usize, far: bool| {
+            let sign = if far { 1.0 } else { -1.0 };
+            let pull = |dir: f64| {
+                if axis == 0 {
+                    (sign * dir * PROBE_PULL, 0.0)
+                } else {
+                    (0.0, sign * dir * PROBE_PULL)
+                }
+            };
+            let size = |sizes: &[f64]| sizes.get(index).copied().unwrap_or(0.0);
+            let base = if axis == 0 {
+                size(widths)
+            } else {
+                size(heights)
+            };
+            let moved = |dir: f64| {
+                let (w, h) = geometry(pull(dir));
+                (if axis == 0 { size(&w) } else { size(&h) }) - base
+            };
+            (moved(-1.0) as f32, moved(1.0) as f32)
+        };
+        let reserve = self
+            .layout
+            .grid
+            .filter(|step| step.is_finite() && *step > 0.0)
+            .map_or(0.0, |step| (step / 2.0) as f32);
+        let contain = self.layout.contain.unwrap_or(Rect::EVERYTHING);
+        let build = |axis: usize| {
+            let Some((index, far)) = dragged[axis] else {
+                let anchor = if axis == 0 {
+                    display.min.x
+                } else {
+                    display.min.y + band * scale
+                };
+                return (
+                    AxisFollow {
+                        anchor,
+                        sign: 1.0,
+                        lead: 0.0,
+                        reserve: 0.0,
+                        length: 0.0,
+                        min: 0.0,
+                        max: 0.0,
+                        bounds: (f32::NEG_INFINITY, f32::INFINITY),
+                        over: 0.0,
+                        reach: 0.0,
+                    },
+                    0.0,
+                    true,
+                );
+            };
+            let (grid_line, page_extent) = if axis == 0 {
+                (line.0, page.0)
+            } else {
+                (line.1, page.1)
+            };
+            let length = if far {
+                grid_line
+            } else {
+                page_extent - grid_line
+            } as f32;
+            let anchor = match (axis, far) {
+                (0, true) => display.min.x,
+                (0, false) => display.max.x,
+                (_, true) => display.min.y + band * scale,
+                (_, false) => display.max.y,
+            };
+            let (shorter, longer) = reach(axis, index, far);
+            let bounds = if axis == 0 {
+                (contain.min.x, contain.max.x)
+            } else {
+                (contain.min.y, contain.max.y)
+            };
+            (
+                AxisFollow {
+                    anchor,
+                    sign: if far { 1.0 } else { -1.0 },
+                    lead: if axis == 1 && !far { band } else { 0.0 },
+                    reserve,
+                    length,
+                    min: length + shorter,
+                    max: length + longer,
+                    bounds,
+                    over: 0.0,
+                    reach: 0.0,
+                },
+                length + longer,
+                far,
+            )
+        };
+        let (x, max_x, far_x) = build(0);
+        let (y, max_y, far_y) = build(1);
+        Some(HandleFollow {
+            axes: [x, y],
+            dragged: [dragged[0].is_some(), dragged[1].is_some()],
+            scale,
+            start: [x.length, y.length],
+            max: [max_x, max_y],
+            far: (far_x, far_y),
+            band,
+            last_abs: press,
+            eased: (f64::from(x.length), f64::from(y.length)),
+            settled: None,
+        })
     }
 
     /// The preview of a drag on a free figure.

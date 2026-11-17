@@ -1,25 +1,26 @@
-//! How a page-corner drag follows the pointer (#512).
+//! How a drag of a handle that may grow the page follows the pointer (#512).
 //!
-//! The corner of the page stays under the cursor for the whole drag, outward
-//! and inward, and the opposite corner does not move on the screen. When the
-//! corner reaches the edge of the drawing area, pushing further still grows the
+//! The handle (the outer edge of a regular grid, or an internal line pulled
+//! with Alt) stays under the cursor for the whole drag, outward and inward, and
+//! the opposite page edge (the anchor) does not move on the screen. When the
+//! handle reaches the edge of the drawing area, pushing further still grows the
 //! page 1:1 with the outward movement of the pointer, and the display zooms out
 //! (one uniform scale, never zooming back in during the drag) so the whole page
-//! stays visible. Coming back inward, the page shrinks at once and the corner
-//! follows the cursor: the page length is clamped, so there is no dead zone. A
-//! pointer held still grows nothing: only movement counts, never time.
+//! stays visible. While the pointer is outside the area, moving back shrinks
+//! nothing: the handle waits at the edge, and growth resumes only past the
+//! farthest point the pointer had reached. Once the pointer is back inside, the
+//! handle follows it again at the current scale. A pointer held still grows
+//! nothing: only movement counts, never time.
 //!
 //! Why this and nothing else: the only input is the **absolute** pointer
 //! position, so the drag behaves the same on every OS and in a virtual machine
 //! (a lock or a warp of the cursor is not portable, and a speed set by the push
-//! was rejected: in a diagonal drag one axis races ahead of the other). The
-//! growth stops when the cursor reaches the edge of the screen; growing past it
-//! is #560.
+//! was rejected: in a diagonal drag one axis races ahead of the other).
 //!
-//! Pure functions only: [`follow_step`] turns the movement of the pointer into a
-//! page length and a display scale. The gesture code in `layout_mode.rs` feeds
-//! them and hands the lengths to the geometry (`page_corner_slack`,
-//! `moved_page_corner`).
+//! Pure functions only: [`follow_step`] turns the movement of the pointer into
+//! a handle distance and a display scale. The gesture code in `layout_mode.rs`
+//! feeds them and hands the lengths to the geometry (`resized_edge`,
+//! `resized_line_alone`).
 
 use egui::Vec2;
 
@@ -53,39 +54,50 @@ fn finite(v: Vec2) -> Vec2 {
     )
 }
 
-/// One axis of the drag: the frozen parameters and the page length so far.
+/// One axis of the drag: the frozen parameters and the handle distance so far.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct AxisFollow {
-    /// Screen coordinate of the opposite page corner (the anchor): it never
+    /// Screen coordinate of the opposite page edge (the anchor): it never
     /// moves during the drag.
     pub anchor: f32,
-    /// `1.0` when the dragged corner is on the far side of the anchor (right,
+    /// `1.0` when the dragged handle is on the far side of the anchor (right,
     /// bottom), `-1.0` on the near side.
     pub sign: f32,
-    /// Figure points between the dragged page corner and the edge of the
-    /// figure on its side: the title band above a top corner, else 0.
+    /// Figure points between the handle and the outer edge of the figure on
+    /// its side, which must stay in the area: the title band above a top edge,
+    /// else 0. The empty space of the grid is left out on purpose: it never
+    /// grows during the drag.
     pub lead: f32,
-    /// Figure points past the page corner that the snap may add (half a grid
+    /// Figure points past the handle that the snap may add (half a grid
     /// step): the zoom-out keeps room for them, so the snapped page never
     /// leaves the area while the scale only follows the unsnapped length.
     pub reserve: f32,
-    /// The page length now, in points (before the snap of the geometry).
+    /// The distance from the anchor to the handle now, in points (before the
+    /// snap of the geometry).
     pub length: f32,
-    /// The shortest and the longest page length the geometry accepts.
+    /// The shortest and the longest distance the geometry accepts.
     pub min: f32,
     pub max: f32,
     /// The screen range the figure must stay in: the drawing area.
     pub bounds: (f32, f32),
+    /// Screen points by which the pointer is beyond the edge of the area in
+    /// the handle's direction, `0` while it is inside (or while the handle is
+    /// not pinned at the edge).
+    pub over: f32,
+    /// The farthest `over` reached since the pointer left the area: moving
+    /// back toward it grows nothing.
+    pub reach: f32,
 }
 
 impl AxisFollow {
-    /// Screen position of the dragged page corner at `scale`.
-    pub(crate) fn corner(&self, scale: f32) -> f32 {
+    /// Screen position of the dragged handle at `scale`.
+    pub(crate) fn position(&self, scale: f32) -> f32 {
         self.anchor + self.sign * self.length * scale
     }
 
-    /// The scale at which a page of `length` has its outer edge on the edge of
-    /// the drawing area, if the edge is on the corner's side of the anchor.
+    /// The scale at which a handle at `length` has the outer edge of the figure
+    /// on the edge of the drawing area, if the edge is on the handle's side of
+    /// the anchor.
     pub(crate) fn scale_to_fit(&self, length: f32) -> Option<f32> {
         let edge = if self.sign > 0.0 {
             self.bounds.1
@@ -98,47 +110,79 @@ impl AxisFollow {
     }
 }
 
-/// One frame: the corner is carried by `motion` (screen points) from where it
-/// is drawn. Returns the new page lengths and the new display scale.
+/// One frame: the handle is carried by `motion` (screen points) from where it
+/// is drawn. Returns the axes with their new distance and pointer state, and
+/// the new display scale.
 ///
-/// Per axis, the wanted position of the figure's outer edge is where it is
-/// drawn plus the motion. Inside the drawing area the length follows it. Past
-/// the edge, the edge stays where it is, the overflow becomes length (at the
-/// old scale) and the scale that puts the grown page exactly in the area is
-/// wanted. The result scale is the smallest of the old one and the wanted ones:
-/// the display zooms out, never back in. The length is clamped to what the
-/// geometry accepts, so a page held at its minimum (the graphs) or maximum does
-/// not hide motion that the next frame would have to repay.
-pub(crate) fn follow_step(axes: [AxisFollow; 2], scale: f32, motion: Vec2) -> ([f32; 2], f32) {
+/// Per axis, inside the drawing area the distance follows the pointer at the
+/// scale now shown. Past the edge, the handle stays at the edge, the overflow
+/// becomes length (at the old scale) and the scale that puts the grown page
+/// exactly in the area is wanted; moving back while the pointer is outside
+/// grows nothing, and only a pointer past its farthest reach grows again. The
+/// result scale is the smallest of the old one and the wanted ones: the display
+/// zooms out, never back in. The length is clamped to what the geometry
+/// accepts, so a handle held at its minimum or maximum does not hide motion
+/// that the next frame would have to repay.
+pub(crate) fn follow_step(
+    axes: [AxisFollow; 2],
+    scale: f32,
+    motion: Vec2,
+) -> ([AxisFollow; 2], f32) {
     let motion = finite(motion);
     let moved = [motion.x, motion.y];
-    let mut lengths = [axes[0].length, axes[1].length];
+    let mut out = axes;
     let mut next = scale;
     if !(scale.is_finite() && scale > 0.0) {
-        return (lengths, scale);
+        return (out, scale);
     }
     for (i, axis) in axes.iter().enumerate() {
         let lead = axis.lead + axis.reserve;
-        let outer = axis.corner(scale) + axis.sign * lead * scale;
-        let wanted = outer + moved[i];
         let (low, high) = axis.bounds;
         let edge = if axis.sign > 0.0 { high } else { low };
-        let beyond = axis.sign * (wanted - edge);
         let span = axis.sign * (edge - axis.anchor);
-        let extent = if beyond > 0.0 && span > 0.0 {
-            span / scale + beyond / scale
+        let clamp = |extent: f32| (extent - lead).clamp(axis.min.min(axis.max), axis.max);
+        let mut fit_to = None;
+        if axis.over > 0.0 {
+            // The pointer is outside: the handle waits at the edge.
+            let over = axis.over + axis.sign * moved[i];
+            if over <= 0.0 {
+                // Back inside: the handle follows the pointer again.
+                let outer = edge + axis.sign * over;
+                out[i].length = clamp(axis.sign * (outer - axis.anchor) / scale);
+                out[i].over = 0.0;
+                out[i].reach = 0.0;
+            } else {
+                let grow = (over - axis.reach).max(0.0);
+                let length = (axis.length + grow / scale).clamp(axis.min.min(axis.max), axis.max);
+                out[i].length = length;
+                out[i].over = over;
+                out[i].reach = axis.reach.max(over);
+                fit_to = Some(length);
+            }
         } else {
-            axis.sign * (wanted - axis.anchor) / scale
-        };
-        let length = (extent - lead).clamp(axis.min.min(axis.max), axis.max);
-        lengths[i] = length;
-        if beyond > 0.0 {
+            let outer = axis.position(scale) + axis.sign * lead * scale;
+            let wanted = outer + moved[i];
+            let beyond = axis.sign * (wanted - edge);
+            let extent = if beyond > 0.0 && span > 0.0 {
+                span / scale + beyond / scale
+            } else {
+                axis.sign * (wanted - axis.anchor) / scale
+            };
+            let length = clamp(extent);
+            out[i].length = length;
+            if beyond > 0.0 {
+                out[i].over = beyond;
+                out[i].reach = beyond;
+                fit_to = Some(length);
+            }
+        }
+        if let Some(length) = fit_to {
             if let Some(fit) = (AxisFollow { length, ..*axis }).scale_to_fit(length) {
                 next = next.min(fit);
             }
         }
     }
-    (lengths, next)
+    (out, next)
 }
 
 #[cfg(test)]
@@ -157,6 +201,8 @@ mod tests {
             min: 50.0,
             max: 20000.0,
             bounds: (0.0, 500.0),
+            over: 0.0,
+            reach: 0.0,
         }
     }
 
@@ -171,11 +217,18 @@ mod tests {
             min: 50.0,
             max: 20000.0,
             bounds: (0.0, 800.0),
+            over: 0.0,
+            reach: 0.0,
         }
     }
 
     fn step(x: AxisFollow, y: AxisFollow, scale: f32, dx: f32, dy: f32) -> ([f32; 2], f32) {
-        follow_step([x, y], scale, Vec2::new(dx, dy))
+        let (axes, scale) = follow_step([x, y], scale, Vec2::new(dx, dy));
+        ([axes[0].length, axes[1].length], scale)
+    }
+
+    fn step_axes(axes: [AxisFollow; 2], scale: f32, dx: f32, dy: f32) -> ([AxisFollow; 2], f32) {
+        follow_step(axes, scale, Vec2::new(dx, dy))
     }
 
     /// Inside the area the corner follows the pointer at the scale now shown.
@@ -205,41 +258,47 @@ mod tests {
             length: lengths[0],
             ..x
         }
-        .corner(scale);
+        .position(scale);
         assert!((corner_x - 500.0).abs() < 1e-3, "the corner is at the edge");
         let corner_y = AxisFollow {
             length: lengths[1],
             ..y
         }
-        .corner(scale);
-        assert!(corner_y < y.corner(1.0), "y moved toward its anchor");
+        .position(scale);
+        assert!(corner_y < y.position(1.0), "y moved toward its anchor");
         assert!(corner_y > y.anchor);
     }
 
-    /// Right after an overflow, going back inward shrinks the page at once.
-    /// Witness: an accumulator that keeps the overflow (not clamped to the
-    /// edge) needs the whole 250 of motion before the length moves.
+    /// While the pointer is outside the area, moving back shrinks nothing;
+    /// past the farthest point reached it grows again; back inside, the handle
+    /// follows the pointer at the scale then shown. Witness: the old rule (the
+    /// length follows the pointer at once) shrinks it at the first step back.
     #[test]
-    fn coming_back_inward_has_no_dead_zone() {
-        let x = right();
-        let (lengths, scale) = step(x, down(), 1.0, 450.0, 0.0);
-        let at_edge = AxisFollow {
-            length: lengths[0],
-            ..x
-        };
-        let (back, scale_back) = follow_step([at_edge, down()], scale, Vec2::new(-10.0, 0.0));
-        assert!(back[0] < lengths[0], "{} < {}", back[0], lengths[0]);
-        assert!((back[0] - (lengths[0] - 10.0 / scale)).abs() < 1e-3);
+    fn outside_the_area_moving_back_shrinks_nothing_and_inside_it_follows_again() {
+        let (axes, scale) = step_axes([right(), down()], 1.0, 450.0, 0.0);
+        let grown = axes[0].length;
+        assert_eq!(grown, 650.0);
+        // 100 back, still 150 beyond the edge: nothing changes.
+        let (back, scale_back) = step_axes(axes, scale, -100.0, 0.0);
+        assert_eq!(back[0].length, grown);
         assert_eq!(scale_back, scale, "the display does not zoom back in");
-        let corner = AxisFollow {
-            length: back[0],
-            ..x
-        }
-        .corner(scale_back);
+        // Out again, but not past the farthest point: still nothing.
+        let (again, scale_again) = step_axes(back, scale_back, 60.0, 0.0);
+        assert_eq!(again[0].length, grown);
+        assert_eq!(scale_again, scale);
+        // Past it: grows by the excess only, at the scale shown.
+        let (past, scale_past) = step_axes(again, scale_again, 90.0, 0.0);
+        assert!((past[0].length - (grown + 50.0 / scale)).abs() < 1e-3);
+        assert!(scale_past < scale_again);
+        // Back inside: 300 beyond, then 350 back = 50 inside the edge.
+        let (inside, scale_inside) = step_axes(past, scale_past, -350.0, 0.0);
+        assert_eq!(inside[0].over, 0.0);
+        let corner = inside[0].position(scale_inside);
         assert!(
-            (corner - 490.0).abs() < 1e-3,
-            "the corner follows: {corner}"
+            (corner - 450.0).abs() < 1e-2,
+            "the handle follows: {corner}"
         );
+        assert_eq!(scale_inside, scale_past);
     }
 
     /// Below the graphs' minimum the length stops, and coming back outward
@@ -255,7 +314,7 @@ mod tests {
             ..x
         };
         let (again, _) = follow_step([stopped, down()], 1.0, Vec2::new(10.0, 0.0));
-        assert_eq!(again[0], 60.0);
+        assert_eq!(again[0].length, 60.0);
     }
 
     /// A pointer held still past the edge grows nothing: the step is the
@@ -263,14 +322,10 @@ mod tests {
     /// changes the length.
     #[test]
     fn a_still_pointer_grows_nothing() {
-        let x = right();
-        let (lengths, scale) = step(x, down(), 1.0, 450.0, 0.0);
-        let at_edge = AxisFollow {
-            length: lengths[0],
-            ..x
-        };
-        let (again, again_scale) = follow_step([at_edge, down()], scale, Vec2::ZERO);
-        assert!((again[0] - lengths[0]).abs() < 1e-3 && (again[1] - lengths[1]).abs() < 1e-3);
+        let (axes, scale) = step_axes([right(), down()], 1.0, 450.0, 0.0);
+        let (again, again_scale) = step_axes(axes, scale, 0.0, 0.0);
+        assert!((again[0].length - axes[0].length).abs() < 1e-3);
+        assert!((again[1].length - axes[1].length).abs() < 1e-3);
         assert!((again_scale - scale).abs() < 1e-6);
     }
 
@@ -282,11 +337,10 @@ mod tests {
             max: 700.0,
             ..right()
         };
-        let (lengths, scale) = step(x, down(), 1.0, 900.0, 0.0);
-        assert_eq!(lengths[0], 700.0);
-        let held = AxisFollow { length: 700.0, ..x };
-        let (again, again_scale) = follow_step([held, down()], scale, Vec2::new(50.0, 0.0));
-        assert_eq!(again[0], 700.0);
+        let (axes, scale) = step_axes([x, down()], 1.0, 900.0, 0.0);
+        assert_eq!(axes[0].length, 700.0);
+        let (again, again_scale) = step_axes(axes, scale, 50.0, 0.0);
+        assert_eq!(again[0].length, 700.0);
         assert_eq!(again_scale, scale, "the display does not move any more");
     }
 
@@ -310,7 +364,7 @@ mod tests {
     }
 
     /// A top corner (near side, title band above it): the band is part of the
-    /// figure that must stay in the area, the page corner sits below its edge.
+    /// figure that must stay in the area, the handle sits below its edge.
     #[test]
     fn a_near_corner_keeps_the_title_band_in_the_area() {
         let up = AxisFollow {
@@ -322,15 +376,13 @@ mod tests {
             min: 50.0,
             max: 20000.0,
             bounds: (100.0, 800.0),
+            over: 0.0,
+            reach: 0.0,
         };
         // Outer edge at 400 - 230 = 170; 100 of motion up goes 30 past 100.
-        let (lengths, scale) = follow_step([right(), up], 1.0, Vec2::new(0.0, -100.0));
-        assert_eq!(lengths[1], 200.0 + 70.0 + 30.0);
-        let corner = AxisFollow {
-            length: lengths[1],
-            ..up
-        }
-        .corner(scale);
+        let (axes, scale) = step_axes([right(), up], 1.0, 0.0, -100.0);
+        assert_eq!(axes[1].length, 200.0 + 70.0 + 30.0);
+        let corner = axes[1].position(scale);
         let outer = corner - up.lead * scale;
         assert!((outer - 100.0).abs() < 1e-3, "the band edge is at the area");
     }
@@ -374,7 +426,7 @@ mod tests {
             length: lengths[0],
             ..x
         }
-        .corner(scale);
+        .position(scale);
         assert!((corner - (500.0 - 25.0 * scale)).abs() < 1e-3, "{corner}");
     }
 }

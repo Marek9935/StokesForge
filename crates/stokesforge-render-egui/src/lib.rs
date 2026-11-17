@@ -78,10 +78,10 @@
 pub mod backend;
 mod bar_resize;
 pub mod cache;
-mod corner_follow;
 pub mod drawings;
 pub mod edge_band;
 pub mod feathering;
+mod handle_follow;
 mod layout_mode;
 pub mod scaled;
 mod shape_tools;
@@ -186,8 +186,10 @@ pub enum GraphEvent {
     },
     /// A boundary or a corner of a regular grid was pulled in the Page Layout
     /// Mode, then released (#426): the new frame widths and heights of the whole
-    /// grid, in points, to commit as **one** change of the model. The sums are
-    /// those the gesture began with (the figure keeps its size). The preview
+    /// grid, in points, to commit as **one** change of the model. The sums
+    /// are those the gesture began with, except for an outer edge or an Alt
+    /// line pulled outward past the empty space: the page grows by the rest
+    /// (#512). The preview
     /// stays displayed until the model changes ([`GraphView::hold_preview`]).
     GridFramesEdited {
         /// Frame width of every column.
@@ -201,10 +203,6 @@ pub enum GraphEvent {
         /// (#505); `None` for every other gesture (the slack stays as it is).
         slack: Option<stokesforge_plot::GridSlack>,
     },
-    /// An outer edge (or an Alt-dragged line) is pulled outward and the page
-    /// has no room left: signalled **once per drag**, while it bumps (#505,
-    /// F3), so the application can say how to enlarge the page.
-    PageEdgeReached,
     /// A graph of a regular grid was dragged to another place, or moved by an
     /// arrow key, in the Page Layout Mode (#491): the base layer of the graph
     /// and where it goes, to commit as **one** change of the model. Nothing is

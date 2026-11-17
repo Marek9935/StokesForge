@@ -1,7 +1,7 @@
 //! Pure arithmetic of a drag pushed past the edge of an area (#535, #512): the
 //! signed distance of the pointer past the edge (the **push**), the speed it
 //! sets and the step of one frame. No window, no egui, no model. The grid's
-//! scroll and the page-corner growth both use it; each keeps its own gain, cap
+//! scroll and the growth of a handle both use it; each keeps its own gain, cap
 //! and frame-time bound in an [`EdgePush`].
 
 /// Gain, cap and frame-time bound of a push-to-speed law.

@@ -16832,6 +16832,60 @@ fn the_size_lock_is_session_state() {
     assert_eq!(state.size_lock(graph), None);
 }
 
+/// #512: an outer edge pulled past the empty space grows the page with the
+/// padlock of Figure size closed: the gesture ignores the padlock (the frame
+/// grows by the whole pull, the other axis does not follow), the padlock stays
+/// closed and takes the new proportions from the new image, and the undo step
+/// is the gesture's own, Resize Plot Area. Witness: `adopt_size_lock` called
+/// for this edit (the lock would keep the old ratio).
+#[test]
+fn an_outer_edge_growing_the_page_with_the_padlock_closed_makes_the_lock_adopt_the_new_ratio() {
+    use stokesforge_commands::PlotEditKind as K;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    let before = graph_spec(&state, graph);
+    let image = |state: &AppState| {
+        stokesforge_app_state::frame_sizes::figure_extent(state.tree(), &graph_spec(state, graph))
+            .expect("extent")
+    };
+    let start = image(&state);
+    let lock = stokesforge_app_state::frame_sizes::SizeLock::close(start).expect("lock");
+    state.dispatch(Action::SetSizeLock {
+        graph,
+        lock: Some(lock),
+    });
+    let mut widths = before.frame_widths.clone();
+    widths[0] += 120.0;
+    state.dispatch(Action::SetGridFrames {
+        graph,
+        widths: widths.clone(),
+        heights: before.frame_heights.clone(),
+        figure: false,
+        slack: Some(stokesforge_plot::GridSlack::default()),
+    });
+    let after = graph_spec(&state, graph);
+    assert_eq!(after.frame_widths, widths, "the padlock is ignored");
+    assert_eq!(after.frame_heights, before.frame_heights);
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(K::ResizeCell))
+    );
+    let grown = image(&state);
+    assert!(
+        (grown.0 - start.0 - 120.0).abs() < 1.0,
+        "{start:?} {grown:?}"
+    );
+    let mut followed = state.size_lock(graph).expect("still closed");
+    followed.follow(grown);
+    assert!(
+        (followed.ratio - grown.1 / grown.0).abs() < 1e-12
+            && (followed.ratio - lock.ratio).abs() > 1e-3,
+        "the lock adopts the new proportions: {} vs {}",
+        followed.ratio,
+        lock.ratio
+    );
+}
+
 /// #394: deleting a cell that empties its column removes that column; the
 /// figure shrinks by the column's outer width, and undo brings both back in
 /// one step.
