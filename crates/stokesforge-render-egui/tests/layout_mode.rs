@@ -2780,6 +2780,133 @@ fn a_grid_page_corner_pushed_past_the_edge_zooms_out_and_keeps_growing() {
     assert!(slack.right > 300.0, "{}", slack.right);
 }
 
+/// #512: the pointer held far past the edge of the drawing area, on both axes,
+/// for a long time: the page stops at the longest size the geometry accepts and
+/// the display scale stops shrinking (the page shown does not shrink while it
+/// no longer grows). Returns the scales of the last frames and the final event.
+fn held_far_past_the_edge(
+    fixture: &Fixture,
+    from: Pos2,
+    contain: Rect,
+    frames: usize,
+) -> (Vec<f32>, Vec<GraphEvent>) {
+    let (context, mut view) = in_mode(fixture);
+    let none = egui::Modifiers::NONE;
+    let mut held = Held::begin_kicked(
+        &context,
+        &mut view,
+        fixture,
+        contain,
+        from,
+        egui::vec2(8.0, 8.0),
+        none,
+    );
+    held.dt = 0.05;
+    held.push(&mut view, egui::vec2(500.0, 500.0), none);
+    let mut scales = Vec::new();
+    for _ in 0..frames {
+        held.wait(&mut view, none);
+        scales.push(view.display_scale().expect("scale"));
+    }
+    let tail = scales.split_off(scales.len() - 6);
+    let mut signals = held.release(&mut view, none);
+    signals.retain(|signal| !matches!(signal, GraphEvent::PageEdgeReached));
+    (tail, signals)
+}
+
+/// #512, Regular Grid: held long past the edge the page stops at the largest
+/// the geometry gives (2000 points of empty space per axis, what
+/// `GridSlack::sanitized` keeps) and the display scale freezes. Witness: the
+/// longest page left at `MAX_FIGURE_EXTENT` (the scale goes on shrinking and the
+/// sixth scale differs from the first).
+#[test]
+fn a_grid_page_corner_held_past_the_edge_stops_at_the_geometry_maximum_and_the_display_freezes() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let (w, h) = (layout.size.0 as f32, layout.size.1 as f32);
+    let from = Pos2::new(w + 4.0, h + 4.0);
+    let contain = Rect::from_min_max(Pos2::ZERO, Pos2::new(w + 40.0, h + 40.0));
+    let (tail, signals) = held_far_past_the_edge(&fixture, from, contain, 120);
+    assert!(
+        tail.iter().all(|scale| *scale == tail[0]),
+        "the scale goes on shrinking: {tail:?}"
+    );
+    let [GraphEvent::GridFramesEdited {
+        slack: Some(slack), ..
+    }] = signals.as_slice()
+    else {
+        panic!("one figure event expected, got {signals:?}");
+    };
+    assert_eq!(slack.right, 2000.0, "{slack:?}");
+    assert_eq!(slack.bottom, 2000.0, "{slack:?}");
+}
+
+/// #512, Free: same, the page stops at `MAX_FIGURE_EXTENT` on both axes and the
+/// display scale freezes. Witness: a longest page beyond what `moved_page_corner`
+/// accepts (the scale keeps shrinking in the last frames).
+#[test]
+fn a_free_page_corner_held_past_the_edge_stops_at_the_geometry_maximum_and_the_display_freezes() {
+    let fixture = Fixture::free_two_layers();
+    let (_, view) = in_mode(&fixture);
+    let (from, contain) = free_corner_and_area(&view, 40.0);
+    let contain = Rect::from_min_max(contain.min, Pos2::new(contain.max.x, from.y + 40.0));
+    let (tail, signals) = held_far_past_the_edge(&fixture, from, contain, 260);
+    assert!(
+        tail.iter().all(|scale| *scale == tail[0]),
+        "the scale goes on shrinking: {tail:?}"
+    );
+    let (_, page) = edited(&signals);
+    let page = page.expect("a page");
+    assert_eq!(page.width, stokesforge_plot::MAX_FIGURE_EXTENT);
+    assert_eq!(page.height, stokesforge_plot::MAX_FIGURE_EXTENT);
+}
+
+/// #512, Regular Grid: pushed diagonally with the pointer far past the right
+/// edge (a big push) and just past the bottom one (a small push), both sides of
+/// the page grow in every frame, neither waiting for the other. Witness: the lengths read in
+/// one pushed axis only (the height stays still while the width grows).
+#[test]
+fn a_diagonal_push_grows_both_sides_of_a_grid_page_in_every_frame() {
+    let fixture = Fixture::grid(2, 2, false, false, false);
+    let (context, mut view) = in_mode(&fixture);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let (w, h) = (layout.size.0 as f32, layout.size.1 as f32);
+    let from = Pos2::new(w + 4.0, h + 4.0);
+    let contain = Rect::from_min_max(Pos2::ZERO, Pos2::new(w + 40.0, h + 40.0));
+    let none = egui::Modifiers::NONE;
+    let mut held = Held::begin_kicked(
+        &context,
+        &mut view,
+        &fixture,
+        contain,
+        from,
+        egui::vec2(8.0, 8.0),
+        none,
+    );
+    held.dt = 0.05;
+    // 300 points past the right edge, 15 past the bottom one.
+    held.push(&mut view, egui::vec2(300.0, 43.0), none);
+    let page = |view: &GraphView| {
+        let rect = view.display_rect().expect("drawn");
+        let scale = view.display_scale().expect("scale");
+        (rect.width() / scale, rect.height() / scale)
+    };
+    let mut before = page(&view);
+    let mut speeds = Vec::new();
+    for _ in 0..8 {
+        held.wait(&mut view, none);
+        let now = page(&view);
+        assert!(now.0 > before.0 + 1.0, "width: {before:?} -> {now:?}");
+        assert!(now.1 > before.1 + 1.0, "height: {before:?} -> {now:?}");
+        speeds.push(((now.0 - before.0) / 0.05, (now.1 - before.1) / 0.05));
+        before = now;
+    }
+    // Not an assertion on the ratio: the bottom corner is held at the edge by
+    // the zoom-out the width causes, so its length grows with the zoom too.
+    assert_eq!(speeds.len(), 8, "{speeds:?}");
+}
+
 /// #512: the raw motion of the mouse (`MouseMoved`) is not read at all by a
 /// page-corner drag: a huge one alone moves nothing, and with the frame that
 /// starts the drag it changes nothing either. Only the pointer position counts.

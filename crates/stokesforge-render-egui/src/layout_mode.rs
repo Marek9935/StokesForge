@@ -272,6 +272,10 @@ impl LayoutState {
     }
 }
 
+/// A pull far beyond any page, in points: what the geometry is asked at the
+/// press to learn the longest page it accepts (#512).
+const PROBE_PULL: f64 = 1.0e9;
+
 /// The state of a page-corner drag (#512): the corner stays under the cursor,
 /// the opposite corner (the anchor) does not move on the screen, and the
 /// display scale only shrinks, when the corner reaches the edge of the drawing
@@ -284,6 +288,11 @@ struct CornerFollow {
     scale: f32,
     /// The page lengths at the press, in points.
     start: [f32; 2],
+    /// The longest page the geometry accepts per axis, read from it at the
+    /// press (#512): the growth stops there and the display scale freezes.
+    max: [f32; 2],
+    /// The same with Ctrl (the page keeps its ratio), on a regular grid.
+    ratio_max: Option<[f32; 2]>,
     /// `(right, bottom)`: the corner is on the far side of the anchor.
     far: (bool, bool),
     /// Height of the title band above the page, in figure points.
@@ -1451,7 +1460,7 @@ impl GraphView {
         let display = self.display_rect?;
         let (_, layout) = self.figure_memo.as_ref()?;
         let band = layout.title_band as f32;
-        let (corner, length, min) = match kind {
+        let (corner, length, min, max, ratio_max) = match kind {
             DragKind::Figure {
                 corner,
                 image,
@@ -1465,6 +1474,23 @@ impl GraphView {
                         near_slack
                     }
                 };
+                // The longest page is what the geometry returns for a huge pull:
+                // asked of the same functions the drag uses, never re-derived.
+                let sign = |far: bool| if far { 1.0 } else { -1.0 };
+                let huge = (sign(corner.0) * PROBE_PULL, sign(corner.1) * PROBE_PULL);
+                let page_after = |out: GridSlack| {
+                    (
+                        image.0 + side(corner.0, out.right, out.left)
+                            - side(corner.0, slack.right, slack.left),
+                        image.1 + side(corner.1, out.bottom, out.top)
+                            - side(corner.1, slack.bottom, slack.top),
+                    )
+                };
+                let longest = page_after(page_corner_slack(*corner, *image, *slack, huge));
+                // With Ctrl the page keeps its ratio: both sides stop together.
+                let kept = page_after(page_corner_slack_keeping_ratio(
+                    *corner, *image, *slack, huge,
+                ));
                 (
                     *corner,
                     (image.0, image.1),
@@ -1472,6 +1498,8 @@ impl GraphView {
                         image.0 - side(corner.0, slack.right, slack.left),
                         image.1 - side(corner.1, slack.bottom, slack.top),
                     ),
+                    longest,
+                    Some(kept),
                 )
             }
             DragKind::Free {
@@ -1500,6 +1528,19 @@ impl GraphView {
                     };
                     stop.max(MIN_PAGE_EXTENT)
                 };
+                let sign = |far: bool| if far { 1.0 } else { -1.0 };
+                let free = Snap {
+                    grid: None,
+                    threshold: 0.0,
+                    enabled: false,
+                };
+                let longest = moved_page_corner(
+                    boxes,
+                    *page,
+                    (*right, *bottom),
+                    (sign(*right) * PROBE_PULL, sign(*bottom) * PROBE_PULL),
+                    free,
+                );
                 (
                     (*right, *bottom),
                     (page.width, page.height),
@@ -1507,6 +1548,8 @@ impl GraphView {
                         shortest(page.left, page.width, *right, bbox.0),
                         shortest(page.top, page.height, *bottom, bbox.1),
                     ),
+                    (longest.width, longest.height),
+                    None,
                 )
             }
             _ => return None,
@@ -1531,7 +1574,13 @@ impl GraphView {
                 .map_or((f32::NEG_INFINITY, f32::INFINITY), |_| (low, high))
         };
         let contain = self.layout.contain.unwrap_or(Rect::EVERYTHING);
-        let axis = |far: bool, anchor: f32, lead: f32, length: f64, min: f64, range: (f32, f32)| {
+        let axis = |far: bool,
+                    anchor: f32,
+                    lead: f32,
+                    length: f64,
+                    min: f64,
+                    max: f64,
+                    range: (f32, f32)| {
             AxisFollow {
                 anchor,
                 sign: if far { 1.0 } else { -1.0 },
@@ -1539,7 +1588,7 @@ impl GraphView {
                 reserve,
                 length: length as f32,
                 min: min as f32,
-                max: stokesforge_plot::MAX_FIGURE_EXTENT as f32,
+                max: max as f32,
                 bounds: range,
             }
         };
@@ -1554,6 +1603,7 @@ impl GraphView {
                 0.0,
                 length.0,
                 min.0,
+                max.0,
                 bounds(contain.min.x, contain.max.x),
             ),
             axis(
@@ -1566,6 +1616,7 @@ impl GraphView {
                 if corner.1 { 0.0 } else { band },
                 length.1,
                 min.1,
+                max.1,
                 bounds(contain.min.y, contain.max.y),
             ),
         ];
@@ -1578,6 +1629,8 @@ impl GraphView {
             axes,
             scale,
             start: [length.0 as f32, length.1 as f32],
+            max: [max.0 as f32, max.1 as f32],
+            ratio_max: ratio_max.map(|kept| [kept.0 as f32, kept.1 as f32]),
             far: corner,
             band,
             grab: Vec2::new(press.x - outer[0], press.y - outer[1]),
@@ -1614,6 +1667,12 @@ impl GraphView {
             _ => None,
         };
         let follow = drag.follow.as_mut()?;
+        let longest = match (ratio.is_some(), follow.ratio_max) {
+            (true, Some(kept)) => kept,
+            _ => follow.max,
+        };
+        follow.axes[0].max = longest[0];
+        follow.axes[1].max = longest[1];
         if !(live && pos.x.is_finite() && pos.y.is_finite()) {
             return Some(follow.delta());
         }

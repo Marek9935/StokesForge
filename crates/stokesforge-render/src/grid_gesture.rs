@@ -574,12 +574,16 @@ pub fn scaled_axis(sizes: &[f64], bands: f64, delta: f64, far: bool) -> Vec<f64>
 /// The empty space of one side after the page edge on that side is pulled
 /// `outward` points (negative: inward): rounded to whole points, never below
 /// zero (the edge stops at the graphs) and never growing the `extent` of the
-/// page past [`MAX_FIGURE_EXTENT`]. Untouched if `outward` is not finite.
-fn side_moved(side: f64, extent: f64, outward: f64) -> f64 {
+/// page past [`MAX_FIGURE_EXTENT`], nor the two sides of an axis (`other` is
+/// the empty space on the opposite side) past [`MAX_FRAME_SIZE`], the limit
+/// `GridSlack::sanitized` applies later. Untouched if `outward` is not finite.
+fn side_moved(side: f64, other: f64, extent: f64, outward: f64) -> f64 {
     if !outward.is_finite() {
         return side;
     }
-    let high = (MAX_FIGURE_EXTENT - extent).max(0.0);
+    let high = (MAX_FIGURE_EXTENT - extent)
+        .min(MAX_FRAME_SIZE - side - other.max(0.0))
+        .max(0.0);
     let moved = outward.round().clamp(-side.max(0.0), high);
     (side + moved).max(0.0)
 }
@@ -600,14 +604,14 @@ pub fn page_corner_slack(
 ) -> GridSlack {
     let mut out = slack;
     if corner.0 {
-        out.right = side_moved(slack.right, image.0, delta.0);
+        out.right = side_moved(slack.right, slack.left, image.0, delta.0);
     } else {
-        out.left = side_moved(slack.left, image.0, -delta.0);
+        out.left = side_moved(slack.left, slack.right, image.0, -delta.0);
     }
     if corner.1 {
-        out.bottom = side_moved(slack.bottom, image.1, delta.1);
+        out.bottom = side_moved(slack.bottom, slack.top, image.1, delta.1);
     } else {
-        out.top = side_moved(slack.top, image.1, -delta.1);
+        out.top = side_moved(slack.top, slack.bottom, image.1, -delta.1);
     }
     out
 }
@@ -1455,8 +1459,11 @@ mod tests {
             slack(0.0, 0.0, 5.0, 5.0)
         );
         let huge = page_corner_slack((true, true), image, start, (1e9, 1e9));
-        assert_eq!(huge.right, 30.0 + (MAX_FIGURE_EXTENT - 500.0));
-        assert_eq!(huge.bottom, 10.0 + (MAX_FIGURE_EXTENT - 450.0));
+        // The two sides of an axis share MAX_FRAME_SIZE (what `sanitized`
+        // keeps): the page cannot grow past what the geometry holds (#512).
+        assert_eq!(huge.right, MAX_FRAME_SIZE);
+        assert_eq!(huge.bottom, MAX_FRAME_SIZE);
+        assert_eq!(huge.sanitized(), huge, "nothing is cut afterwards");
     }
 
     /// K1: Fit Layout to Page scales each axis by its own factor, the empty
