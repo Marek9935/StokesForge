@@ -1,8 +1,10 @@
 //! How a drag of a handle that may grow the page follows the pointer (#512).
 //!
-//! The handle (the outer edge of a regular grid, or an internal line pulled
-//! with Alt) stays under the cursor for the whole drag, outward and inward, and
-//! the opposite page edge (the anchor) does not move on the screen. When the
+//! The handle (the outer edge of a regular grid, an internal line pulled with
+//! Alt, or the leading edge of a graph box of a free figure moved or resized)
+//! stays under the cursor for the whole drag, outward and inward (a box grabbed
+//! by its middle keeps its grab offset: "at the edge" and "outside" are the
+//! edge of the box, which is the handle), and the opposite page edge (the anchor) does not move on the screen. When the
 //! handle reaches the edge of the drawing area, pushing further still grows the
 //! page 1:1 with the outward movement of the pointer, and the display zooms out
 //! (one uniform scale, never zooming back in during the drag) so the whole page

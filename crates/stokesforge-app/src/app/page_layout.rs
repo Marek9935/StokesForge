@@ -865,10 +865,10 @@ fn figure_size_controls(
             }
         }
         let new_page = wanted.sanitized().unwrap_or(image);
-        model.push(Action::SetFreeLayout {
+        model.push(Action::SetFreeFigure {
             graph,
             frames: scaled_to_page(&view.layout_boxes(), image, new_page),
-            page: Some(new_page),
+            page: new_page,
         });
     } else {
         let (axis, points) = if width_changed {

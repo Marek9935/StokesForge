@@ -1051,11 +1051,12 @@ pub enum Action {
     /// Sets several frames of a free graph and its page in one go: what a
     /// gesture of the Page Layout Mode commits (#426). Each `(base layer,
     /// frame)` is stored as given (brought into bounds, stacking key kept);
-    /// `page`, when `Some`, becomes the page of the graph. One undo step:
-    /// [`PlotEditKind::ResizeFigure`] when the page size changes (against the
-    /// stored page, or the figure as drawn when there is none),
+    /// `page`, when `Some`, becomes the page of the graph (it grows when a
+    /// gesture pushes a graph past it, #512). One undo step with the label of
+    /// the gesture, **even when the page grows**:
     /// [`PlotEditKind::ResizeLayer`] when a frame size changes, else
-    /// [`PlotEditKind::MoveLayer`]. Nothing sent on the grid, for a missing
+    /// [`PlotEditKind::MoveLayer`] (the typed Figure size has its own action,
+    /// [`Action::SetFreeFigure`]). Nothing sent on the grid, for a missing
     /// layer or when nothing changes.
     SetFreeLayout {
         /// Target graph.
@@ -1064,6 +1065,19 @@ pub enum Action {
         frames: Vec<(usize, FreeFrame)>,
         /// The new page, if the gesture holds one.
         page: Option<FreePage>,
+    },
+    /// The typed Figure size of a free graph (#512): the frames scaled with the
+    /// new page, one undo step labelled [`PlotEditKind::ResizeFigure`] when the
+    /// page size changes. [`Action::SetFreeLayout`] never takes that label (a
+    /// gesture keeps its own, even when it grows the page). Nothing sent on
+    /// the grid, for a missing layer or when nothing changes.
+    SetFreeFigure {
+        /// Target graph.
+        graph: NodeId,
+        /// New frame of each scaled layer, by base layer.
+        frames: Vec<(usize, FreeFrame)>,
+        /// The new page.
+        page: FreePage,
     },
     /// Puts the cell of layer `panel` in front of the others in free placement
     /// (#398); an overlay layer acts on its base. Layer numbers are kept. One
@@ -6458,7 +6472,12 @@ impl AppState {
                 graph,
                 frames,
                 page,
-            } => self.set_free_layout(graph, &frames, page),
+            } => self.set_free_layout(graph, &frames, page, false),
+            Action::SetFreeFigure {
+                graph,
+                frames,
+                page,
+            } => self.set_free_layout(graph, &frames, Some(page), true),
             Action::SetFigureTotal {
                 graph,
                 axis,
@@ -12969,13 +12988,16 @@ impl AppState {
         });
     }
 
-    /// [`Action::SetFreeLayout`]: every frame and the page applied to one spec
-    /// and committed as one step.
+    /// [`Action::SetFreeLayout`] and [`Action::SetFreeFigure`]: every frame and
+    /// the page applied to one spec and committed as one step. `figure`: the
+    /// step is a resize of the figure (typed size), so a page whose size
+    /// changes names it; otherwise the label is the gesture's own (#512).
     fn set_free_layout(
         &mut self,
         graph: NodeId,
         frames: &[(usize, FreeFrame)],
         page: Option<FreePage>,
+        figure: bool,
     ) {
         use stokesforge_core::compose::{set_free_frame, FreeField};
         let Some(before) = self.plot_spec(graph) else {
@@ -13024,7 +13046,7 @@ impl AppState {
         if page.is_some() {
             self.adopt_size_lock(graph);
         }
-        let kind = if page_resized {
+        let kind = if figure && page_resized {
             PlotEditKind::ResizeFigure
         } else if frame_resized {
             PlotEditKind::ResizeLayer

@@ -7,8 +7,12 @@
 //! * **Free**: every layer is a **graph box** (its plot area and its axis and
 //!   title bands) with its size written on it; the selected boxes show eight
 //!   handles, the box under the pointer shows them faintly. The figure is a
-//!   **page**, which no handle changes. All the geometry is in
-//!   `stokesforge_render::free_gesture` (stored page coordinates).
+//!   **page**; no handle of it exists, but a box moved, nudged or resized past
+//!   it grows it (#512): the gesture returns the grown page and the release
+//!   sends it with the frame (the follow at the edge of the drawing area is
+//!   the one of the grid handles, the leading edge of the box being the
+//!   handle). All the geometry is in `stokesforge_render::free_gesture`
+//!   (stored page coordinates).
 //! * **Regular Grid**: the grid is not converted and no single graph is
 //!   resized; the internal boundaries between columns and rows, and the graph
 //!   corners lying on one of them, are the handles (they keep priority). The
@@ -29,7 +33,8 @@
 //! resized the page were removed on purpose (#512, the user's decision, never
 //! to be reimplemented). The page grows through the graphs instead: an outer
 //! edge pulled outward, or an internal line pulled outward with Alt, eats the
-//! empty space of its side and then grows the page. Such a drag follows the
+//! empty space of its side and then grows the page; in Free a graph box moved
+//! or resized past the page grows it. Such a drag follows the
 //! pointer by the rules of `handle_follow` (the handle stays under the cursor,
 //! the display zooms out at the edge of the drawing area, the page grows 1:1
 //! with the outward movement of the absolute pointer, no cursor lock or warp);
@@ -52,9 +57,10 @@ use stokesforge_plot::{FreeFrame, FreePage, GridSlack, LayerPlacement, LengthUni
 use stokesforge_render::pipeline::FigureLayout;
 use stokesforge_render::{
     boundary_group, figure_to_stored, graph_boxes, grid_cell_at, grid_corners, grid_handle_at,
-    layout_handle_at, moved_boundary, moved_box, nudged_box, resized_edge, resized_frames,
-    resized_line_alone, stored_to_figure, BoundaryGroup, EdgeSide, GraphBox, GridCorner,
-    GridHandle, Guide, LayoutHandle, LayoutReach, Snap, EDGE_REACH_PX, MAGNET_THRESHOLD_POINTS,
+    layout_handle_at, moved_boundary, moved_box, nudged_box, pages_united, resized_edge,
+    resized_frames, resized_line_alone, stored_to_figure, BoundaryGroup, EdgeSide, GraphBox,
+    GridCorner, GridHandle, Guide, LayoutHandle, LayoutReach, Snap, EDGE_REACH_PX,
+    MAGNET_THRESHOLD_POINTS,
 };
 
 use crate::handle_follow::{follow_step, glide_step, AxisFollow};
@@ -256,10 +262,13 @@ struct HandleFollow {
     /// The longest distance the geometry accepts per axis, read from it at the
     /// press (#512): the growth stops there and the display scale freezes.
     max: [f32; 2],
-    /// `(right, bottom)`: the handle is on the far side of the anchor.
-    far: (bool, bool),
-    /// Height of the title band above the page, in figure points.
-    band: f32,
+    /// Figure points between the image edge and the page edge, per axis: on
+    /// the low side (left, top: the title band is part of it) and on the high
+    /// side (right, bottom). Zero but the title band for a grid.
+    lo: [f32; 2],
+    hi: [f32; 2],
+    /// Free placement only: what a box gesture needs to follow the pointer.
+    free: Option<FreeAxes>,
     /// The absolute pointer of the previous frame of this drag.
     last_abs: Pos2,
     /// The distances shown now, gliding toward the snapped ones, in points.
@@ -268,7 +277,64 @@ struct HandleFollow {
     settled: Option<FramePreview>,
 }
 
+/// What a drag of a graph box of a free figure keeps from the press (#512),
+/// to follow the pointer on either side of the page. Indexes: the axis (across,
+/// down), then `0` for the far side (the leading edge is the right or bottom
+/// one, the anchor the left or top page edge), `1` for the near side.
+#[derive(Debug, Clone)]
+struct FreeAxes {
+    /// The gesture moves the box: the side that grows is chosen live, per
+    /// axis, by the side the box goes out of. A resize keeps its own side.
+    moves: bool,
+    /// Extent of the press page per axis, in points.
+    page: [f32; 2],
+    /// Distance from the anchor to the leading edge at the press.
+    start: [[f32; 2]; 2],
+    /// The shortest and the longest distance the geometry accepts.
+    limits: [[(f32, f32); 2]; 2],
+    /// Figure points between the leading edge and the figure edge.
+    lead: [[f32; 2]; 2],
+}
+
 impl HandleFollow {
+    /// A moved box leads with the edge that goes out of the page: when the pull
+    /// changes sign, the other edge leads and the other page side is the
+    /// anchor, put where the press page is drawn now so that nothing jumps.
+    fn reseat(&mut self) {
+        let Some(free) = self.free.as_ref().filter(|free| free.moves) else {
+            return;
+        };
+        for i in 0..2 {
+            let axis = self.axes[i];
+            let pull = axis.sign * (axis.length - self.start[i]);
+            let far = pull >= 0.0;
+            if far == (axis.sign > 0.0) {
+                continue;
+            }
+            let k = usize::from(!far);
+            let width = free.page[i] * self.scale;
+            let sign = if far { 1.0 } else { -1.0 };
+            let (min, max) = free.limits[i][k];
+            self.start[i] = free.start[i][k];
+            self.max[i] = max;
+            self.axes[i] = AxisFollow {
+                anchor: if far {
+                    axis.anchor - width
+                } else {
+                    axis.anchor + width
+                },
+                sign,
+                lead: free.lead[i][k],
+                length: free.start[i][k] + sign * pull,
+                min,
+                max,
+                over: 0.0,
+                reach: 0.0,
+                ..axis
+            };
+        }
+    }
+
     /// The pointer delta, in points, that the geometry of the drag gets: how
     /// far the handle was pulled, per axis (negative toward the page on its
     /// side).
@@ -298,16 +364,16 @@ impl HandleFollow {
     /// figure of `figure` points.
     fn rect(&self, figure: (f32, f32)) -> Rect {
         let s = self.scale;
-        let min_x = if self.far.0 {
-            self.axes[0].anchor
-        } else {
-            self.axes[0].anchor - figure.0 * s
+        let min = |i: usize, extent: f32| {
+            let axis = &self.axes[i];
+            if axis.sign > 0.0 {
+                axis.anchor - self.lo[i] * s
+            } else {
+                axis.anchor + self.hi[i] * s - extent * s
+            }
         };
-        let min_y = if self.far.1 {
-            self.axes[1].anchor - self.band * s
-        } else {
-            self.axes[1].anchor - figure.1 * s
-        };
+        let min_x = min(0, figure.0);
+        let min_y = min(1, figure.1);
         Rect::from_min_size(
             Pos2::new(min_x, min_y),
             egui::vec2(figure.0 * s, figure.1 * s),
@@ -677,8 +743,8 @@ impl GraphView {
     }
 
     /// Moves the selected layers of a free figure by `steps` grid steps (the
-    /// default step of the unit when the grid is off), held inside the page,
-    /// previewed. The burst is committed as **one** [`GraphEvent::LayoutEdited`]
+    /// default step of the unit when the grid is off), previewed; past the page,
+    /// the page grows (#512). The burst is committed as **one** [`GraphEvent::LayoutEdited`]
     /// after 0.7 s without a nudge (`now` and the frame clock are the same
     /// clock, `egui::InputState::time`), when the mode is left, when a drag
     /// starts or on [`GraphView::commit_layout_edit`]. On a regular grid a key
@@ -721,20 +787,24 @@ impl GraphView {
         burst.total.0 += f64::from(steps.0) * step;
         burst.total.1 += f64::from(steps.1) * step;
         burst.last = now;
+        let mut grown = burst.page;
         let frees: Vec<(usize, FreeFrame)> = burst
             .start
             .iter()
-            .map(|graph| (graph.base, nudged_box(graph, burst.total, burst.page)))
+            .map(|graph| {
+                let (frame, page) = nudged_box(graph, burst.total, burst.page);
+                grown = pages_united(grown, page);
+                (graph.base, frame)
+            })
             .collect();
         // Keep the total at what the reference box achieved, so that keys
         // against the page edge do not pile up an invisible overshoot.
         if let (Some(first), Some((_, frame))) = (burst.start.first(), frees.first()) {
             burst.total = (frame.left - first.frame.left, frame.top - first.frame.top);
         }
-        let page = burst.page;
         self.set_frame_preview(Some(FramePreview {
             frees,
-            page: Some(page),
+            page: Some(grown),
             ..FramePreview::default()
         }));
     }
@@ -795,7 +865,7 @@ impl GraphView {
             {
                 self.events.push(GraphEvent::LayoutEdited {
                     frames: preview.frees,
-                    page: Some(burst.page),
+                    page: Some(preview.page.unwrap_or(burst.page)),
                 });
                 self.hold_preview();
             }
@@ -1355,6 +1425,8 @@ impl GraphView {
         }
         let (axes, scale) = follow_step(follow.axes, follow.scale, step);
         follow.axes = axes;
+        follow.scale = scale;
+        follow.reseat();
         let pulled = follow.delta();
         follow.scale = scale;
         Some(pulled)
@@ -1560,8 +1632,22 @@ impl GraphView {
     /// The follow state of a drag at the press (#512): born for an outer edge
     /// and for an internal line pulled with Alt (the handles that may grow the
     /// page); `None` for every other drag (an ordinary line trades with its
-    /// neighbour, a graph is moved, a Free handle).
+    /// neighbour, a graph is moved, a boundary between two graphs).
     fn handle_follow(&self, kind: &DragKind, press: Pos2, scale: f32) -> Option<HandleFollow> {
+        match kind {
+            DragKind::Free {
+                handle,
+                boxes,
+                page,
+                ..
+            } => self.free_follow(handle, boxes, *page, press, scale),
+            DragKind::Grid { .. } => self.grid_follow(kind, press, scale),
+            DragKind::MoveCell { .. } => None,
+        }
+    }
+
+    /// [`Self::handle_follow`] of a drag of a regular grid.
+    fn grid_follow(&self, kind: &DragKind, press: Pos2, scale: f32) -> Option<HandleFollow> {
         let DragKind::Grid {
             handle,
             widths,
@@ -1701,16 +1787,209 @@ impl GraphView {
                 far,
             )
         };
-        let (x, max_x, far_x) = build(0);
-        let (y, max_y, far_y) = build(1);
+        let (x, max_x, _) = build(0);
+        let (y, max_y, _) = build(1);
         Some(HandleFollow {
             axes: [x, y],
             dragged: [dragged[0].is_some(), dragged[1].is_some()],
             scale,
             start: [x.length, y.length],
             max: [max_x, max_y],
-            far: (far_x, far_y),
-            band,
+            lo: [0.0, band],
+            hi: [0.0, 0.0],
+            free: None,
+            last_abs: press,
+            eased: (f64::from(x.length), f64::from(y.length)),
+            settled: None,
+        })
+    }
+
+    /// [`Self::handle_follow`] of a drag of a graph box of a free figure:
+    /// a move or a resize by a side or a corner. The anchor is the page edge
+    /// opposite the one that grows; the lengths run from there to the leading
+    /// edge of the box, in stored points. The shortest and the longest are what
+    /// [`moved_box`] returns for a huge pull each way, never re-derived.
+    fn free_follow(
+        &self,
+        handle: &LayoutHandle,
+        boxes: &[GraphBox],
+        page: FreePage,
+        press: Pos2,
+        scale: f32,
+    ) -> Option<HandleFollow> {
+        let (base, edges) = match *handle {
+            LayoutHandle::Box { base, edges } | LayoutHandle::Side { base, edges } => (base, edges),
+            LayoutHandle::Boundary { .. } => return None,
+        };
+        let graph = boxes.iter().find(|graph| graph.base == base)?;
+        let display = self.display_rect?;
+        let (_, layout) = self.figure_memo.as_ref()?;
+        let band = f64::from(layout.title_band);
+        let moves = edges.is_move();
+        // Whether the gesture may pull the edge of the side (axis, far).
+        let may = |axis: usize, far: bool| {
+            moves
+                || match (axis, far) {
+                    (0, true) => edges.right,
+                    (0, false) => edges.left,
+                    (_, true) => edges.bottom,
+                    (_, false) => edges.top,
+                }
+        };
+        let pages = [
+            (page.left, page.left + page.width),
+            (page.top, page.top + page.height),
+        ];
+        let o = graph.outer;
+        let outer = [(o.left, o.left + o.width), (o.top, o.top + o.height)];
+        let (ox, oy) = layout.free_origin;
+        let lo = [
+            (pages[0].0 - ox).max(0.0),
+            (pages[1].0 + band - oy).max(0.0),
+        ];
+        let size = (f64::from(layout.size.0), f64::from(layout.size.1));
+        let hi = [
+            (size.0 - (pages[0].1 - ox)).max(0.0),
+            (size.1 - (pages[1].1 + band - oy)).max(0.0),
+        ];
+        let probe = |delta: (f64, f64)| {
+            let snap = Snap {
+                grid: None,
+                threshold: 0.0,
+                enabled: false,
+            };
+            let (frame, _, grown) = moved_box(graph, &edges, delta, page, &[], snap);
+            (graph.outer_of(&frame), grown)
+        };
+        const PROBE_PULL: f64 = 1.0e9;
+        let edge = |rect: FreePage, axis: usize| {
+            if axis == 0 {
+                (rect.left, rect.left + rect.width)
+            } else {
+                (rect.top, rect.top + rect.height)
+            }
+        };
+        let mut axes = FreeAxes {
+            moves,
+            page: [
+                (pages[0].1 - pages[0].0) as f32,
+                (pages[1].1 - pages[1].0) as f32,
+            ],
+            start: [[0.0; 2]; 2],
+            limits: [[(0.0, 0.0); 2]; 2],
+            lead: [[0.0; 2]; 2],
+        };
+        for axis in 0..2 {
+            for (k, far) in [(0, true), (1, false)] {
+                if !may(axis, far) {
+                    continue;
+                }
+                let sign = if far { 1.0 } else { -1.0 };
+                let start = if far {
+                    outer[axis].1 - pages[axis].0
+                } else {
+                    pages[axis].1 - outer[axis].0
+                };
+                let pull = |dir: f64| {
+                    if axis == 0 {
+                        (sign * dir * PROBE_PULL, 0.0)
+                    } else {
+                        (0.0, sign * dir * PROBE_PULL)
+                    }
+                };
+                let (_, grown) = probe(pull(1.0));
+                let (grown_lo, grown_hi) = edge(grown, axis);
+                let longest = if far {
+                    grown_hi - pages[axis].0
+                } else {
+                    pages[axis].1 - grown_lo
+                }
+                .max(start);
+                let shortest = if moves {
+                    -PROBE_PULL
+                } else {
+                    let (inward, _) = probe(pull(-1.0));
+                    let (low, high) = edge(inward, axis);
+                    (if far {
+                        high - pages[axis].0
+                    } else {
+                        pages[axis].1 - low
+                    })
+                    .min(start)
+                };
+                axes.start[axis][k] = start as f32;
+                axes.limits[axis][k] = (shortest as f32, longest as f32);
+                axes.lead[axis][k] = (if far { hi[axis] } else { lo[axis] }) as f32;
+            }
+        }
+        let reserve = self
+            .layout
+            .grid
+            .filter(|step| step.is_finite() && *step > 0.0)
+            .map_or(0.0, |step| (step / 2.0) as f32);
+        let contain = self.layout.contain.unwrap_or(Rect::EVERYTHING);
+        let screen = |axis: usize| -> (f32, f32, (f32, f32)) {
+            if axis == 0 {
+                (display.min.x, display.max.x, (contain.min.x, contain.max.x))
+            } else {
+                (display.min.y, display.max.y, (contain.min.y, contain.max.y))
+            }
+        };
+        let build = |axis: usize| {
+            let (screen_min, screen_max, bounds) = screen(axis);
+            let dragged = may(axis, true) || may(axis, false);
+            if !dragged {
+                return (
+                    AxisFollow {
+                        anchor: screen_min + lo[axis] as f32 * scale,
+                        sign: 1.0,
+                        lead: 0.0,
+                        reserve: 0.0,
+                        length: 0.0,
+                        min: 0.0,
+                        max: 0.0,
+                        bounds: (f32::NEG_INFINITY, f32::INFINITY),
+                        over: 0.0,
+                        reach: 0.0,
+                    },
+                    0.0,
+                    false,
+                );
+            }
+            let k = usize::from(!may(axis, true));
+            let (min, max) = axes.limits[axis][k];
+            (
+                AxisFollow {
+                    anchor: if k == 0 {
+                        screen_min + lo[axis] as f32 * scale
+                    } else {
+                        screen_max - hi[axis] as f32 * scale
+                    },
+                    sign: if k == 0 { 1.0 } else { -1.0 },
+                    lead: axes.lead[axis][k],
+                    reserve,
+                    length: axes.start[axis][k],
+                    min,
+                    max,
+                    bounds,
+                    over: 0.0,
+                    reach: 0.0,
+                },
+                max,
+                true,
+            )
+        };
+        let (x, max_x, drag_x) = build(0);
+        let (y, max_y, drag_y) = build(1);
+        Some(HandleFollow {
+            axes: [x, y],
+            dragged: [drag_x, drag_y],
+            scale,
+            start: [x.length, y.length],
+            max: [max_x, max_y],
+            lo: [lo[0] as f32, lo[1] as f32],
+            hi: [hi[0] as f32, hi[1] as f32],
+            free: Some(axes),
             last_abs: press,
             eased: (f64::from(x.length), f64::from(y.length)),
             settled: None,
@@ -1735,8 +2014,8 @@ impl GraphView {
                     .filter(|graph| graph.base != base)
                     .map(|graph| graph.outer)
                     .collect();
-                let (frame, guides) = moved_box(start, &edges, delta, page, &others, snap);
-                (vec![(base, frame)], page, guides)
+                let (frame, guides, grown) = moved_box(start, &edges, delta, page, &others, snap);
+                (vec![(base, frame)], grown, guides)
             }
             LayoutHandle::Boundary { vertical, .. } => {
                 let group = boundary?;

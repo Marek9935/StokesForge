@@ -128,11 +128,11 @@ pub use decimate::lttb;
 pub use fonts::{available_families, FamilyEntry, FontChoice, FontSet, FontSource, ResolvedFonts};
 pub use framing::{auto_frame, AutoMargins, AxisRole};
 pub use free_gesture::{
-    boundary_group, boxes_fitted_to_page, figure_to_stored, graph_boxes, layout_handle_at,
-    moved_boundary, moved_box, nudged_box, page_fitted_to_layers, scaled_to_page, stored_to_figure,
-    BoundaryGroup, FreeHandle, GraphBox, Guide, LayoutHandle, LayoutReach, Snap,
-    BOUNDARY_CENTRE_PX, BOUNDARY_SIDE_PX, EDGE_REACH_PX, FIT_PAGE_EXTRA_MARGIN, INNER_REACH_SHARE,
-    MAGNET_THRESHOLD_POINTS, MIN_PAGE_EXTENT, TOUCH_TOLERANCE_POINTS,
+    boundary_group, boxes_fitted_to_page, figure_to_stored, graph_boxes, grown_page,
+    layout_handle_at, moved_boundary, moved_box, nudged_box, page_fitted_to_layers, pages_united,
+    scaled_to_page, stored_to_figure, BoundaryGroup, FreeHandle, GraphBox, Guide, LayoutHandle,
+    LayoutReach, Snap, BOUNDARY_CENTRE_PX, BOUNDARY_SIDE_PX, EDGE_REACH_PX, FIT_PAGE_EXTRA_MARGIN,
+    INNER_REACH_SHARE, MAGNET_THRESHOLD_POINTS, MIN_PAGE_EXTENT, TOUCH_TOLERANCE_POINTS,
 };
 pub use grid_gesture::{
     grid_cell_at, grid_corners, grid_handle_at, grid_line_at, layout_fitted_to_page, resized_edge,

@@ -17250,7 +17250,8 @@ fn layer_stacking_and_background_are_single_steps_in_free_and_nothing_on_the_gri
 }
 
 /// #426: `SetFreeLayout` writes frames and page as ONE undo step; the kind
-/// follows what changed (page size, frame size, position only); Undo gives
+/// follows what changed (frame size, position only; a page that grows keeps the
+/// gesture's label, #512; the typed size is `SetFreeFigure`); Undo gives
 /// back the page and every frame; unchanged or grid = nothing sent.
 /// Witness: two steps, or the page left out of the undo.
 #[test]
@@ -17341,12 +17342,54 @@ fn setting_the_free_layout_is_one_undoable_step_with_the_page() {
     assert_eq!(page_of(&state), Some(page));
     assert_eq!(
         label(&state),
-        Some(HistoryLabel::EditPlotSpec(K::ResizeFigure))
+        Some(HistoryLabel::EditPlotSpec(K::ResizeLayer)),
+        "the gesture keeps its own label even when the page changes (#512)"
     );
     state.dispatch(Action::Undo);
     assert_eq!(frames_of(&state), (a, b));
     assert_eq!(page_of(&state), Some(drawn));
-    state.dispatch(Action::Redo);
+    // The typed Figure size has its own action and its own label.
+    state.dispatch(Action::SetFreeFigure {
+        graph,
+        frames: vec![(0, na), (1, nb)],
+        page,
+    });
+    assert_eq!(frames_of(&state), (na, nb));
+    assert_eq!(page_of(&state), Some(page));
+    assert_eq!(
+        label(&state),
+        Some(HistoryLabel::EditPlotSpec(K::ResizeFigure))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(page_of(&state), Some(drawn));
+    state.dispatch(Action::SetFreeLayout {
+        graph,
+        frames: vec![(0, na), (1, nb)],
+        page: Some(page),
+    });
+
+    // A move that grows the page keeps the Move Layer label (#512).
+    let grown = FreePage {
+        left: page.left - 40.0,
+        width: page.width + 40.0,
+        ..page
+    };
+    let slid = FreeFrame {
+        left: na.left - 40.0,
+        ..na
+    };
+    state.dispatch(Action::SetFreeLayout {
+        graph,
+        frames: vec![(0, slid)],
+        page: Some(grown),
+    });
+    assert_eq!(page_of(&state), Some(grown));
+    assert_eq!(
+        label(&state),
+        Some(HistoryLabel::EditPlotSpec(K::MoveLayer))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(page_of(&state), Some(page));
 
     // Nothing changes: nothing is sent. A missing layer too.
     let revision = state.snapshot().revision;

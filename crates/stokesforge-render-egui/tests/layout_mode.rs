@@ -2722,3 +2722,298 @@ fn a_press_at_the_former_page_corner_starts_no_drag() {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// #512: a graph box moved or resized past the page grows the page
+// ---------------------------------------------------------------------------
+
+/// The two free layers in the mode, the figure size and the press point on
+/// the middle of layer 0 (the right one: its outer right edge is the page's).
+fn free_press() -> (Fixture, f32, f32, Pos2) {
+    let fixture = Fixture::free_two_layers();
+    let (context, mut view) = in_mode(&fixture);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let (w, h) = (layout.size.0 as f32, layout.size.1 as f32);
+    let from = middle(&view, 0);
+    (fixture, w, h, from)
+}
+
+/// Moving a box past the right of the drawing area grows the page 1:1 with the
+/// pointer, the display zooms out, the page's left edge stays on the screen,
+/// the other graph keeps its frame, and one `LayoutEdited` carries the moved
+/// frame and the grown page at the release; the system cursor is never
+/// grabbed or moved. Witness: the box held inside the page again (the page
+/// stays), the follow not born for a box (the figure leaves the area), or the
+/// page left changed.
+#[test]
+fn a_box_moved_past_the_area_grows_the_page_and_zooms_out() {
+    let (fixture, w, h, from) = free_press();
+    let (context, mut view) = in_mode(&fixture);
+    let before = box_of(&view, 0).frame;
+    let old_left = view.layout_page().expect("page").left;
+    let window = Rect::from_min_max(Pos2::new(-500.0, -500.0), Pos2::new(w + 40.0, h + 500.0));
+    let mut d = Driver::new(&context, &mut view, &fixture, window, egui::Modifiers::NONE);
+    d.press(from);
+    let mut at = from;
+    for _ in 0..8 {
+        at.x += 60.0;
+        d.to(at);
+    }
+    let (grown, _) = d.figure();
+    assert!(grown > w + 300.0, "the page grew past the travel: {grown}");
+    let shown = d.shown();
+    assert!(shown.min.x.abs() < 0.01, "the left edge stays: {shown:?}");
+    assert!(shown.max.x <= window.max.x + 0.5, "inside: {shown:?}");
+    assert!(shown.width() < grown, "zoomed out");
+    assert!(d.events.is_empty(), "nothing before the release");
+    d.release(at);
+    let (frames, page) = edited(&d.events);
+    let page = page.expect("the grown page");
+    let [(0, frame)] = frames else {
+        panic!("only the moved frame expected: {frames:?}");
+    };
+    assert!(frame.left > before.left + 300.0, "{frame:?}");
+    assert_eq!((frame.width, frame.height), (before.width, before.height));
+    assert!(page.width > f64::from(w) + 300.0, "{page:?}");
+    assert_eq!(page.left, old_left, "the page left stays");
+    assert!(
+        !d.commands.iter().any(|command| matches!(
+            command,
+            egui::ViewportCommand::CursorGrab(_) | egui::ViewportCommand::CursorPosition(_)
+        )),
+        "{:?}",
+        d.commands
+    );
+}
+
+/// A box moved past the left of the area lowers the page's left and keeps its
+/// right edge on the screen, whichever side the box went out of. Witness: the
+/// anchor kept on the left page edge.
+#[test]
+fn a_box_moved_past_the_left_keeps_the_right_page_edge_fixed() {
+    let fixture = Fixture::free_two_layers();
+    let (context, mut view) = in_mode(&fixture);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let (w, h) = (layout.size.0 as f32, layout.size.1 as f32);
+    let from = middle(&view, 1);
+    let window = Rect::from_min_max(Pos2::new(-40.0, -500.0), Pos2::new(w + 500.0, h + 500.0));
+    let old_left = view.layout_page().expect("page").left;
+    let mut d = Driver::new(&context, &mut view, &fixture, window, egui::Modifiers::NONE);
+    d.press(from);
+    let mut at = from;
+    for _ in 0..8 {
+        at.x -= 60.0;
+        d.to(at);
+    }
+    let (grown, _) = d.figure();
+    assert!(grown > w + 300.0, "{grown}");
+    let shown = d.shown();
+    assert!(
+        (shown.max.x - w).abs() < 0.01,
+        "the right edge stays: {shown:?}"
+    );
+    assert!(shown.min.x >= window.min.x - 0.5, "inside: {shown:?}");
+    d.release(at);
+    let (frames, page) = edited(&d.events);
+    let page = page.expect("the grown page");
+    assert!(page.left < old_left - 300.0, "{page:?}");
+    assert!((page.left + page.width - (f64::from(w) + old_left)).abs() < 0.01);
+    assert_eq!(frames.len(), 1);
+}
+
+/// The leading edge of a moved box is the handle: while it is pinned at the
+/// edge of the area, moving back shrinks nothing and the display does not zoom
+/// back in; a hand held still changes nothing; once the edge is back inside,
+/// the box follows the pointer again. Witness: the length following the pointer
+/// at once.
+#[test]
+fn a_moved_box_pinned_at_the_edge_shrinks_nothing_and_inside_it_follows_again() {
+    let (fixture, w, h, from) = free_press();
+    let (context, mut view) = in_mode(&fixture);
+    let outer = box_of(&view, 0).outer;
+    // The pointer that puts the right outer edge of the box at screen x `edge`.
+    let offset = screen(&view, outer.left + outer.width, outer.top).x - from.x;
+    let at = |edge: f32| Pos2::new(edge - offset, from.y);
+    let window = Rect::from_min_max(Pos2::new(-500.0, -500.0), Pos2::new(w + 40.0, h + 500.0));
+    let mut d = Driver::new(&context, &mut view, &fixture, window, egui::Modifiers::NONE);
+    d.press(from);
+    d.to(at(w + 40.0));
+    d.to(at(w + 240.0));
+    let (grown, _) = d.figure();
+    let scale = d.shown().width() / grown;
+    assert!(grown > w + 100.0);
+    d.to(at(w + 240.0));
+    d.to(at(w + 240.0));
+    assert_eq!(d.figure().0, grown, "a still hand grows nothing");
+    d.to(at(w + 120.0));
+    assert_eq!(d.figure().0, grown, "nothing shrinks while pinned");
+    assert!((d.shown().width() / grown - scale).abs() < 1e-4);
+    d.to(at(w + 200.0));
+    assert_eq!(d.figure().0, grown, "no growth short of the farthest reach");
+    d.to(at(w - 40.0));
+    let (now, _) = d.figure();
+    assert!(now < grown, "the box follows the pointer again: {now}");
+    assert!(
+        d.shown().width() / now <= scale + 1e-4,
+        "never zooms back in"
+    );
+    d.release(at(w - 40.0));
+}
+
+/// The growth stops at the geometry maximum and the display freezes there.
+/// Witness: the maximum not probed at the press.
+#[test]
+fn a_moved_box_stops_at_the_geometry_maximum_and_the_display_freezes() {
+    let (fixture, w, h, from) = free_press();
+    let (context, mut view) = in_mode(&fixture);
+    let window = Rect::from_min_max(Pos2::new(-500.0, -500.0), Pos2::new(w + 40.0, h + 500.0));
+    let mut d = Driver::new(&context, &mut view, &fixture, window, egui::Modifiers::NONE);
+    d.press(from);
+    let mut at = from;
+    for _ in 0..80 {
+        at.x += 400.0;
+        d.to(at);
+    }
+    let (stopped, _) = d.figure();
+    let frozen = d.shown();
+    assert!(
+        f64::from(stopped) <= stokesforge_plot::MAX_FIGURE_EXTENT,
+        "{stopped}"
+    );
+    assert!(frozen.max.x <= window.max.x + 0.5, "{frozen:?}");
+    at.x += 400.0;
+    d.to(at);
+    assert_eq!(d.figure().0, stopped, "no longer grows");
+    assert_eq!(d.shown(), frozen, "the display is frozen");
+    d.release(at);
+    let (_, page) = edited(&d.events);
+    let page = page.expect("page");
+    assert!(page.left + page.width <= stokesforge_plot::MAX_FIGURE_EXTENT / 2.0);
+}
+
+/// Leaving the mode in the middle of the drag commits nothing. Witness: the
+/// preview committed on leaving.
+#[test]
+fn leaving_the_mode_in_the_middle_of_a_growing_box_drag_commits_nothing() {
+    let (fixture, w, h, from) = free_press();
+    let (context, mut view) = in_mode(&fixture);
+    let window = Rect::from_min_max(Pos2::new(-500.0, -500.0), Pos2::new(w + 40.0, h + 500.0));
+    let at = Pos2::new(from.x + 300.0, from.y);
+    {
+        let mut d = Driver::new(&context, &mut view, &fixture, window, egui::Modifiers::NONE);
+        d.press(from);
+        d.to(at);
+        d.to(at + egui::vec2(60.0, 0.0));
+        assert!(d.figure().0 > w + 100.0, "the drag was growing the page");
+    }
+    view.set_layout_mode(false);
+    let mut d = Driver::new(&context, &mut view, &fixture, window, egui::Modifiers::NONE);
+    d.time = 5.0;
+    d.release(at);
+    assert!(d.events.is_empty(), "{:?}", d.events);
+    assert_eq!(spec_of(&fixture).free_page, None);
+}
+
+/// A corner handle pulled past the bottom-right of the page grows both axes;
+/// the opposite corner stays on the screen. Witness: one axis only.
+#[test]
+fn a_corner_pulled_past_the_area_grows_both_axes() {
+    let fixture = Fixture::free_two_layers();
+    let (context, mut view) = in_mode(&fixture);
+    let spec = spec_of(&fixture);
+    view.set_active_panel(0, &spec);
+    frame(
+        &context,
+        &mut view,
+        &fixture,
+        vec![],
+        0.5,
+        egui::Modifiers::NONE,
+    );
+    let layout = layout_of(&context, &mut view, &fixture);
+    let (w, h) = (layout.size.0 as f32, layout.size.1 as f32);
+    let before = box_of(&view, 0);
+    let corner = screen(
+        &view,
+        before.outer.left + before.outer.width,
+        before.outer.top + before.outer.height,
+    );
+    let window = Rect::from_min_max(Pos2::new(-500.0, -500.0), Pos2::new(w + 40.0, h + 40.0));
+    let mut d = Driver::new(&context, &mut view, &fixture, window, egui::Modifiers::NONE);
+    d.press(corner);
+    let mut at = corner;
+    for _ in 0..6 {
+        at += egui::vec2(60.0, 60.0);
+        d.to(at);
+    }
+    let (gw, gh) = d.figure();
+    assert!(gw > w + 200.0 && gh > h + 200.0, "{gw} x {gh}");
+    let shown = d.shown();
+    assert!(
+        shown.min.x.abs() < 0.01 && shown.min.y.abs() < 0.01,
+        "{shown:?}"
+    );
+    assert!(shown.max.x <= window.max.x + 0.5 && shown.max.y <= window.max.y + 0.5);
+    d.release(at);
+    let (frames, page) = edited(&d.events);
+    let page = page.expect("page");
+    assert!(page.width > f64::from(w) + 200.0 && page.height > f64::from(h) + 200.0);
+    let [(0, frame)] = frames else {
+        panic!("one frame: {frames:?}");
+    };
+    assert_eq!(
+        (frame.left, frame.top),
+        (before.frame.left, before.frame.top),
+        "the opposite corner stays"
+    );
+    assert!(frame.width > before.frame.width + 200.0);
+}
+
+/// An arrow key against the page edge grows the page, one step per nudge, and
+/// the burst is one event carrying the grown page. Witness: the nudge held
+/// inside the page again (the page stays, the frame does not move).
+#[test]
+fn a_nudge_past_the_page_grows_the_page() {
+    let fixture = Fixture::free_two_layers();
+    let (context, mut view) = in_mode(&fixture);
+    let spec = spec_of(&fixture);
+    view.set_active_panel(0, &spec);
+    frame(
+        &context,
+        &mut view,
+        &fixture,
+        vec![],
+        0.5,
+        egui::Modifiers::NONE,
+    );
+    let before = box_of(&view, 0).frame;
+    let page = view.layout_page().expect("page");
+    view.nudge((1, 0), 1.0);
+    view.nudge((1, 0), 1.1);
+    let mut signals = Vec::new();
+    for time in [2.0, 2.1] {
+        signals.extend(frame(
+            &context,
+            &mut view,
+            &fixture,
+            vec![],
+            time,
+            egui::Modifiers::NONE,
+        ));
+    }
+    let (frames, grown) = edited(&signals);
+    let step = 5.0 * 72.0 / 25.4;
+    let [(0, frame)] = frames else {
+        panic!("one frame expected: {frames:?}");
+    };
+    assert!(
+        (frame.left - before.left - 2.0 * step).abs() < 0.02,
+        "{frame:?}"
+    );
+    let grown = grown.expect("page");
+    assert!(
+        (grown.width - page.width - 2.0 * step).abs() < 0.02,
+        "{grown:?}"
+    );
+    assert_eq!(grown.left, page.left);
+}
