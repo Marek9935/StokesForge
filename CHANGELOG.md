@@ -24,7 +24,7 @@ without a message, see `docs/persistence.md`).
 
 ## [Unreleased]
 
-## [1.2.0] - undated
+## [1.2.0] - 2026-11-17
 
 ### Added
 
@@ -108,6 +108,15 @@ without a message, see `docs/persistence.md`).
 
 ### Changed
 
+- Page Layout Mode: the page grows from the graphs themselves (#512). On a
+  Regular Grid, pulling a graph's outer edge outward (or an internal line with
+  Alt) first uses the empty space on that side, then enlarges the page; in Free,
+  moving, resizing or nudging a graph past the page enlarges it. Past the edge
+  of the drawing area the view zooms out, and coming back while the pointer is
+  still outside shrinks nothing. Only the pointer position is read, so the
+  gesture is the same on every system and in a virtual machine. The page's
+  L-shaped corner handles are gone; a graph moved into a new grid column (row)
+  keeps its own width (height). Undo keeps the gesture's name.
 - Opening a project made with an earlier version writes its automatic axis
   ranges once (#529): every axis left on Auto, in every graph that has data,
   gets its From and To computed with the new framing rule and the margins of
