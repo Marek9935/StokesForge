@@ -29,16 +29,15 @@
 //!   those of [`crate::edge_band`], shared with the drop of workbook columns.
 //!
 //! The L-shaped **page corners** of both placements follow the pointer by
-//! their own rules (#512, `corner_follow`): the system cursor is free (never
-//! held, warped or hidden), the opposite corner does not move on the screen
-//! ([`GraphView::page_corner_rect`] is where the host draws the figure), and the
-//! corner is under the pointer inside the drawing area
-//! ([`GraphView::set_layout_contain`]). Past its edge the page grows at a speed
-//! set by the distance (`stokesforge_render::edge_push`, as the grid scroll of
-//! #535), the hand still or not, while the display zooms out; coming back
-//! inside, the corner jumps under the pointer. The pointer alone cannot give
-//! the travel a big page needs, since the screen ends, and a held cursor is not
-//! portable.
+//! their own rules (#512, `corner_follow`): the corner stays under the cursor
+//! for the whole drag, the opposite corner does not move on the screen
+//! ([`GraphView::page_corner_rect`] is where the host draws the figure), and at
+//! the edge of the drawing area ([`GraphView::set_layout_contain`]) the display
+//! zooms out while the page keeps growing 1:1 with the pointer's outward
+//! movement (never with time: a still hand grows nothing). The only input is
+//! the absolute pointer position, so the gesture is the same on every OS and in
+//! a virtual machine, with no cursor lock or warp; it stops when the cursor
+//! reaches the edge of the screen (growing past it is #560).
 //!
 //! In both, the primary drag does nothing else (no pan, no zoom, no object
 //! drag). This module only maps pointer events to the geometry, previews the
@@ -73,18 +72,6 @@ use crate::{FramePreview, GraphEvent, GraphView};
 /// reach, so that the page corner handles can be grabbed outside the page: the
 /// interaction area grows by that much in the mode.
 pub const LAYOUT_GRAB_MARGIN: f32 = 2.0 * EDGE_REACH_PX as f32;
-
-/// The frame time of the drag, in seconds: the one source of both the growth past
-/// the edge and the glide (#512). The real time of the frame, else the stable
-/// one (the stable time follows only after a frame that asked for a repaint,
-/// which a following drag does every pass).
-fn frame_dt(input: &egui::InputState) -> f32 {
-    if input.unstable_dt.is_finite() && input.unstable_dt > 0.0 {
-        input.unstable_dt
-    } else {
-        input.stable_dt
-    }
-}
 
 /// Quiet time after the last arrow key before a nudge burst is committed.
 const NUDGE_QUIET_SECONDS: f64 = 0.7;
@@ -297,10 +284,8 @@ struct CornerFollow {
     far: (bool, bool),
     /// Height of the title band above the page, in figure points.
     band: f32,
-    /// Where the pointer was grabbed, from the outer edge of the figure on the
-    /// screen at the press: the pointer minus this is where the pointer wants
-    /// the outer edge.
-    grab: Vec2,
+    /// The absolute pointer of the previous frame of this drag.
+    last_abs: Pos2,
     /// The page size shown now, gliding toward the snapped one, in points.
     eased: (f64, f64),
     /// The preview with the snapped page: what the release commits.
@@ -1620,11 +1605,6 @@ impl GraphView {
                 bounds(contain.min.y, contain.max.y),
             ),
         ];
-        // Where the outer edge of the figure is drawn at the press, on the screen.
-        let outer = [0, 1].map(|i| {
-            let axis = axes[i];
-            axis.corner(scale) + axis.sign * (axis.lead + axis.reserve) * scale
-        });
         Some(CornerFollow {
             axes,
             scale,
@@ -1633,31 +1613,24 @@ impl GraphView {
             ratio_max: ratio_max.map(|kept| [kept.0 as f32, kept.1 as f32]),
             far: corner,
             band,
-            grab: Vec2::new(press.x - outer[0], press.y - outer[1]),
+            last_abs: press,
             eased: (f64::from(length.0 as f32), f64::from(length.1 as f32)),
             settled: None,
         })
     }
 
-    /// One frame of a page-corner drag (#512): the pointer turned into a page
-    /// length and a display scale, as the pull of the corner in points.
+    /// One frame of a page-corner drag (#512): the pointer movement turned into
+    /// a page length and a display scale, as the pull of the corner in points.
     /// `None` when the drag in progress is not a page corner.
     ///
-    /// Past the edge of the drawing area the page grows at a speed set by the
-    /// push, the hand still or not ([`follow_step`]); the growth lives only while
-    /// the window is focused and the primary button is down, and a pointer that
-    /// is not finite moves nothing. Everything here is driven by the **unsnapped**
-    /// pointer: the lengths and the display scale. The snap only shapes the page
-    /// that is shown ([`Self::glide_page_corner`]), so the figure never rescales
-    /// by steps.
+    /// Everything here is driven by the **unsnapped** absolute pointer: the
+    /// lengths and the display scale. The movement since the previous frame is
+    /// the only thing that grows the page (a still pointer grows nothing, time
+    /// plays no part), and a pointer that is not finite moves nothing. The snap
+    /// only shapes the page that is shown ([`Self::glide_page_corner`]), so the
+    /// figure never rescales by steps.
     fn follow_page_corner(&mut self, context: &Context, pos: Pos2) -> Option<(f64, f64)> {
-        let (ctrl, dt, live) = context.input(|input| {
-            (
-                input.modifiers.ctrl,
-                frame_dt(input),
-                input.focused && input.pointer.primary_down(),
-            )
-        });
+        let ctrl = context.input(|input| input.modifiers.ctrl);
         let contain = self.layout.contain;
         let drag = self.layout.drag.as_mut()?;
         // With Ctrl on a regular grid the page keeps the ratio it had at the
@@ -1673,27 +1646,20 @@ impl GraphView {
         };
         follow.axes[0].max = longest[0];
         follow.axes[1].max = longest[1];
-        if !(live && pos.x.is_finite() && pos.y.is_finite()) {
-            return Some(follow.delta());
-        }
+        let step = if pos.x.is_finite() && pos.y.is_finite() {
+            let moved = pos - follow.last_abs;
+            follow.last_abs = pos;
+            moved
+        } else {
+            Vec2::ZERO
+        };
         if let Some(contain) = contain {
             follow.axes[0].bounds = (contain.min.x, contain.max.x);
             follow.axes[1].bounds = (contain.min.y, contain.max.y);
         }
-        let wanted = pos - follow.grab;
-        let step = follow_step(follow.axes, follow.scale, Vec2::new(wanted.x, wanted.y), dt);
-        follow.axes[0].length = step.lengths[0];
-        follow.axes[1].length = step.lengths[1];
-        let mut scale = step.scale;
-        if ratio.is_some() && step.pushed[0] != step.pushed[1] {
-            // One side pushed with Ctrl: it leads, the other follows the ratio,
-            // kept just short of it so the pushed side stays the leading one.
-            let (lead, other) = if step.pushed[0] { (0, 1) } else { (1, 0) };
-            let reached = follow.axes[lead].length / follow.start[lead];
-            let axis = &mut follow.axes[other];
-            axis.length = (follow.start[other] * reached - RATIO_MARGIN)
-                .clamp(axis.min.min(axis.max), axis.max);
-        }
+        let (lengths, mut scale) = follow_step(follow.axes, follow.scale, step);
+        follow.axes[0].length = lengths[0];
+        follow.axes[1].length = lengths[1];
         // What the geometry gets is the pull of the pointer itself: with Ctrl
         // it keeps the ratio and snaps on the leading side by itself.
         let pulled = follow.delta();
@@ -1712,8 +1678,9 @@ impl GraphView {
                 if let Some(fit) = (AxisFollow { length, ..axis }).scale_to_fit(length) {
                     scale = scale.min(fit);
                 }
-                // The lengths kept are the ones shown: a push goes on from
-                // them, and a pointer back inside sets them anew.
+                // The accumulator is projected onto the page that is shown: the
+                // corner is where the cursor is drawn, and a movement off the
+                // ratio line builds no hidden travel.
                 follow.axes[i].length = length;
             }
         }
@@ -1736,7 +1703,13 @@ impl GraphView {
     ) {
         let snapping = self.layout.grid.is_some() && !shift;
         let settled = self.frame_preview.clone();
-        let dt = context.input(frame_dt);
+        let dt = context.input(|input| {
+            if input.unstable_dt.is_finite() && input.unstable_dt > 0.0 {
+                input.unstable_dt
+            } else {
+                input.stable_dt
+            }
+        });
         let Some(follow) = self
             .layout
             .drag
