@@ -1,18 +1,27 @@
 //! How a page-corner drag follows the pointer (#512).
 //!
-//! The corner of the page stays under the cursor for the whole drag, outward
-//! and inward, and the opposite corner does not move on the screen. When the
-//! corner reaches the edge of the drawing area the cursor stays on it, pushing
-//! further still grows the page, and the display zooms out (one uniform scale,
-//! never zooming back in during the drag) so the whole page stays visible.
-//! Coming back inward, the page shrinks at once and the corner follows the
-//! cursor: the page length is clamped, so there is no dead zone.
+//! The opposite corner of the page (the anchor) never moves on the screen. The
+//! system cursor is never held: it is free, as in the grid (#535). Inside the
+//! drawing area the corner is under the pointer, outward and inward. While the
+//! pointer is past the edge of the area on the corner's outward side of an axis,
+//! that axis grows every frame by a speed set by the distance past the edge
+//! ([`PAGE_PUSH`], in page points per second, so the same push grows the same
+//! length at any zoom), the hand still or not, and the axes not pushed keep their
+//! length; the display zooms out (one uniform scale, never back in) so the page,
+//! drawn from its fixed anchor, stays in the area. As soon as no axis is pushed
+//! any more, every axis is set from the pointer at the scale now shown: the
+//! corner jumps under the pointer. Why: the pointer cannot go past the screen,
+//! and a held or warped cursor is not portable (a lock on Wayland and macOS only,
+//! a warp on Windows that the trial rejected), so the distance past the edge
+//! replaces the travel the screen cannot give.
 //!
-//! Pure functions only: [`follow_step`] turns the movement of the pointer into a page length and a display scale. The gesture
-//! code in `layout_mode.rs` feeds them and hands the lengths to the geometry
-//! (`page_corner_slack`, `moved_page_corner`).
+//! Pure functions only: [`follow_step`] turns the pointer and the frame time
+//! into a page length and a display scale. The gesture code in `layout_mode.rs`
+//! feeds them and hands the lengths to the geometry (`page_corner_slack`,
+//! `moved_page_corner`).
 
 use egui::Vec2;
+use stokesforge_render::edge_push::{push_past, EdgePush};
 
 /// Time constant, in seconds, of the glide of the page to a new snapped size.
 pub(crate) const GLIDE_TIME_CONSTANT: f32 = 0.03;
@@ -89,47 +98,92 @@ impl AxisFollow {
     }
 }
 
-/// One frame: the corner is carried by `motion` (screen points) from where it
-/// is drawn. Returns the new page lengths and the new display scale.
+/// The push-to-speed law of a page corner held past the edge of the drawing
+/// area (#512): the signed distance of the corner past the edge, in screen
+/// points, sets the growth speed in **page** points per second, so the same
+/// push grows the page by the same length whatever the zoom. Starts from the
+/// grid's scroll (#535: 10 per second per point of push) and is tuned at the
+/// trial.
+pub(crate) const PAGE_PUSH: EdgePush = EdgePush {
+    speed_per_push: 10.0,
+    max_speed: 3000.0,
+    max_frame_time: 0.1,
+};
+
+/// What one frame of the drag gave.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct FollowStep {
+    /// The new page lengths, in points.
+    pub lengths: [f32; 2],
+    /// The new display scale (never above the old one).
+    pub scale: f32,
+    /// The axes the pointer pushes past the edge of the area, on the corner's
+    /// outward side (they grow at speed).
+    pub pushed: [bool; 2],
+}
+
+/// One frame. `wanted` is where the pointer wants the outer edge of the figure
+/// on the screen (the pointer minus the grab offset of the press), `dt` the
+/// frame time in seconds.
 ///
-/// Per axis, the wanted position of the figure's outer edge is where it is
-/// drawn plus the motion. Inside the drawing area the length follows it. Past
-/// the edge, the edge stays where it is, the overflow becomes length (at the
-/// old scale) and the scale that puts the grown page exactly in the area is
-/// wanted. The result scale is the smallest of the old one and the wanted ones:
-/// the display zooms out, never back in. The length is clamped to what the
-/// geometry accepts, so a page held at its minimum (the graphs) or maximum does
-/// not hide motion that the next frame would have to repay.
-pub(crate) fn follow_step(axes: [AxisFollow; 2], scale: f32, motion: Vec2) -> ([f32; 2], f32) {
-    let motion = finite(motion);
-    let moved = [motion.x, motion.y];
-    let mut lengths = [axes[0].length, axes[1].length];
-    let mut next = scale;
-    if !(scale.is_finite() && scale > 0.0) {
-        return (lengths, scale);
+/// Per axis, the push is how far `wanted` is past the edge of the area on the
+/// corner's outward side. While at least one axis is pushed, each pushed axis
+/// is at least as long as puts its corner at the edge, and grows from there by
+/// [`PAGE_PUSH`] at the speed its push sets (the hand may be still),
+/// and the axes not pushed keep their length. When no axis is pushed, every
+/// axis is set from `wanted` at the scale now shown: the corner jumps under
+/// the pointer. A push on the anchor side grows nothing: the length is clamped
+/// to what the geometry accepts (the graphs). The scale is then the smallest of
+/// the old one and the one that puts the page, from its fixed anchor, inside the
+/// area: the display zooms out, never back in. A `wanted` or a bound that is not
+/// finite pushes nothing and moves nothing (invariant 10).
+pub(crate) fn follow_step(axes: [AxisFollow; 2], scale: f32, wanted: Vec2, dt: f32) -> FollowStep {
+    let mut step = FollowStep {
+        lengths: [axes[0].length, axes[1].length],
+        scale,
+        pushed: [false; 2],
+    };
+    if !(scale.is_finite() && scale > 0.0 && wanted.x.is_finite() && wanted.y.is_finite()) {
+        return step;
     }
+    let wanted = [wanted.x, wanted.y];
+    let mut push = [0.0_f32; 2];
+    for (i, axis) in axes.iter().enumerate() {
+        let (low, high) = axis.bounds;
+        if low.is_finite() && high.is_finite() {
+            push[i] = (axis.sign * push_past(wanted[i], low, high)).max(0.0);
+        }
+        step.pushed[i] = push[i] > 0.0;
+    }
+    let pushing = step.pushed[0] || step.pushed[1];
     for (i, axis) in axes.iter().enumerate() {
         let lead = axis.lead + axis.reserve;
-        let outer = axis.corner(scale) + axis.sign * lead * scale;
-        let wanted = outer + moved[i];
-        let (low, high) = axis.bounds;
-        let edge = if axis.sign > 0.0 { high } else { low };
-        let beyond = axis.sign * (wanted - edge);
-        let span = axis.sign * (edge - axis.anchor);
-        let extent = if beyond > 0.0 && span > 0.0 {
-            span / scale + beyond / scale
+        let range = axis.min.min(axis.max)..=axis.max;
+        let length = if !pushing {
+            (axis.sign * (wanted[i] - axis.anchor) / scale - lead)
+                .clamp(*range.start(), *range.end())
+        } else if step.pushed[i] {
+            // The corner first reaches the edge (a pointer that went out in one
+            // frame is not waited for), then the page grows from there.
+            let edge = if axis.sign > 0.0 {
+                axis.bounds.1
+            } else {
+                axis.bounds.0
+            };
+            let at_edge = axis.sign * (edge - axis.anchor) / scale - lead;
+            (axis.length.max(at_edge) + PAGE_PUSH.step(push[i], dt)).min(axis.max)
         } else {
-            axis.sign * (wanted - axis.anchor) / scale
+            axis.length
         };
-        let length = (extent - lead).clamp(axis.min.min(axis.max), axis.max);
-        lengths[i] = length;
-        if beyond > 0.0 {
-            if let Some(fit) = (AxisFollow { length, ..*axis }).scale_to_fit(length) {
-                next = next.min(fit);
+        step.lengths[i] = length;
+        if let Some(fit) = (AxisFollow { length, ..*axis }).scale_to_fit(length) {
+            // A hair of tolerance: a page already inside never creeps.
+            if fit < step.scale * (1.0 - 1.0e-5) {
+                step.scale = fit;
             }
         }
     }
-    (lengths, next)
+    step
 }
 
 #[cfg(test)]
@@ -165,96 +219,149 @@ mod tests {
         }
     }
 
-    fn step(x: AxisFollow, y: AxisFollow, scale: f32, dx: f32, dy: f32) -> ([f32; 2], f32) {
-        follow_step([x, y], scale, Vec2::new(dx, dy))
+    /// One frame with the pointer wanting the outer edge at `(x, y)` and a frame
+    /// time of `dt`.
+    fn step(x: AxisFollow, y: AxisFollow, scale: f32, at: (f32, f32), dt: f32) -> FollowStep {
+        follow_step([x, y], scale, Vec2::new(at.0, at.1), dt)
     }
 
-    /// Inside the area the corner follows the pointer at the scale now shown.
+    /// Inside the area the corner is under the pointer at the scale now shown.
     /// Witness: the scale frozen at the press when the scale has changed gives
-    /// 250 instead of 300.
+    /// 250 instead of 300 (here 100 + 200 / 0.5 = 500 at x = 200).
     #[test]
-    fn inside_the_area_the_corner_follows_at_the_scale_shown() {
-        let (lengths, scale) = step(right(), down(), 0.5, 50.0, 0.0);
-        assert_eq!(scale, 0.5);
-        assert_eq!(lengths[0], 300.0, "200 + 50 / 0.5");
-        assert_eq!(lengths[1], 100.0);
+    fn inside_the_area_the_corner_is_under_the_pointer_at_the_scale_shown() {
+        let moved = step(right(), down(), 0.5, (200.0, 150.0), 0.016);
+        assert_eq!(moved.scale, 0.5);
+        assert_eq!(moved.lengths[0], 200.0, "(200 - 100) / 0.5");
+        assert_eq!(moved.lengths[1], 100.0, "(150 - 100) / 0.5");
+        assert_eq!(moved.pushed, [false, false]);
     }
 
-    /// Past the edge the corner sits at the edge, the overflow grows the page
-    /// at the old scale, the scale shrinks, and the other axis' corner moves
-    /// toward its anchor on the screen.
-    /// Witness: no zoom-out leaves the scale at 1.0 and the length at 400.
+    /// Past the edge the length grows by the speed times the frame time, the
+    /// other axis keeps its length, and the scale puts the page at the edge.
+    /// Witness: no zoom-out leaves the scale at 1.0.
     #[test]
-    fn past_the_edge_the_page_grows_and_the_display_zooms_out() {
+    fn past_the_edge_the_page_grows_at_speed_and_the_display_zooms_out() {
         let x = right();
         let y = down();
-        // The corner is at 300, 200 from the edge at 500; 250 wanted beyond.
-        let (lengths, scale) = step(x, y, 1.0, 450.0, 0.0);
-        assert_eq!(lengths[0], 650.0, "to the edge (400) plus 250 of overflow");
-        assert!((scale - 400.0 / 650.0).abs() < 1e-6);
+        // 30 points past the edge at 500: 300 page points per second. The
+        // corner (at 300) first goes to the edge (a length of 400).
+        let moved = step(x, y, 1.0, (530.0, 20.0), 0.1);
+        assert_eq!(moved.pushed, [true, false]);
+        assert!((moved.lengths[0] - 430.0).abs() < 1e-3, "{:?}", moved);
+        assert_eq!(moved.lengths[1], 100.0, "the other axis keeps its length");
+        assert!((moved.scale - 400.0 / 430.0).abs() < 1e-5, "{moved:?}");
         let corner_x = AxisFollow {
-            length: lengths[0],
+            length: moved.lengths[0],
             ..x
         }
-        .corner(scale);
-        assert!((corner_x - 500.0).abs() < 1e-3, "the corner is at the edge");
-        let corner_y = AxisFollow {
-            length: lengths[1],
-            ..y
-        }
-        .corner(scale);
-        assert!(corner_y < y.corner(1.0), "y moved toward its anchor");
-        assert!(corner_y > y.anchor);
+        .corner(moved.scale);
+        assert!(corner_x <= 500.0 + 1e-3, "{corner_x}");
     }
 
-    /// Right after an overflow, going back inward shrinks the page at once.
-    /// Witness: an accumulator that keeps the overflow (not clamped to the
-    /// edge) needs the whole 250 of motion before the length moves.
+    /// The speed is the same in page points whatever the scale, and grows with
+    /// the push. Witness: a speed in screen points (divided by the scale).
     #[test]
-    fn coming_back_inward_has_no_dead_zone() {
-        let x = right();
-        let (lengths, scale) = step(x, down(), 1.0, 450.0, 0.0);
-        let at_edge = AxisFollow {
-            length: lengths[0],
-            ..x
+    fn the_speed_is_in_page_points_whatever_the_zoom() {
+        let grown = |scale: f32, push: f32| {
+            // Bounds so that a page of 200 points at `scale` is inside.
+            let x = AxisFollow {
+                bounds: (0.0, 100.0 + 200.0 * scale),
+                ..right()
+            };
+            let at = 100.0 + 200.0 * scale + push;
+            step(x, down(), scale, (at, 0.0), 0.05).lengths[0] - 200.0
         };
-        let (back, scale_back) = follow_step([at_edge, down()], scale, Vec2::new(-10.0, 0.0));
-        assert!(back[0] < lengths[0], "{} < {}", back[0], lengths[0]);
-        assert!((back[0] - (lengths[0] - 10.0 / scale)).abs() < 1e-3);
-        assert_eq!(scale_back, scale, "the display does not zoom back in");
-        let corner = AxisFollow {
-            length: back[0],
-            ..x
-        }
-        .corner(scale_back);
+        assert!((grown(1.0, 20.0) - grown(0.25, 20.0)).abs() < 1e-3);
+        assert!(grown(1.0, 40.0) > grown(1.0, 20.0) * 1.9);
+        assert!((grown(1.0, 20.0) - 10.0).abs() < 1e-3, "20 * 10 * 0.05");
+    }
+
+    /// A stall counts as one frame of the longest allowed time. Witness: no dt
+    /// clamp (the 5 s stall grows by 2000 points).
+    #[test]
+    fn a_stalled_frame_grows_by_the_longest_frame_time_only() {
+        let moved = step(right(), down(), 1.0, (540.0, 0.0), 5.0);
         assert!(
-            (corner - 490.0).abs() < 1e-3,
-            "the corner follows: {corner}"
+            (moved.lengths[0] - 400.0 - 40.0 * 10.0 * 0.1).abs() < 1e-3,
+            "{:?}",
+            moved
         );
     }
 
-    /// Below the graphs' minimum the length stops, and coming back outward
-    /// grows at once. Witness: no clamp (the length goes to 0 and further, the
-    /// way back repays it).
+    /// Pushed on the anchor side, nothing grows, the length is clamped to the
+    /// minimum. Witness: an unsigned push (the left side grows the page).
     #[test]
-    fn the_inward_stop_clamps_the_length_too() {
-        let x = right();
-        let (lengths, _) = step(x, down(), 1.0, -400.0, 0.0);
-        assert_eq!(lengths[0], 50.0);
-        let stopped = AxisFollow {
-            length: lengths[0],
-            ..x
+    fn a_push_on_the_anchor_side_grows_nothing() {
+        let to_the_left = AxisFollow {
+            bounds: (150.0, 500.0),
+            ..right()
         };
-        let (again, _) = follow_step([stopped, down()], 1.0, Vec2::new(10.0, 0.0));
-        assert_eq!(again[0], 60.0);
+        let moved = step(to_the_left, down(), 1.0, (100.0, 0.0), 0.1);
+        assert_eq!(moved.pushed, [false, false]);
+        assert_eq!(moved.lengths[0], 50.0, "clamped to the minimum");
     }
 
-    /// Non-finite motion changes nothing (invariant 10).
+    /// A diagonal push grows both axes, each at its own speed.
     #[test]
-    fn non_finite_motion_changes_nothing() {
-        let (lengths, scale) = step(right(), down(), 1.0, f32::NAN, f32::INFINITY);
-        assert_eq!(lengths, [200.0, 100.0]);
-        assert_eq!(scale, 1.0);
+    fn a_diagonal_push_grows_both_axes() {
+        let moved = step(right(), down(), 1.0, (540.0, 820.0), 0.1);
+        assert_eq!(moved.pushed, [true, true]);
+        assert!((moved.lengths[0] - 440.0).abs() < 1e-3, "{moved:?}");
+        assert!((moved.lengths[1] - 720.0).abs() < 1e-3, "{moved:?}");
+    }
+
+    /// With the pointer back inside, every axis is set from the pointer at the
+    /// scale now shown, the axis that was not pushed too.
+    /// Witness: the length kept for the axis that was not pushed.
+    #[test]
+    fn back_inside_every_axis_is_set_from_the_pointer() {
+        let grown = AxisFollow {
+            length: 650.0,
+            ..right()
+        };
+        let moved = step(grown, down(), 0.5, (300.0, 250.0), 0.016);
+        assert_eq!(moved.pushed, [false, false]);
+        assert_eq!(moved.lengths[0], 400.0, "(300 - 100) / 0.5");
+        assert_eq!(moved.lengths[1], 300.0, "(250 - 100) / 0.5");
+        assert_eq!(moved.scale, 0.5, "the display does not zoom back in");
+    }
+
+    /// Below the graphs' minimum the length stops, and coming back outward
+    /// grows at once. Witness: no clamp.
+    #[test]
+    fn the_inward_stop_clamps_the_length_too() {
+        let moved = step(right(), down(), 1.0, (-300.0, 0.0), 0.016);
+        assert_eq!(moved.lengths[0], 50.0);
+        let stopped = AxisFollow {
+            length: moved.lengths[0],
+            ..right()
+        };
+        let again = step(stopped, down(), 1.0, (160.0, 0.0), 0.016);
+        assert_eq!(again.lengths[0], 60.0);
+    }
+
+    /// The page never passes the longest length the geometry accepts.
+    #[test]
+    fn the_growth_stops_at_the_longest_page() {
+        let near_max = AxisFollow {
+            length: 19999.0,
+            ..right()
+        };
+        let moved = step(near_max, down(), 1.0, (900.0, 0.0), 0.1);
+        assert_eq!(moved.lengths[0], 20000.0);
+    }
+
+    /// A pointer or a frame time that is not finite changes nothing
+    /// (invariant 10).
+    #[test]
+    fn non_finite_input_changes_nothing() {
+        let moved = step(right(), down(), 1.0, (f32::NAN, f32::INFINITY), 0.1);
+        assert_eq!(moved.lengths, [200.0, 100.0]);
+        assert_eq!(moved.scale, 1.0);
+        assert_eq!(moved.pushed, [false, false]);
+        let no_time = step(right(), down(), 1.0, (540.0, 0.0), f32::NAN);
+        assert_eq!(no_time.lengths[0], 400.0, "at the edge, no growth");
     }
 
     /// A top corner (near side, title band above it): the band is part of the
@@ -271,15 +378,16 @@ mod tests {
             max: 20000.0,
             bounds: (100.0, 800.0),
         };
-        // Outer edge at 400 - 230 = 170; 100 of motion up goes 30 past 100.
-        let (lengths, scale) = follow_step([right(), up], 1.0, Vec2::new(0.0, -100.0));
-        assert_eq!(lengths[1], 200.0 + 70.0 + 30.0);
+        // 20 past the top edge at 100: 200 per second, 0.1 s.
+        let moved = step(right(), up, 1.0, (0.0, 80.0), 0.1);
+        assert_eq!(moved.pushed, [false, true]);
+        assert!((moved.lengths[1] - 290.0).abs() < 1e-3, "{moved:?}");
         let corner = AxisFollow {
-            length: lengths[1],
+            length: moved.lengths[1],
             ..up
         }
-        .corner(scale);
-        let outer = corner - up.lead * scale;
+        .corner(moved.scale);
+        let outer = corner - up.lead * moved.scale;
         assert!((outer - 100.0).abs() < 1e-3, "the band edge is at the area");
     }
 
@@ -305,24 +413,27 @@ mod tests {
     }
 
     /// The reserve keeps room for the snap: the scale that fits the page
-    /// counts it, and it starts zooming out before the corner is at the edge.
-    /// Witness: reserve ignored gives scale 400/650 (the corner at the edge).
+    /// counts it. Witness: reserve ignored gives scale 400 / (length) with the
+    /// corner at the edge.
     #[test]
     fn the_reserve_is_kept_inside_the_area_when_zooming_out() {
         let x = AxisFollow {
             reserve: 25.0,
             ..right()
         };
-        let (lengths, scale) = step(x, down(), 1.0, 450.0, 0.0);
+        let moved = step(x, down(), 1.0, (550.0, 0.0), 0.1);
         assert!(
-            (scale - 400.0 / (lengths[0] + 25.0)).abs() < 1e-5,
-            "{scale}"
+            (moved.scale - 400.0 / (moved.lengths[0] + 25.0)).abs() < 1e-5,
+            "{moved:?}"
         );
         let corner = AxisFollow {
-            length: lengths[0],
+            length: moved.lengths[0],
             ..x
         }
-        .corner(scale);
-        assert!((corner - (500.0 - 25.0 * scale)).abs() < 1e-3, "{corner}");
+        .corner(moved.scale);
+        assert!(
+            (corner - (500.0 - 25.0 * moved.scale)).abs() < 1e-3,
+            "{corner}"
+        );
     }
 }
