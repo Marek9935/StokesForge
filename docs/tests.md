@@ -1311,7 +1311,7 @@ A selection drag that reaches an edge of the grid keeps scrolling; the push past
 
 | Rule | Witness |
 |---|---|
-| speed: inside the edges 0, signed by the side, grows with the push, capped, proportional to the frame time (bounded), not finite gives 0 | `grid_autoscroll::tests::*` (constant speed: red) |
+| speed: inside the edges 0, signed by the side, grows with the push, capped, proportional to the frame time (bounded), not finite gives 0 | `edge_push::tests::*` (constant speed: red) |
 | `column_at` is the inverse of `column_x_range` (gutter, spacing, past the end, NaN, no column) | `column_at_is_the_inverse_of_column_x_range` |
 | a cell press then the pointer past the right edge, no more event: the grid scrolls and the cursor goes past the last column that was visible | `a_cell_drag_past_the_right_edge_scrolls_the_grid_with_the_hand_still` (`grid_autoscroll` call removed: red) |
 | a bigger push scrolls further | `a_bigger_push_scrolls_further` (constant speed: red) |

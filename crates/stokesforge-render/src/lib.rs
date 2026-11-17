@@ -72,6 +72,7 @@ pub mod clip;
 pub mod color;
 pub mod color_bar;
 pub mod decimate;
+pub mod edge_push;
 pub mod fonts;
 pub mod formula;
 pub mod framing;
