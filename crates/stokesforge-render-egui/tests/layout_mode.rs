@@ -3724,7 +3724,7 @@ fn after_the_release_nothing_grows() {
     held.go_to(&mut view, Pos2::new(contain.max.x + 24.0, held.at.y), none);
     held.wait(&mut view, none);
     let signals = held.release(&mut view, none);
-    assert_eq!(edited(&signals).1.is_some(), true);
+    assert!(edited(&signals).1.is_some());
     assert!(!view.layout_dragging());
     for _ in 0..4 {
         let out = held.wait(&mut view, none);
@@ -3751,39 +3751,56 @@ fn a_long_push_stops_at_the_longest_page() {
     );
 }
 
-/// #512, Ctrl on a regular grid: a push on the right leads and the height
-/// follows the ratio, exactly, at the release; even when the hand had pulled
-/// the height more than the width before (the pushed side leads all the same).
-/// Witness: the side that grew more before the push leading (the width stays
-/// at the ratio of the height: it does not grow while pushed).
+/// #512, Ctrl on a regular grid: Ctrl pressed while the width is pushed past the
+/// edge, the pushed side leads and the height follows the ratio, exactly, even
+/// though the hand had pulled the height by a larger relative change before:
+/// the width keeps growing while Ctrl is held, the height comes back to the
+/// ratio of the width, and the page keeps its ratio at the release.
+/// Witness: the side that grew more before the push leading (the height stays
+/// at the 300 points of the hand and the width follows it).
 #[test]
 fn with_ctrl_the_pushed_side_leads_and_the_other_keeps_the_ratio() {
     let fixture = Fixture::grid(2, 2, false, false, false);
-    let (context, mut view) = in_mode(&fixture);
-    let before = layout_of(&context, &mut view, &fixture);
-    let (w, h) = (
-        f64::from(before.size.0),
-        f64::from(before.size.1 - before.title_band),
-    );
-    let (from, contain, _) = grid_corner(&context, &mut view, &fixture, 100.0);
+    let none = egui::Modifiers::NONE;
     let ctrl = with_ctrl();
-    let mut held = Held::begin(&context, &mut view, &fixture, contain, from, ctrl);
-    held.dt = 0.05;
-    // The hand pulls the height first; the page is long enough below.
-    held.push(&mut view, egui::vec2(0.0, 60.0), ctrl);
-    held.go_to(&mut view, Pos2::new(contain.max.x + 24.0, held.at.y), ctrl);
-    for _ in 0..8 {
-        held.wait(&mut view, ctrl);
-    }
-    let slack = figure_slack(&held.release(&mut view, ctrl));
-    let (new_w, new_h) = (w + slack.right, h + slack.bottom);
+    let (w, h) = {
+        let (context, mut view) = in_mode(&fixture);
+        let before = layout_of(&context, &mut view, &fixture);
+        (
+            f64::from(before.size.0),
+            f64::from(before.size.1 - before.title_band),
+        )
+    };
+    let run = |ctrl_frames: usize| {
+        let (context, mut view) = in_mode(&fixture);
+        let (from, contain, _) = grid_corner(&context, &mut view, &fixture, 20.0);
+        let mut held = Held::begin(&context, &mut view, &fixture, contain, from, none);
+        held.dt = 0.05;
+        // The hand pulls the height first (a larger relative change than the
+        // width will have at the edge), then pushes the width without Ctrl.
+        held.push(&mut view, egui::vec2(0.0, 300.0), none);
+        held.go_to(&mut view, Pos2::new(contain.max.x + 24.0, held.at.y), none);
+        for _ in 0..3 {
+            held.wait(&mut view, none);
+        }
+        for _ in 0..ctrl_frames {
+            held.wait(&mut view, ctrl);
+        }
+        figure_slack(&held.release(&mut view, ctrl))
+    };
+    let (short, long) = (run(2), run(8));
+    let (new_w, new_h) = (w + long.right, h + long.bottom);
     assert!(
         (new_w / new_h - w / h).abs() < 0.01,
         "{new_w} x {new_h} vs {}",
         w / h
     );
     assert!(
-        slack.right > 100.0,
-        "the width grew while pushed: {slack:?}"
+        long.right > short.right + 40.0,
+        "the width keeps growing under Ctrl: {short:?} then {long:?}"
+    );
+    assert!(
+        long.bottom < 200.0,
+        "the height follows the pushed width, not the 300 of the hand: {long:?}"
     );
 }

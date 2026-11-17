@@ -46,13 +46,6 @@ pub(crate) fn glide_step(eased: f64, target: f64, dt: f32) -> f64 {
     }
 }
 
-fn finite(v: Vec2) -> Vec2 {
-    Vec2::new(
-        if v.x.is_finite() { v.x } else { 0.0 },
-        if v.y.is_finite() { v.y } else { 0.0 },
-    )
-}
-
 /// One axis of the drag: the frozen parameters and the page length so far.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct AxisFollow {
