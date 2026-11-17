@@ -1072,7 +1072,7 @@ which `graph_window.rs` turns into `Action::SetFreeLayout` (one `EditPlotSpec`,
 every handle, and the arrow keys move that graph: `GraphEvent::GridCellMoved` becomes `Action::MoveGridCell`
 (one `EditPlotSpec`, `PlotEditKind::MoveLayer`), whose work is `compose::move_cell` (to a cell: swap or
 hole; or `MoveTarget::NewLine` at a grid position, or `Beside` the cell of a layer, a new column or row made by `open_line`, the same code as
-`insert_cell`); a column or row left empty goes through `close_empty_lines`, the collapse `remove_cell`
+`insert_cell`; the new line takes the **moved graph's own** column width / row height (`sized_like`, #512), where `insert_cell` uses the reference's); a column or row left empty goes through `close_empty_lines`, the collapse `remove_cell`
 uses too. A release on an internal line between two graphs is a `MoveTarget::Beside` too (`GraphView::drop_place`, #504), so it is the same single `MoveLayer` step. Only the `row` / `column` of the moved layers change, never the layer numbers. The four edge bands
 (`stokesforge_render_egui::edge_band`, #503) are shared with the drop of workbook columns in `graph_window.rs`.
 `FigureFollow` also remembers the image's origin (`free_origin`):
