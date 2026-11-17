@@ -425,7 +425,7 @@ select a graph in the foreground with nothing selected in it, Ctrl+C, then
 (`wl-paste -t image/png > figure.png` to read a representation).
 
 **Tabs** (`state::PlotSettingsTab`, `plot-tab-*` keys, in English):
-"General" (title and its color, background, Text color and Axes color), "Plot Area" (layer title,
+"General" (title and its color, background, Text color and Axes color, Font and Text scale), "Plot Area" (layer title,
 grid lines), "Axes" (one side of the cell at a time, chosen in the vertical
 strip at the left of the page: axis title (quantity and units), scale, display,
 axis color; see "Axes tab: four sides" below),
@@ -449,6 +449,33 @@ Typst text (interface side: "Math", #322) goes through `formula_field`; any othe
 The test `each_reminder_example_compiles` checks that each example compiles. A
 series name left empty takes that of the column, displayed as is.
 
+**Graph font and Text scale (General tab, #545)**: two rows under the global
+colour rows (`global_text_rows` in `plot_settings.rs`), stored on the graph
+(`PlotSpec::text_font`, `text_scale`) and **read by rendering**, not written into
+the local fields. **Font** is the same list as the format toolbar (« Graph font »
+= the embedded default); **Text scale (%)** takes 25 to 400, Auto = 100 %. Every
+text left on Auto follows them (graph and layer titles, axis titles, tick
+numbers, legend, colour bar, free texts created since #545); a text whose family
+or size was set by hand keeps it, the size absolute (`GraphText`, `stokesforge-plot`: the one place
+that decides, see `docs/rendering.md` § Graph font and text scale). The format
+toolbar's size shows « Auto (N) » with the size drawn, scale included. The window
+is one history step (`GraphProperties`); Cancel writes nothing. The Title fonts
+theme family carries both. `pyst.set_graph(text_font=…, text_scale=…)`.
+
+**Every text size is a field of Graph Properties (#545, after the trial)**, an
+Auto-capable number field like the Legend tab's (`text_size_row`,
+`quantities::TEXT_FORMAT_SIZE`): General › **Title size** under Title color,
+Plot Area › **Layer title size** under Layer title, Axes › **Axis title size**
+under the axis title color and **Tick label size** under Show tick labels
+(Display; none on a mirror axis, which follows the opposite one), Legend ›
+**Font size (pt)**. Auto reads « Auto (N) », N = built-in size times the graph
+scale, in full (the size field is `wide`); a typed size is **absolute** (the
+scale does not multiply it, and the field shows what was typed). The tick label
+size is `AxisSpec::tick_label_size` (`Option<f64>`, per axis), classed in the
+Axes theme family, read through `GraphText::size` for measuring, tick count,
+edge reserves and drawing. Both views (toolbar, Graph Properties) edit the same
+fields; the window stays one history step.
+
 **Global colors (General tab, #542)**: Text color and Axes color
 (`plot-general-text-color`, `plot-general-axes-color`; the background is the row
 above them; they were on the Theme tab, form 514-4 V5) are laid out with the
@@ -457,7 +484,7 @@ collapsible section, S-L5). A global color is **written into the graph-level
 field only** (`PlotSpec::text_color` / `axes_color`, through
 `set_text_color`/`set_axes_color`, #550): a part with its own colour keeps it,
 and the parts left on automatic follow the global colour (resolution order in
-`docs/rendering.md`). Under each row a grey note says how many parts have their own color (`PlotSpec::parts_with_own_text_color` / `parts_with_own_axes_color`, plural key `plot-general-own-colors-note`); the button « Reset Parts to Graph Settings » (`plot-general-reset-parts`, `PlotSpec::reset_parts_to_graph`, greyed when no part has its own color) clears those own colors in the draft (one undo step on OK) and never touches the curves, the graph title's own Title color, the backgrounds, the legend frame or the tick mark colors. The Auto choice of a part's color picker reads « Auto (graph color) » (`plot-color-auto-graph`); the General rows keep « Auto (contrasts with background) ». Light and Dark put every part back to automatic (G2). Painting writes nothing: a value is written only when the user
+`docs/rendering.md`). Under each row a grey note says how many parts have their own color (`PlotSpec::parts_with_own_text_color` / `parts_with_own_axes_color`, plural key `plot-general-own-colors-note`); the button « Reset Parts to Graph Settings » (`plot-general-reset-parts`, `PlotSpec::reset_parts_to_graph`, below the Font and Text scale rows, greyed when no part has its own color, font or size: `reset_parts_enabled` adds `parts_with_own_font_or_size`) clears those own colors and puts every hand-set font family and size back to Auto in the draft (graph title, layer titles, axis titles, per-axis `tick_label_size`, legend font, free texts: family empty and `follows_graph_size = true`; one undo step on OK). It never touches the graph's Font, Text scale, Text color and Axes color, the curves, the graph title's own Title color, the backgrounds, the legend frame or the tick mark colors. The Auto choice of a part's color picker reads « Auto (graph color) » (`plot-color-auto-graph`); the General rows keep « Auto (contrasts with background) ». Light and Dark put every part back to automatic (G2). Painting writes nothing: a value is written only when the user
 changed it. Everything stays in the draft of the window: a single history step
 on confirmation. `stokesforge_plot::THEMES` (Light and Dark) now only holds the
 colors of the two first built-in themes (`builtin_themes`); the old two-button
@@ -535,8 +562,8 @@ Light (`light`) and Dark (`dark`), colour-only as before; then seven full-style
 themes, each built with the ordinary constructors and passed through
 `GraphTheme::capture` (so it holds no data): **Publication** (`publication`: one
 layer, plot area 8.5 cm wide, closed frame, ticks inside, black and greys,
-8-9 pt texts), **Publication Wide** (`publication-wide`: 17 cm), **Presentation**
-(`presentation`: large texts, 3 pt lines), **Fit + Residuals** (`fit-residuals`:
+text scale 60 %, every text on Auto), **Publication Wide** (`publication-wide`: 17 cm), **Presentation**
+(`presentation`: text scale 150 %, texts on Auto, 3 pt lines), **Fit + Residuals** (`fit-residuals`:
 two stacked layers, plot area heights 3:1, X numbers and title only under the
 bottom layer, data as red points and the fit as a line, residuals as points),
 **Kinetics** (`kinetics`: a group on the Viridis gradient, colour bar on the

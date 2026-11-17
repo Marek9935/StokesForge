@@ -493,6 +493,7 @@ pub(super) fn annotation_editor_ui(
     ctx: &egui::Context,
     view: &mut GraphView,
     graph: NodeId,
+    text_scale: f64,
     mut editor: AnnotationEditor,
     actions: &mut Vec<Action>,
 ) {
@@ -515,7 +516,11 @@ pub(super) fn annotation_editor_ui(
     let field = stokesforge_render_egui::annotation_field(
         center,
         size,
-        editor.draft.effective_size(),
+        // The size drawn: a text that follows the graph carries its text scale (#545).
+        editor.draft.resolved_size(stokesforge_plot::GraphText {
+            family: None,
+            scale: text_scale,
+        }),
         view.display_scale().unwrap_or(1.0),
     );
 
@@ -547,12 +552,20 @@ pub(super) fn annotation_editor_ui(
                         &mut env,
                     );
                     ui.label(tr!("plot-text-size"));
-                    number_field(
+                    // Same as the format bar: "Auto (N)" with the size really
+                    // drawn (#545) while the text follows the graph.
+                    let mut size = (!editor.draft.follows_graph_size).then_some(editor.draft.size);
+                    let hint = size_hint(&editor.draft, text_scale);
+                    let response = crate::number_field::auto_number_field(
                         ui,
                         ("annotation_size", id),
-                        &mut editor.draft.size,
-                        &quantities::TEXT_SIZE,
+                        &mut size,
+                        &quantities::TEXT_FORMAT_SIZE,
+                        &hint,
                     );
+                    if response.changed {
+                        set_draft_size(&mut editor.draft, size);
+                    }
                     ui.label(tr!("plot-text-rotation"));
                     number_field(
                         ui,
@@ -690,6 +703,33 @@ pub(super) fn annotation_editor_ui(
     ctx.data_mut(|data| data.insert_temp(id, editor));
 }
 
+/// The grayed text of the size field of the editor: "Auto (N)" with the size
+/// the text is drawn at, the graph scale included (#545), while it follows the
+/// graph; empty once a size was set by hand.
+fn size_hint(draft: &stokesforge_plot::AnnotationSpec, text_scale: f64) -> String {
+    let drawn = draft.resolved_size(stokesforge_plot::GraphText {
+        family: None,
+        scale: text_scale,
+    });
+    format!(
+        "{} ({})",
+        tr!("common-auto"),
+        crate::number_field::format_value(drawn, quantities::TEXT_FORMAT_SIZE.decimals)
+    )
+}
+
+/// An entry of the size field: a number sets the size by hand (the text stops
+/// following the graph scale), Auto gives it back.
+fn set_draft_size(draft: &mut stokesforge_plot::AnnotationSpec, size: Option<f64>) {
+    match size {
+        Some(size) => {
+            draft.size = size;
+            draft.follows_graph_size = false;
+        }
+        None => draft.follows_graph_size = true,
+    }
+}
+
 /// Validates the editor: one action, and only if something
 /// changed. An emptied text is removed (an empty text is not plotted, it
 /// could no longer be designated).
@@ -818,6 +858,20 @@ mod tests {
             focus: false,
             anchor: None,
         }
+    }
+
+    /// #545: the size field of the editor says "Auto (N)" with the drawn size
+    /// (16 at 150 % is 24), and an entry sets the size by hand. Witness: the
+    /// hint built from the unscaled `size` says 16.
+    #[test]
+    fn the_editor_size_field_shows_the_drawn_size_as_auto() {
+        let mut draft = AnnotationSpec::new("Peak", 1.0, 2.0);
+        assert_eq!(size_hint(&draft, 1.5), "Auto (24)");
+        assert_eq!(size_hint(&draft, 1.0), "Auto (16)");
+        set_draft_size(&mut draft, Some(12.0));
+        assert_eq!((draft.size, draft.follows_graph_size), (12.0, false));
+        set_draft_size(&mut draft, None);
+        assert!(draft.follows_graph_size);
     }
 
     /// #465/#466: a save closes the editors still open and sends their actions,
@@ -1081,7 +1135,7 @@ mod tests {
                     .ctx()
                     .data(|data| data.get_temp(annotation_editor_id(view)));
                 if let Some(editor) = editor {
-                    annotation_editor_ui(ui.ctx(), view, graph, editor, &mut actions);
+                    annotation_editor_ui(ui.ctx(), view, graph, 1.0, editor, &mut actions);
                 }
             });
             output.textures_delta.clear();

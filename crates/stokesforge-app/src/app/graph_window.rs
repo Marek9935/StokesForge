@@ -1305,7 +1305,11 @@ fn annotation_interactions(
     let id = annotation_editor_id(view);
     let editor: Option<AnnotationEditor> = ui.ctx().data(|data| data.get_temp(id));
     match editor {
-        Some(editor) => annotation_editor_ui(ui.ctx(), view, graph, editor, actions),
+        Some(editor) => {
+            let scale = stokesforge_core::compose::current_plot_spec(tree, graph)
+                .map_or(1.0, |spec| spec.graph_text().scale);
+            annotation_editor_ui(ui.ctx(), view, graph, scale, editor, actions)
+        }
         None => {
             // Delete removes the selected text, when no field has
             // focus (otherwise the key belongs to the input).

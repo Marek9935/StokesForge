@@ -8798,6 +8798,45 @@ fn changing_the_legend_text_source_is_one_undo_step() {
     assert_eq!(state.undo_label(), label_before, "a single history entry");
 }
 
+/// #545: the graph font and text scale set in Graph Properties › General are
+/// one history entry (the window's group), one Undo brings the old ones back,
+/// and Cancel writes nothing. Witness: a setting that bypasses the draft leaves
+/// the spec changed after Cancel; one entry per field fails the Undo.
+#[test]
+fn the_graph_font_and_text_scale_are_one_undo_step_and_cancel_writes_nothing() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let graph = plotted_graph(&mut state);
+    let before = state.plot_spec(graph).expect("spec");
+    assert_eq!((before.text_font.as_str(), before.text_scale), ("", None));
+    let label_before = state.undo_label();
+
+    let open = |state: &mut AppState| {
+        state.dispatch(Action::OpenPlotSettings {
+            graph,
+            tab: PlotSettingsTab::Graph,
+            axis: None,
+        });
+        let edit = state.plot_edit_mut().expect("draft");
+        edit.spec.text_font = "Libertinus Sans".to_string();
+        edit.spec.text_scale = Some(1.5);
+    };
+    open(&mut state);
+    state.cancel_plot_settings();
+    assert_eq!(state.plot_spec(graph).expect("spec"), before, "Cancel");
+    assert_eq!(state.undo_label(), label_before);
+
+    open(&mut state);
+    state.commit_plot_edit();
+    state.close_plot_settings();
+    let after = state.plot_spec(graph).expect("spec");
+    assert_eq!(after.text_font, "Libertinus Sans");
+    assert_eq!(after.text_scale, Some(1.5));
+    state.dispatch(Action::Undo);
+    assert_eq!(state.plot_spec(graph).expect("spec"), before, "one Undo");
+    assert_eq!(state.undo_label(), label_before, "a single history entry");
+}
+
 /// #507: the size set with the format toolbar (`Action::SetTextFont` on the
 /// legend) is what the Legend tab's draft holds when the window opens, and a
 /// size set while the window is open reaches the draft too (an untouched draft

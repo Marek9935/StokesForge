@@ -124,8 +124,8 @@ pub const FONT_FAMILY: &str = "sans-serif";
 /// many is impossible; the fallback is described in [`grid_of`].
 pub const MAX_CELLS: usize = 256;
 
+use stokesforge_plot::{GraphText, MAX_FRAME_SIZE, MIN_FRAME_SIZE};
 pub use stokesforge_plot::{DEFAULT_FIGURE_SIZE, FALLBACK_FRAME, MIN_CELL};
-use stokesforge_plot::{MAX_FRAME_SIZE, MIN_FRAME_SIZE};
 
 /// Which axes of a drawn layer had data to frame, see [`DrawnPanel::has_data`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -316,6 +316,10 @@ pub struct AxisArea {
     /// area: 0 in general, a multiple of `size` for the axis of a
     /// superimposed layer stacked behind the axes of older layers (#168).
     pub offset: u32,
+    /// Pixels the title zone gained from larger text (#545) or lost to a graph
+    /// scale under 100 %, 0 at the built-in sizes: the hit test moves the title
+    /// band by as much.
+    pub title_grow: i32,
 }
 
 /// The tick areas of a panel.
@@ -481,6 +485,7 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
     let title_style = font_style(
         &spec.title_font,
         TITLE_SIZE,
+        spec.graph_text(),
         title_color,
         root.dim_in_pixel().0,
     );
@@ -549,7 +554,9 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
             &layout,
             &plans,
             Some(root_width),
-            &mut |text, font, size, width| text_band(root, text, font, size, width),
+            &mut |text, font, size, width| {
+                text_band(root, text, font, size, spec.graph_text(), width)
+            },
             &mut |_| Ok(title_height),
         )?)
     } else {
@@ -585,7 +592,9 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
                     frames,
                     &edges,
                     Some(root_width),
-                    &mut |text, font, size, width| text_band(root, text, font, size, width),
+                    &mut |text, font, size, width| {
+                        text_band(root, text, font, size, spec.graph_text(), width)
+                    },
                     &mut |_| Ok(title_height),
                 )?)
             }
@@ -724,6 +733,7 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
             bases.get(&cell_index),
             &overlay_panels,
             plot.spec.decimal_comma,
+            plot.spec.graph_text(),
             figure_texts,
             graph_inks,
         )?;
@@ -883,12 +893,12 @@ impl CellPlan {
     fn gutters(&self, band: u32) -> Gutters {
         let area = |visible: bool, wanted: u32| if visible { wanted } else { 0 };
         Gutters {
-            left: MARGIN + area(self.left, Y_LABEL_AREA),
+            left: MARGIN + area(self.left, self.left_area()),
             right: MARGIN + area(self.right, self.right_wanted()) + self.bar_right
                 - self.tuck_right(self.right_wanted_area()),
             top: MARGIN + area(self.top, self.top_wanted()),
-            bottom: MARGIN + area(self.bottom, X_LABEL_AREA) + self.bar_bottom
-                - self.tuck_bottom(area(self.bottom, X_LABEL_AREA)),
+            bottom: MARGIN + area(self.bottom, self.bottom_area()) + self.bar_bottom
+                - self.tuck_bottom(area(self.bottom, self.bottom_area())),
             band,
         }
     }
@@ -923,13 +933,18 @@ fn edge_reserves<DB: DrawingBackend>(
     probe: &DrawingArea<DB, Shift>,
 ) -> Vec<(u32, u32)> {
     let mut reserves = vec![(0_u32, 0_u32); layout.columns];
-    let style = text_style(LABEL_SIZE, (0, 0, 0, 255));
-    let width_of = |text: &str| -> f64 {
-        probe
-            .estimate_text_size(text, &style)
-            .map_or(0.0, |size| f64::from(size.0))
-    };
     for (index, panel) in spec.panels.iter().enumerate() {
+        // The numbers of this layer's X axis, at the size of that axis (#545).
+        let style = tick_style(
+            spec.graph_text(),
+            panel.bottom.tick_label_size,
+            (0, 0, 0, 255),
+        );
+        let width_of = |text: &str| -> f64 {
+            probe
+                .estimate_text_size(text, &style)
+                .map_or(0.0, |size| f64::from(size.0))
+        };
         let Some(cell) = layout.cells.get(index).copied() else {
             continue;
         };
@@ -1013,8 +1028,10 @@ fn cell_plans<DB: DrawingBackend>(
                 crate::color_bar::band(
                     panel.color_bar_in_order().as_deref(),
                     &panel.legend.font,
+                    spec.graph_text(),
                     probe,
                 )?,
+                spec.graph_text(),
             );
         } else {
             ranks.push((0, 0));
@@ -1138,8 +1155,9 @@ impl ExplicitGrid {
     ) -> Result<Self, E> {
         let (frame_widths, frame_heights) = frames;
         let place = Placement::of(spec);
-        let reserve_x = MARGIN + Y_LABEL_AREA;
-        let reserve_y = MARGIN + X_LABEL_AREA;
+        let (reserve_left, reserve_bottom) = CellPlan::reserve_of(spec.graph_text());
+        let reserve_x = MARGIN + reserve_left;
+        let reserve_y = MARGIN + reserve_bottom;
         let mut overflow = false;
         // Horizontally first: the width of the figure sets the width of the
         // title boxes, hence the height of the panel title bands.
@@ -1375,8 +1393,9 @@ impl FreeLayout {
         measure_title: &mut MeasureTitle<'_, E>,
     ) -> Result<Self, E> {
         let fixed = spec.fixed_figure;
-        let reserve_x = MARGIN + Y_LABEL_AREA;
-        let reserve_y = MARGIN + X_LABEL_AREA;
+        let (reserve_left, reserve_bottom) = CellPlan::reserve_of(spec.graph_text());
+        let reserve_x = MARGIN + reserve_left;
+        let reserve_y = MARGIN + reserve_bottom;
         let keys: Vec<usize> = layout
             .cells
             .iter()
@@ -1717,7 +1736,9 @@ pub fn figure_layout<DB: DrawingBackend>(
             &layout,
             &plans,
             None,
-            &mut |text, font, size, width| text_band(probe, text, font, size, width),
+            &mut |text, font, size, width| {
+                text_band(probe, text, font, size, spec.graph_text(), width)
+            },
             &mut |width| graph_title_band(spec, probe, width),
         )?;
         let natural = free.natural_size();
@@ -1806,7 +1827,7 @@ pub fn figure_layout<DB: DrawingBackend>(
         frames,
         &edges,
         None,
-        &mut |text, font, size, width| text_band(probe, text, font, size, width),
+        &mut |text, font, size, width| text_band(probe, text, font, size, spec.graph_text(), width),
         &mut |width| graph_title_band(spec, probe, width),
     )?;
     let band = grid.title_band;
@@ -2435,7 +2456,7 @@ pub fn place_beside<DB: DrawingBackend>(
     let frame = spec.panels[spec.cell_bases()[panel]].sanitized_free_frame();
     // The bands a new, default layer asks for around its frame.
     let mut plan = CellPlan::default();
-    plan.add(&PanelSpec::default(), (0, 0));
+    plan.add(&PanelSpec::default(), (0, 0), spec.graph_text());
     let new = plan.gutters(0);
     let (new_left, new_top) = (f64::from(new.left), f64::from(new.top));
     let (width, height) = (
@@ -2509,7 +2530,7 @@ fn drawn_legacy_frames<DB: DrawingBackend>(
     let row_breaks = fit_breaks(None, layout.rows, total_height.saturating_sub(band));
     let (plans, _, _) = cell_plans(spec, &layout, probe)?;
     let bands = panel_bands(spec, &layout, width, &mut |text, font, size, width| {
-        text_band(probe, text, font, size, width)
+        text_band(probe, text, font, size, spec.graph_text(), width)
     })?;
     let mut widths = vec![0.0_f64; layout.columns];
     let mut heights = vec![0.0_f64; layout.rows];
@@ -2528,10 +2549,10 @@ fn drawn_legacy_frames<DB: DrawingBackend>(
             .1
             .saturating_sub(bands.get(&cell).copied().unwrap_or(0));
         let lost_x = 2 * MARGIN
-            + label_area(plan.left, Y_LABEL_AREA, outer.0)
+            + label_area(plan.left, plan.left_area(), outer.0)
             + label_area(plan.right, plan.right_wanted(), outer.0);
         let lost_y = 2 * MARGIN
-            + label_area(plan.bottom, X_LABEL_AREA, inner_height)
+            + label_area(plan.bottom, plan.bottom_area(), inner_height)
             + label_area(plan.top, plan.top_wanted(), inner_height);
         widths[column] = widths[column].max(f64::from(outer.0.saturating_sub(lost_x)));
         heights[row] = heights[row].max(f64::from(inner_height.saturating_sub(lost_y)));
@@ -2562,9 +2583,10 @@ fn text_band<DB: DrawingBackend>(
     text: &str,
     font: &stokesforge_plot::TextFont,
     size: f64,
+    graph: GraphText<'_>,
     width: u32,
 ) -> Result<u32, DrawingAreaErrorKind<DB::ErrorType>> {
-    let style = font_style(font, size, (0, 0, 0, 255), width);
+    let style = font_style(font, size, graph, (0, 0, 0, 255), width);
     let (_, text_height) = area.estimate_text_size(text, &style)?;
     Ok(text_height + (text_height / 2).min(5) * 2)
 }
@@ -2579,7 +2601,14 @@ fn graph_title_band<DB: DrawingBackend>(
     if !spec.title_visible || spec.title.is_empty() {
         return Ok(0);
     }
-    text_band(probe, &spec.title, &spec.title_font, TITLE_SIZE, width)
+    text_band(
+        probe,
+        &spec.title,
+        &spec.title_font,
+        TITLE_SIZE,
+        spec.graph_text(),
+        width,
+    )
 }
 
 /// The area under the band a title would occupy, **without** writing the
@@ -2764,10 +2793,158 @@ struct CellPlan {
     /// right after the tick labels (#499).
     bottom_title: bool,
     right_title: bool,
+    /// Room the resolved text sizes add to the axis areas (#545), the largest
+    /// of the layers: zero at the built-in sizes.
+    grow_bottom: Grow,
+    grow_left: Grow,
+    grow_top: Grow,
+    grow_right: Grow,
+    /// Factor of the default bands under a graph scale below 100 % (#545).
+    shrink: BandShrink,
+}
+
+/// The factor the default axis bands are scaled by: the graph scale when it
+/// is below 100 %, else 1 (a band never grows from the scale alone, and a
+/// hand-set size never shrinks it). The default is 1.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct BandShrink(f64);
+
+impl Default for BandShrink {
+    fn default() -> Self {
+        Self(1.0)
+    }
+}
+
+impl BandShrink {
+    fn of(graph: GraphText<'_>) -> Self {
+        Self(graph.scale.clamp(GraphText::SCALE_RANGE.0, 1.0))
+    }
+
+    /// A built-in band depth, scaled (exact at 1).
+    fn band(self, base: u32) -> u32 {
+        (f64::from(base) * self.0).round() as u32
+    }
+
+    /// A built-in text size, scaled and kept in the size range.
+    fn text(self, built_in: f64) -> f64 {
+        (built_in * self.0).max(stokesforge_plot::TextFont::SIZE_RANGE.0.min(built_in))
+    }
+}
+
+/// What an axis area gains from larger text (#545): `ticks` for the tick
+/// marks and numbers, `title` for the axis title, in pixels. Both zero at the
+/// built-in sizes, so the bands of an untouched graph do not move.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Grow {
+    ticks: u32,
+    title: u32,
+}
+
+impl Grow {
+    /// An axis of the given depth of ticks (`ticks_depth`) and title zone
+    /// (`title_zone`), with its title font under the graph settings.
+    fn of(
+        axis: &AxisSpec,
+        graph: GraphText<'_>,
+        shrink: BandShrink,
+        ticks_depth: u32,
+        title_zone: u32,
+    ) -> Self {
+        Self {
+            ticks: grown_room(
+                shrink.band(ticks_depth),
+                graph.size(axis.tick_label_size, LABEL_SIZE),
+                shrink.text(LABEL_SIZE),
+            ),
+            title: grown_room(
+                shrink.band(title_zone),
+                axis.title_font.resolved_size(graph, AXIS_DESC_SIZE),
+                shrink.text(AXIS_DESC_SIZE),
+            ),
+        }
+    }
+
+    fn total(self) -> u32 {
+        self.ticks + self.title
+    }
+
+    fn max(self, other: Self) -> Self {
+        Self {
+            ticks: self.ticks.max(other.ticks),
+            title: self.title.max(other.title),
+        }
+    }
 }
 
 impl CellPlan {
-    fn add(&mut self, spec: &PanelSpec, (bar_bottom, bar_right): (u32, u32)) {
+    /// Change of the title band of the hit test against the built-in one: the
+    /// growth of the title zone, less what a graph scale under 100 % took off
+    /// the default band.
+    fn title_delta(&self, grow: Grow) -> i32 {
+        let lost = f64::from(crate::hit::AXIS_TITLE_BAND as u32) * (1.0 - self.shrink.0);
+        grow.title as i32 - lost.round() as i32
+    }
+
+    /// Height of the bottom axis area: today's [`X_LABEL_AREA`] plus the
+    /// growth of the text (#545).
+    fn bottom_area(&self) -> u32 {
+        self.shrink.band(X_LABEL_AREA) + self.grow_bottom.total()
+    }
+
+    /// Width of the left axis area (same rule).
+    fn left_area(&self) -> u32 {
+        self.shrink.band(Y_LABEL_AREA) + self.grow_left.total()
+    }
+
+    /// Height of one top axis band (same rule).
+    fn top_unit(&self) -> u32 {
+        self.shrink.band(X_LABEL_AREA) + self.grow_top.total()
+    }
+
+    /// Width of one right axis band (same rule).
+    fn right_unit(&self) -> u32 {
+        self.shrink.band(Y_LABEL_AREA) + self.grow_right.total()
+    }
+
+    /// The axis areas `(left, bottom)` of a default layer under the graph
+    /// settings: what a "Fixed" figure reserves per side.
+    fn reserve_of(graph: GraphText<'_>) -> (u32, u32) {
+        let mut plan = CellPlan::default();
+        plan.add(&PanelSpec::default(), (0, 0), graph);
+        (plan.left_area(), plan.bottom_area())
+    }
+
+    fn add(&mut self, spec: &PanelSpec, (bar_bottom, bar_right): (u32, u32), graph: GraphText<'_>) {
+        self.shrink = BandShrink::of(graph);
+        let shrink = self.shrink;
+        let x_axis = |axis: &AxisSpec| {
+            Grow::of(
+                axis,
+                graph,
+                shrink,
+                X_TICKS_DEPTH,
+                X_LABEL_AREA - X_TICKS_DEPTH,
+            )
+        };
+        let y_axis = |axis: &AxisSpec| {
+            Grow::of(
+                axis,
+                graph,
+                shrink,
+                Y_TICKS_DEPTH,
+                Y_LABEL_AREA - Y_TICKS_DEPTH,
+            )
+        };
+        self.grow_bottom = self.grow_bottom.max(x_axis(&spec.bottom));
+        self.grow_left = self.grow_left.max(y_axis(&spec.left));
+        self.grow_top = self
+            .grow_top
+            .max(x_axis(&spec.top))
+            .max(x_axis(&spec.bottom));
+        self.grow_right = self
+            .grow_right
+            .max(y_axis(&spec.right))
+            .max(y_axis(&spec.left));
         // The bands of the bars of the cell stack, in the order of the layers
         // (a layer draws its bar after the bands of the previous ones).
         self.bar_bottom += bar_bottom;
@@ -2814,7 +2991,9 @@ impl CellPlan {
     /// the area given.
     fn tuck_bottom(&self, area: u32) -> u32 {
         if self.bar_bottom > 0 && self.bottom && !self.bottom_title {
-            X_LABEL_AREA.saturating_sub(X_TICKS_DEPTH).min(area)
+            self.bottom_area()
+                .saturating_sub(self.shrink.band(X_TICKS_DEPTH) + self.grow_bottom.ticks)
+                .min(area)
         } else {
             0
         }
@@ -2822,8 +3001,10 @@ impl CellPlan {
 
     /// Same for a bar right of the frame and the right axis area.
     fn tuck_right(&self, area: u32) -> u32 {
-        if self.bar_right > 0 && self.right && !self.right_title && area == Y_LABEL_AREA {
-            Y_LABEL_AREA.saturating_sub(Y_TICKS_DEPTH).min(area)
+        if self.bar_right > 0 && self.right && !self.right_title && area == self.right_unit() {
+            self.right_unit()
+                .saturating_sub(self.shrink.band(Y_TICKS_DEPTH) + self.grow_right.ticks)
+                .min(area)
         } else {
             0
         }
@@ -2859,9 +3040,9 @@ impl CellPlan {
     /// its tick marks.
     fn top_wanted(&self) -> u32 {
         if self.top_overlay {
-            X_LABEL_AREA.saturating_mul(self.top_levels.max(1))
+            self.top_unit().saturating_mul(self.top_levels.max(1))
         } else if self.top_labels {
-            X_LABEL_AREA
+            self.top_unit()
         } else {
             BARE_LABEL_AREA
         }
@@ -2871,9 +3052,9 @@ impl CellPlan {
     /// `right` is then already true without a mirror).
     fn right_wanted(&self) -> u32 {
         if self.right_overlay {
-            Y_LABEL_AREA.saturating_mul(self.right_slots())
+            self.right_unit().saturating_mul(self.right_slots())
         } else if self.right_data || self.right_labels {
-            Y_LABEL_AREA
+            self.right_unit()
         } else {
             BARE_LABEL_AREA
         }
@@ -2908,6 +3089,7 @@ fn draw_panel<DB: DrawingBackend>(
     base: Option<&BaseFrame<DB>>,
     legend_overlays: &[&ResolvedPanel<'_>],
     decimal_comma: bool,
+    graph: GraphText<'_>,
     figure_texts: &FigureTexts,
     graph_inks: GraphInks,
 ) -> Result<(DrawnPanel, Projection, BaseFrame<DB>), DrawingAreaErrorKind<DB::ErrorType>> {
@@ -3015,6 +3197,7 @@ fn draw_panel<DB: DrawingBackend>(
     let title_style = font_style(
         &spec.title_font,
         PANEL_TITLE_SIZE,
+        graph,
         graph_inks.text(&spec.title_color, ink),
         canvas.dim_in_pixel().0,
     );
@@ -3085,9 +3268,9 @@ fn draw_panel<DB: DrawingBackend>(
             label_area(visible, wanted, available)
         }
     };
-    let x_label_area = area_of(plan.bottom, X_LABEL_AREA, height);
+    let x_label_area = area_of(plan.bottom, plan.bottom_area(), height);
     let top_label_area = area_of(plan.top, plan.top_wanted(), height);
-    let y_label_area = area_of(plan.left, Y_LABEL_AREA, width);
+    let y_label_area = area_of(plan.left, plan.left_area(), width);
     let right_label_area = area_of(plan.right, plan.right_wanted(), width);
 
     let mut builder = ChartBuilder::on(&area);
@@ -3116,45 +3299,52 @@ fn draw_panel<DB: DrawingBackend>(
         .build_cartesian_2d(0.0..1.0, 0.0..1.0)?
         .plotting_area()
         .dim_in_pixel();
-    let label_style = text_style(LABEL_SIZE, opaque(ink));
-    let label_width = |text: &str| -> f64 {
-        area.estimate_text_size(text, &label_style)
-            .map_or(0.0, |size| f64::from(size.0))
-    };
-    let label_height = |text: &str| -> f64 {
-        area.estimate_text_size(text, &label_style)
-            .map_or(0.0, |size| f64::from(size.1))
-    };
-    let count_of = |scale: AxisScale, range: (f64, f64), horizontal: bool| -> usize {
+    // Each axis counts its ticks with the numbers at its own size (#545).
+    let style_of = |axis: &AxisSpec| tick_style(graph, axis.tick_label_size, opaque(ink));
+    let count_of = |scale: AxisScale,
+                    range: (f64, f64),
+                    horizontal: bool,
+                    style: &TextStyle<'static>|
+     -> usize {
         if horizontal {
+            let width = |text: &str| -> f64 {
+                area.estimate_text_size(text, style)
+                    .map_or(0.0, |size| f64::from(size.0))
+            };
             scale::tick_count(
                 scale,
                 range,
                 f64::from(axis_width),
                 scale::AxisDirection::Horizontal,
                 decimal_comma,
-                &label_width,
+                &width,
             )
         } else {
+            let height = |text: &str| -> f64 {
+                area.estimate_text_size(text, style)
+                    .map_or(0.0, |size| f64::from(size.1))
+            };
             scale::tick_count(
                 scale,
                 range,
                 f64::from(axis_height),
                 scale::AxisDirection::Vertical,
                 decimal_comma,
-                &label_height,
+                &height,
             )
         }
     };
     let x_count = match base {
         Some(base) if !x_own => base.x_count,
-        _ => count_of(x_scale, x_range, true),
+        _ => count_of(x_scale, x_range, true, &style_of(&spec.bottom)),
     };
     let y_count = match base {
         Some(base) if !y_own => base.y_count,
-        _ => count_of(y_scale, y_range, false),
+        _ => count_of(y_scale, y_range, false, &style_of(&spec.left)),
     };
-    let y2_count = y2_range.map_or(y_count, |range| count_of(y2_scale, range, false));
+    let y2_count = y2_range.map_or(y_count, |range| {
+        count_of(y2_scale, range, false, &style_of(&spec.right))
+    });
     let chart = builder.build_cartesian_2d(x_range.0..x_range.1, y_range.0..y_range.1)?;
 
     // The secondary axis is **always** attached, even unused: it takes from
@@ -3341,7 +3531,7 @@ fn draw_panel<DB: DrawingBackend>(
     // are displayed at the top and on the right, through Plotters' secondary
     // axes (same frame as the layer itself, see below).
     if overlay.is_none() {
-        let colors = AxisColors::of(&spec.bottom, ink, &graph_inks, figure_width);
+        let colors = AxisColors::of(&spec.bottom, ink, &graph_inks, figure_width, graph);
         let custom = custom_ticks(&spec.bottom);
         for pass in mesh_passes(custom, spec.bottom.tick_labels) {
             let mut mesh = chart.configure_mesh();
@@ -3388,7 +3578,7 @@ fn draw_panel<DB: DrawingBackend>(
         }
     }
     if overlay.is_none() {
-        let colors = AxisColors::of(&spec.left, ink, &graph_inks, figure_width);
+        let colors = AxisColors::of(&spec.left, ink, &graph_inks, figure_width, graph);
         let custom = custom_ticks(&spec.left);
         for pass in mesh_passes(custom, spec.left.tick_labels) {
             let mut mesh = chart.configure_mesh();
@@ -3446,7 +3636,7 @@ fn draw_panel<DB: DrawingBackend>(
                 String::new()
             }
         };
-        let colors = AxisColors::of(&spec.right, ink, &graph_inks, figure_width);
+        let colors = AxisColors::of(&spec.right, ink, &graph_inks, figure_width, graph);
         // The top tick marks only count if the top mirror is drawn.
         let top_custom = mirror_top && custom_ticks(&spec.top);
         let custom = custom_ticks(&spec.right) || top_custom;
@@ -3455,7 +3645,7 @@ fn draw_panel<DB: DrawingBackend>(
             spec.right.tick_labels || (mirror_top && spec.top.tick_labels),
         ) {
             let mut mesh = chart.configure_secondary_axes();
-            mesh.label_style(text_style(LABEL_SIZE, colors.ticks))
+            mesh.label_style(colors.tick_style.clone())
                 .axis_desc_style(colors.title_style.clone())
                 .axis_style(rgba(colors.ticks));
             if pass.rest {
@@ -3519,7 +3709,7 @@ fn draw_panel<DB: DrawingBackend>(
     // the left, without a title. A right axis with data is already drawn
     // above; only the top mirror is then added.
     if (mirror_top || mirror_right) && y2_range.is_none() {
-        let colors = AxisColors::of(&spec.bottom, ink, &graph_inks, figure_width);
+        let colors = AxisColors::of(&spec.bottom, ink, &graph_inks, figure_width, graph);
         let custom_top = mirror_top && custom_ticks(&spec.top);
         let custom_right = mirror_right && custom_ticks(&spec.right);
         let custom = custom_top || custom_right;
@@ -3527,7 +3717,7 @@ fn draw_panel<DB: DrawingBackend>(
             (mirror_top && spec.top.tick_labels) || (mirror_right && spec.right.tick_labels);
         for pass in mesh_passes(custom, labels) {
             let mut mesh = chart.configure_secondary_axes();
-            mesh.label_style(text_style(LABEL_SIZE, colors.ticks))
+            mesh.label_style(colors.tick_style.clone())
                 .axis_style(rgba(colors.ticks));
             if !pass.line {
                 mesh.axis_style(NO_INK);
@@ -3602,8 +3792,8 @@ fn draw_panel<DB: DrawingBackend>(
     if let Some(o) = overlay {
         let show_x = o.x_top && spec.bottom.visible && top_area > 0;
         let show_y = o.y_right && spec.left.visible && right_area > 0;
-        let colors_x = AxisColors::of(&spec.bottom, ink, &graph_inks, figure_width);
-        let colors_y = AxisColors::of(&spec.left, ink, &graph_inks, figure_width);
+        let colors_x = AxisColors::of(&spec.bottom, ink, &graph_inks, figure_width, graph);
+        let colors_y = AxisColors::of(&spec.left, ink, &graph_inks, figure_width, graph);
         let stub = 4;
         if show_x {
             let y0 = top_label_area.saturating_sub(top_offset + top_area);
@@ -3619,7 +3809,7 @@ fn draw_panel<DB: DrawingBackend>(
                     .build_cartesian_2d(x_range.0..x_range.1, y_range.0..y_range.1)?
                     .set_secondary_coord(x_range.0..x_range.1, y_range.0..y_range.1);
                 let mut mesh = axis.configure_secondary_axes();
-                mesh.label_style(text_style(LABEL_SIZE, colors_x.ticks))
+                mesh.label_style(colors_x.tick_style.clone())
                     .axis_desc_style(colors_x.title_style.clone())
                     .axis_style(rgba(colors_x.ticks))
                     .x_desc(plotters_desc(&spec.bottom, bottom_anchor))
@@ -3645,7 +3835,7 @@ fn draw_panel<DB: DrawingBackend>(
                     .build_cartesian_2d(x_range.0..x_range.1, y_range.0..y_range.1)?
                     .set_secondary_coord(x_range.0..x_range.1, y_range.0..y_range.1);
                 let mut mesh = axis.configure_secondary_axes();
-                mesh.label_style(text_style(LABEL_SIZE, colors_y.ticks))
+                mesh.label_style(colors_y.tick_style.clone())
                     .axis_desc_style(colors_y.title_style.clone())
                     .axis_style(rgba(colors_y.ticks))
                     .y_desc(plotters_desc(&spec.left, left_anchor))
@@ -3672,7 +3862,7 @@ fn draw_panel<DB: DrawingBackend>(
     if overlay.is_none() {
         let (left, right) = (origin.0 - 1, origin.0 + size.0 as i32);
         let (top, bottom) = (origin.1 - 1, origin.1 + size.1 as i32);
-        let ink = rgba(AxisColors::of(&spec.bottom, ink, &graph_inks, figure_width).ticks);
+        let ink = rgba(AxisColors::of(&spec.bottom, ink, &graph_inks, figure_width, graph).ticks);
         for (vertical, horizontal, x, y) in [
             (plan.left, plan.bottom, left, bottom),
             (plan.right, plan.bottom, right, bottom),
@@ -3726,6 +3916,7 @@ fn draw_panel<DB: DrawingBackend>(
                     && !spec.bottom.display_label().is_empty()
                     && bottom_anchor.is_none(),
                 offset: 0,
+                title_grow: plan.title_delta(plan.grow_bottom),
             },
             left: AxisArea {
                 size: y_area,
@@ -3734,9 +3925,11 @@ fn draw_panel<DB: DrawingBackend>(
                     && !spec.left.display_label().is_empty()
                     && left_anchor.is_none(),
                 offset: 0,
+                title_grow: plan.title_delta(plan.grow_left),
             },
             right: AxisArea {
                 size: right_area,
+                title_grow: plan.title_delta(plan.grow_right),
                 offset: if overlay.is_some() { right_offset } else { 0 },
                 titled: match overlay {
                     Some(_) => {
@@ -3753,6 +3946,7 @@ fn draw_panel<DB: DrawingBackend>(
             },
             top: AxisArea {
                 size: top_area,
+                title_grow: plan.title_delta(plan.grow_top),
                 offset: if overlay.is_some() { top_offset } else { 0 },
                 titled: spec.bottom.title_visible
                     && !spec.bottom.display_label().is_empty()
@@ -3833,7 +4027,7 @@ fn draw_panel<DB: DrawingBackend>(
         if !axis.title_visible || label.is_empty() || anchor.is_some() || area_size == 0 {
             continue;
         }
-        let colors = AxisColors::of(axis, ink, &graph_inks, figure_width);
+        let colors = AxisColors::of(axis, ink, &graph_inks, figure_width, graph);
         let text_size = area.estimate_text_size(&label, &colors.title_style)?;
         let half = text_size.1 as f64 / 2.0;
         let area_size = area_size as f64;
@@ -3976,13 +4170,14 @@ fn draw_panel<DB: DrawingBackend>(
             typed: font_style(
                 &spec.legend.font,
                 LABEL_SIZE,
+                graph,
                 legend_ink,
                 canvas.dim_in_pixel().0,
             ),
             literal: literal_style_font(
-                spec.legend.font.effective_size(LABEL_SIZE),
+                spec.legend.font.resolved_size(graph, LABEL_SIZE),
                 legend_ink,
-                spec.legend.font.family(),
+                spec.legend.font.resolved_family(graph),
             ),
         },
         figure_texts,
@@ -4029,6 +4224,7 @@ fn draw_panel<DB: DrawingBackend>(
             canvas,
             bar,
             &spec.legend.font,
+            graph,
             &segments,
             &crate::color_bar::BarFrame {
                 frame: (origin, size),
@@ -4042,11 +4238,13 @@ fn draw_panel<DB: DrawingBackend>(
                 center: usable_anchor(bar.anchor).and_then(|anchor| projection.pixel(anchor)),
             },
             &{
-                let (small, tick) = crate::color_bar::label_styles(&spec.legend.font, bar_ink);
+                let (small, tick) =
+                    crate::color_bar::label_styles(&spec.legend.font, graph, bar_ink);
                 crate::color_bar::BarStyles {
                     rich: font_style(
                         &spec.legend.font,
                         LABEL_SIZE,
+                        graph,
                         bar_ink,
                         canvas.dim_in_pixel().0,
                     ),
@@ -4096,7 +4294,7 @@ fn draw_panel<DB: DrawingBackend>(
     ] {
         let Some(anchor) = anchor else { continue };
         let pixel = centered(anchor);
-        let colors = AxisColors::of(axis, ink, &graph_inks, figure_width);
+        let colors = AxisColors::of(axis, ink, &graph_inks, figure_width, graph);
         let measured = draw_centered_text(
             canvas,
             &axis.display_label(),
@@ -4169,7 +4367,7 @@ fn draw_panel<DB: DrawingBackend>(
             chart.plotting_area().map_coordinate(&point)
         };
         if let Some(drawn_annotation) =
-            draw_annotation(canvas, annotation, index, pixel, ink, &graph_inks)?
+            draw_annotation(canvas, annotation, index, pixel, ink, graph, &graph_inks)?
         {
             drawn.annotations.push(drawn_annotation);
         }
@@ -4221,13 +4419,14 @@ fn draw_annotation<DB: DrawingBackend>(
     index: usize,
     pixel: plotters_backend::BackendCoord,
     ink: (u8, u8, u8),
+    graph: GraphText<'_>,
     graph_inks: &GraphInks,
 ) -> Result<Option<DrawnAnnotation>, DrawingAreaErrorKind<DB::ErrorType>> {
     if annotation.text.is_empty() {
         return Ok(None);
     }
     let color = graph_inks.text(&annotation.color, ink);
-    let size = annotation.effective_size();
+    let size = annotation.resolved_size(graph);
     let rotation = annotation.effective_rotation();
     // A fixed width (fraction of the figure, capped to it) makes the text wrap
     // in a box of this width (#244).
@@ -4244,7 +4443,7 @@ fn draw_annotation<DB: DrawingBackend>(
     let (width, height) = draw_centered_text(
         screen,
         &annotation.text,
-        &crate::formula::rich_style_layout(size, color, Some(annotation.font.as_str()), layout),
+        &crate::formula::rich_style_layout(size, color, annotation.resolved_family(graph), layout),
         rotation,
         pixel,
     )?;
@@ -4624,6 +4823,38 @@ pub(crate) fn text_style(size: f64, color: (u8, u8, u8, u8)) -> TextStyle<'stati
     (FONT_FAMILY, size).into_font().color(&rgba(color))
 }
 
+/// The style of the **ticks** under the graph settings (#545): `size` when set
+/// by hand on the axis (absolute), else the Auto size of the tick numbers times
+/// the graph scale, in the graph font. Without a
+/// graph font this is [`text_style`] (laid out by `epaint`, never by Typst, so
+/// an untouched graph keeps its pixels); with one, the numbers are laid out
+/// like a colour-bar tick, as literal text in that family
+/// ([`crate::formula::literal_style_font`]).
+pub(crate) fn tick_style(
+    graph: GraphText<'_>,
+    size: Option<f64>,
+    color: (u8, u8, u8, u8),
+) -> TextStyle<'static> {
+    let size = graph.size(size, LABEL_SIZE);
+    match graph.family {
+        None => text_style(size, color),
+        family => crate::formula::literal_style_font(size, color, family),
+    }
+}
+
+/// Extra room a text asks above today's, in pixels: `base` grown by the ratio
+/// of the resolved `size` to the built-in one, never shrunk (a smaller text
+/// keeps today's room, so a graph at the defaults keeps its bands to the
+/// pixel).
+pub(crate) fn grown_room(base: u32, size: f64, built_in: f64) -> u32 {
+    let ratio = size / built_in;
+    if ratio > 1.0 {
+        (f64::from(base) * (ratio - 1.0)).round() as u32
+    } else {
+        0
+    }
+}
+
 /// The style of an entered rich text (title, axis title, legend): the given
 /// color, the size and font of its area (issues #77, #78), `default_size` and
 /// the graph's font when they are not set.
@@ -4631,9 +4862,12 @@ pub(crate) fn text_style(size: f64, color: (u8, u8, u8, u8)) -> TextStyle<'stati
 /// `figure_width` is the width of the figure in backend pixels: an area width
 /// (#244) is a fraction of it, rounded to the pixel (the style's family name
 /// is retained forever), and also holds for a vertical title.
+///
+/// `graph` supplies the graph font and the scale of an Auto size (#545).
 fn font_style(
     font: &stokesforge_plot::TextFont,
     default_size: f64,
+    graph: GraphText<'_>,
     color: (u8, u8, u8, u8),
     figure_width: u32,
 ) -> TextStyle<'static> {
@@ -4644,9 +4878,9 @@ fn font_style(
         )
     });
     crate::formula::rich_style_layout(
-        font.effective_size(default_size),
+        font.resolved_size(graph, default_size),
         color,
-        font.family(),
+        font.resolved_family(graph),
         layout,
     )
 }
@@ -4890,16 +5124,26 @@ fn draw_marks<DB: DrawingBackend>(
 /// automatic ink (#550, see [`GraphInks`]).
 struct AxisColors {
     ticks: (u8, u8, u8, u8),
+    /// The style of the tick numbers under the graph settings (#545).
+    tick_style: TextStyle<'static>,
     /// The style of the axis title: color, font and size of its area.
     title_style: TextStyle<'static>,
 }
 
 impl AxisColors {
-    fn of(axis: &AxisSpec, ink: (u8, u8, u8), graph: &GraphInks, figure_width: u32) -> Self {
-        let title = graph.text(&axis.title_color, ink);
+    fn of(
+        axis: &AxisSpec,
+        ink: (u8, u8, u8),
+        graph_inks: &GraphInks,
+        figure_width: u32,
+        graph: GraphText<'_>,
+    ) -> Self {
+        let title = graph_inks.text(&axis.title_color, ink);
+        let ticks = graph_inks.axes(&axis.tick_color, ink);
         Self {
-            ticks: graph.axes(&axis.tick_color, ink),
-            title_style: font_style(&axis.title_font, AXIS_DESC_SIZE, title, figure_width),
+            ticks,
+            tick_style: tick_style(graph, axis.tick_label_size, ticks),
+            title_style: font_style(&axis.title_font, AXIS_DESC_SIZE, graph, title, figure_width),
         }
     }
 
@@ -4915,7 +5159,7 @@ impl AxisColors {
         DB: DrawingBackend,
     {
         let ticks = rgba(self.ticks);
-        mesh.label_style(text_style(LABEL_SIZE, self.ticks))
+        mesh.label_style(self.tick_style.clone())
             .axis_desc_style(self.title_style.clone())
             .axis_style(ticks)
             .bold_line_style(ticks.mix(GRID_BOLD_OPACITY))

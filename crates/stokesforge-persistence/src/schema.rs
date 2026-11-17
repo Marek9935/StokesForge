@@ -177,6 +177,10 @@ pub(crate) struct NodeRecord {
 /// 2, `guide-de-correction-robustesse.md` §F3 — see `unknown.rs` for the
 /// mechanism): a variant that this reader does not know becomes
 /// [`KindRecord::Unknown`] instead of making the whole file fail.
+// The `Graph` record carries a whole `PlotSpecRecord`, much bigger than the other
+// kinds; a record lives only while a file is read or written, so boxing it would
+// add an indirection for nothing (#545, #550).
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum KindRecord {
     /// Folder.
@@ -299,6 +303,10 @@ pub(crate) enum KindRecord {
 /// schema that a file written by this reader can produce. `unknown.rs`
 /// uses it to *try* the strict decoding before falling back on
 /// [`KindRecord::Unknown`] — see the head doc of this module.
+// The `Graph` record carries a whole `PlotSpecRecord`, much bigger than the other
+// kinds; a record lives only while a file is read or written, so boxing it would
+// add an indirection for nothing (#545, #550).
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 enum KindRecordKnown {
     Folder {
@@ -814,6 +822,13 @@ pub(crate) struct PlotSpecRecord {
     /// without it stays byte for byte what it was.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) grid_slack: Option<GridSlackRecord>,
+    /// Graph font family (#545): absent = the embedded default. Written only
+    /// when set, so a file without it stays byte for byte what it was.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub(crate) text_font: String,
+    /// Graph text scale (#545), a multiplier: absent = 100 %.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) text_scale: Option<f64>,
 }
 
 /// [`stokesforge_plot::GridSlack`], flat, in points. Written as held.
@@ -900,6 +915,8 @@ impl Default for PlotSpecRecord {
             layer_placement: LayerPlacementRecord::Grid,
             free_page: None,
             grid_slack: None,
+            text_font: String::new(),
+            text_scale: None,
         }
     }
 }
@@ -1082,6 +1099,11 @@ pub(crate) struct AnnotationSpecRecord {
     /// Alignment in the box (#244); absent = centered.
     #[serde(default)]
     pub(crate) align: TextAlignRecord,
+    /// The size follows the graph text scale (#545): absent = `false`, the
+    /// stored `size` is absolute, as for every text written before this
+    /// marker. Written only when set.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) follows_graph_size: bool,
 }
 
 /// [`stokesforge_plot::TextAlign`], flat.
@@ -1183,6 +1205,9 @@ pub(crate) struct AxisSpecRecord {
     /// Color of the ticks; empty = that of the scale.
     #[serde(default)]
     pub(crate) tick_mark_color: String,
+    /// Size of the tick numbers (#545); absent = Auto. Additive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) tick_label_size: Option<f64>,
 }
 
 impl AxisSpecRecord {
@@ -1226,6 +1251,7 @@ impl Default for AxisSpecRecord {
             minor_tick_length: None,
             tick_width: None,
             tick_mark_color: String::new(),
+            tick_label_size: None,
         }
     }
 }
@@ -1711,6 +1737,8 @@ mod tests {
         assert_eq!(reloaded.minor_tick_length, None);
         assert_eq!(reloaded.tick_width, None);
         assert_eq!(reloaded.tick_mark_color, "");
+        // #545: the tick numbers of an old axis are Auto.
+        assert_eq!(reloaded.tick_label_size, None);
 
         let spec = OldSpec {
             title: "Old".to_string(),

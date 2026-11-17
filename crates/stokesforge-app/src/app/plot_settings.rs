@@ -443,10 +443,11 @@ fn plot_settings_contents(
                         );
                     }
                     PlotSettingsTab::PlotArea => {
+                        let scale = spec.graph_text().scale;
                         let Some(panel) = spec.panels.get_mut(edit.selected_panel) else {
                             return;
                         };
-                        commit |= plot_area_settings_page(ui, panel);
+                        commit |= plot_area_settings_page(ui, panel, scale);
                     }
                     // The axes have their own fixed strip: see above.
                     PlotSettingsTab::Axes => {}
@@ -455,10 +456,12 @@ fn plot_settings_contents(
                     // The theme manager has its own layout: see above.
                     PlotSettingsTab::Theme => {}
                     PlotSettingsTab::Legend => {
+                        let scale = spec.graph_text().scale;
                         let Some(panel) = spec.panels.get_mut(edit.selected_panel) else {
                             return;
                         };
-                        commit |= legend_editor(ui, &mut panel.legend, &row_columns, &mut env);
+                        commit |=
+                            legend_editor(ui, &mut panel.legend, &row_columns, scale, &mut env);
                         commit |= super::color_bar_settings::color_bar_section(
                             ui,
                             panel,
@@ -655,8 +658,14 @@ fn global_color_rows(form: &mut Form<'_>, spec: &mut PlotSpec, env: &mut PickerE
     }
     commit |= axes_committed;
     own_colors_note(form, spec.parts_with_own_axes_color());
-    // « Reset Parts to Graph Settings » (#550): greyed when no part has its own
-    // color. It only clears colors for now; #545 adds fonts and sizes.
+    commit
+}
+
+/// « Reset Parts to Graph Settings » (#550, #545): one button for the colors,
+/// fonts and sizes of the parts, under the Font and Text scale rows. Greyed
+/// when no part has its own color, font or size. It never touches the graph
+/// settings, the curves or the backgrounds.
+fn reset_parts_button(form: &mut Form<'_>, spec: &mut PlotSpec) -> bool {
     let any_own = reset_parts_enabled(spec);
     let clicked = form.field(|ui| {
         ui.add_enabled(any_own, egui::Button::new(tr!("plot-general-reset-parts")))
@@ -666,14 +675,97 @@ fn global_color_rows(form: &mut Form<'_>, spec: &mut PlotSpec, env: &mut PickerE
     });
     if clicked {
         spec.reset_parts_to_graph();
-        commit = true;
     }
+    clicked
+}
+
+/// The families the font list offers: « Graph font » (the embedded default),
+/// the embedded and installed fonts, and `current` if it is not installed here
+/// (it stays visible, and selected). Shared by the legend and the General tab.
+fn font_options(current: &str) -> Vec<ChoiceOption<String>> {
+    let mut options = vec![ChoiceOption::new(String::new(), tr!("format-font-default"))];
+    options.extend(
+        stokesforge_render_egui::available_families()
+            .iter()
+            .map(|family| ChoiceOption::new(family.name.clone(), family.name.clone())),
+    );
+    if !options.iter().any(|option| option.value == current) {
+        options.push(ChoiceOption::new(current.to_owned(), current.to_owned()));
+    }
+    options
+}
+
+/// The graph font and the text scale of the General tab (#545): the graph
+/// default of every text left on Auto. Each is stored on the graph and read by
+/// rendering; a text with its own font or size keeps it. Auto (the first font
+/// entry, an emptied scale) clears the graph setting.
+fn global_text_rows(form: &mut Form<'_>, spec: &mut PlotSpec) -> bool {
+    let options = font_options(&spec.text_font);
+    let mut commit = form.row(tr!("format-font"), |ui| {
+        choice(ui, "plot_general_font", &mut spec.text_font, &options)
+    });
+    commit |= form.row(tr!("plot-general-text-scale"), |ui| {
+        let mut percent = spec.text_scale.map(|scale| (scale * 100.0).round());
+        let field = auto_number_field(
+            ui,
+            "plot_general_text_scale",
+            &mut percent,
+            &quantities::TEXT_SCALE_PERCENT,
+            // The size Auto stands for stays readable: « Auto (100) ».
+            &tr!("common-auto-value", value = "100"),
+        );
+        field
+            .response
+            .on_hover_text(tr!("plot-general-text-scale", "hint"));
+        let changed = field.changed;
+        if changed {
+            spec.text_scale = percent.map(|percent| percent / 100.0);
+        }
+        changed
+    });
     commit
 }
 
-/// Whether « Reset Parts to Graph Settings » has something to reset.
+/// A row of the size of a text, Auto-capable like the format toolbar's: Auto
+/// reads « Auto (N) » with the size drawn (`built_in` times the graph text
+/// scale), a typed size is absolute (#545).
+fn text_size_row(
+    form: &mut Form<'_>,
+    (label, hint): (String, String),
+    id: &'static str,
+    size: &mut Option<f64>,
+    built_in: f64,
+    scale: f64,
+    enabled: bool,
+) -> bool {
+    let auto = tr!(
+        "common-auto-value",
+        value = crate::number_field::format_value(
+            stokesforge_plot::GraphText {
+                family: None,
+                scale,
+            }
+            .size(None, built_in),
+            quantities::TEXT_FORMAT_SIZE.decimals
+        )
+    );
+    form.row(label, |ui| {
+        ui.add_enabled_ui(enabled, |ui| {
+            let field = auto_number_field(ui, id, size, &quantities::TEXT_FORMAT_SIZE, &auto);
+            field.response.clone().on_hover_text(hint);
+            field.changed
+        })
+        .inner
+    })
+}
+
+/// Whether « Reset Parts to Graph Settings » has something to reset: a part
+/// with its own color, font or size.
 fn reset_parts_enabled(spec: &PlotSpec) -> bool {
-    spec.parts_with_own_text_color() + spec.parts_with_own_axes_color() > 0
+    spec.parts_with_own_text_color()
+        + spec.parts_with_own_axes_color()
+        + spec.parts_with_own_font_or_size()
+        > 0
 }
 
 /// The grey note under a global color row (#550): how many parts keep their
@@ -710,6 +802,16 @@ fn graph_settings_page(
             Some(&tr!("plot-color-auto-graph")),
             env,
         );
+        let scale = spec.graph_text().scale;
+        commit |= text_size_row(
+            form,
+            (tr!("plot-title-size"), tr!("plot-title-size", "hint")),
+            "plot_title_size",
+            &mut spec.title_font.size,
+            stokesforge_render_egui::TITLE_SIZE,
+            scale,
+            true,
+        );
         commit |= form.color(
             &tr!("plot-general-background"),
             &mut spec.background,
@@ -718,6 +820,8 @@ fn graph_settings_page(
             env,
         );
         commit |= global_color_rows(form, spec, env);
+        commit |= global_text_rows(form, spec);
+        commit |= reset_parts_button(form, spec);
         form.note(tr!("plot-general-dark-note"));
         commit |= form.checkbox(
             &mut spec.stale_warning,
@@ -1277,7 +1381,7 @@ fn offset_rows(
 }
 
 /// Layer page: title and gridlines.
-fn plot_area_settings_page(ui: &mut egui::Ui, panel: &mut PanelSpec) -> bool {
+fn plot_area_settings_page(ui: &mut egui::Ui, panel: &mut PanelSpec, scale: f64) -> bool {
     form(ui, "plot_area_page", |form| {
         let mut commit = false;
         commit |= formula_field(
@@ -1285,6 +1389,18 @@ fn plot_area_settings_page(ui: &mut egui::Ui, panel: &mut PanelSpec) -> bool {
             &tr!("plot-area-layer-title"),
             &tr!("plot-area-layer-title", "hint"),
             &mut panel.title,
+        );
+        commit |= text_size_row(
+            form,
+            (
+                tr!("plot-layer-title-size"),
+                tr!("plot-layer-title-size", "hint"),
+            ),
+            "plot_layer_title_size",
+            &mut panel.title_font.size,
+            stokesforge_render_egui::PANEL_TITLE_SIZE,
+            scale,
+            true,
         );
         form.section(tr!("plot-area-gridlines"));
         commit |= form.checkbox(
@@ -1367,6 +1483,7 @@ pub(super) fn axes_settings_page(
                     AxisSide::Left => bounds.left,
                     _ => bounds.right,
                 });
+                let scale = spec.graph_text().scale;
                 let Some(panel) = spec.panels.get_mut(panel_index) else {
                     return false;
                 };
@@ -1393,9 +1510,16 @@ pub(super) fn axes_settings_page(
                                     } else {
                                         &mut panel.left
                                     };
-                                    axis_editor(form, axis, computed, own, env)
+                                    axis_editor(form, axis, computed, own, scale, env)
                                 } else {
-                                    axis_editor(form, panel.axis_mut(field), computed, None, env)
+                                    axis_editor(
+                                        form,
+                                        panel.axis_mut(field),
+                                        computed,
+                                        None,
+                                        scale,
+                                        env,
+                                    )
                                 };
                                 // Setting of the whole graph (#223), put under the
                                 // axes display.
@@ -1760,6 +1884,7 @@ fn axis_editor(
     axis: &mut AxisSpec,
     computed: Option<(f64, f64)>,
     own_scale: Option<&mut bool>,
+    scale: f64,
     env: &mut PickerEnv,
 ) -> bool {
     let mut commit = false;
@@ -1777,6 +1902,18 @@ fn axis_editor(
         ColorUsage::Text,
         Some(&tr!("plot-color-auto-graph")),
         env,
+    );
+    commit |= text_size_row(
+        form,
+        (
+            tr!("plot-axes-title-size"),
+            tr!("plot-axes-title-size", "hint"),
+        ),
+        "plot_axis_title_size",
+        &mut axis.title_font.size,
+        stokesforge_render_egui::AXIS_DESC_SIZE,
+        scale,
+        true,
     );
 
     form.section(tr!("plot-axes-scale-section"));
@@ -1887,6 +2024,18 @@ fn axis_editor(
         &mut axis.tick_labels,
         tr!("plot-axes-show-tick-labels"),
         None,
+    );
+    commit |= text_size_row(
+        form,
+        (
+            tr!("plot-axes-tick-label-size"),
+            tr!("plot-axes-tick-label-size", "hint"),
+        ),
+        "plot_axis_tick_label_size",
+        &mut axis.tick_label_size,
+        stokesforge_render_egui::LABEL_SIZE,
+        scale,
+        axis.tick_labels,
     );
     commit |= label_every_row(form, axis, true);
     commit |= form.checkbox(&mut axis.grid, tr!("plot-axes-show-gridlines"), None);
@@ -2282,13 +2431,14 @@ fn legend_editor(
     ui: &mut egui::Ui,
     legend: &mut stokesforge_plot::LegendSpec,
     row_columns: &[(NodeId, String)],
+    scale: f64,
     env: &mut PickerEnv,
 ) -> bool {
     form(ui, "plot_legend_page", |form| {
         let mut commit = form.checkbox(&mut legend.visible, tr!("plot-legend-show"), None);
         commit |= legend_position_row(form, legend);
         commit |= legend_text_editor(form, &mut legend.text, row_columns);
-        commit |= legend_font_section(form, legend, env);
+        commit |= legend_font_section(form, legend, scale, env);
         commit |= legend_frame_section(form, legend, env);
         commit |= legend_layout_section(form, legend);
         commit
@@ -2329,25 +2479,11 @@ fn legend_position_row(form: &mut Form<'_>, legend: &mut stokesforge_plot::Legen
 fn legend_font_section(
     form: &mut Form<'_>,
     legend: &mut stokesforge_plot::LegendSpec,
+    scale: f64,
     env: &mut PickerEnv,
 ) -> bool {
     form.section(tr!("plot-legend-text-section"));
-    let mut options = vec![ChoiceOption::new(String::new(), tr!("format-font-default"))];
-    options.extend(
-        stokesforge_render_egui::available_families()
-            .iter()
-            .map(|family| ChoiceOption::new(family.name.clone(), family.name.clone())),
-    );
-    // A font that is not installed here stays visible, and selected.
-    if !options
-        .iter()
-        .any(|option| option.value == legend.font.family)
-    {
-        options.push(ChoiceOption::new(
-            legend.font.family.clone(),
-            legend.font.family.clone(),
-        ));
-    }
+    let options = font_options(&legend.font.family);
     let mut commit = form.row(tr!("format-font"), |ui| {
         choice(ui, "plot_legend_font", &mut legend.font.family, &options)
     });
@@ -2357,7 +2493,17 @@ fn legend_font_section(
             "plot_legend_font_size",
             &mut legend.font.size,
             &quantities::TEXT_FORMAT_SIZE,
-            &tr!("common-auto"),
+            &tr!(
+                "common-auto-value",
+                value = format_value(
+                    stokesforge_plot::GraphText {
+                        family: None,
+                        scale
+                    }
+                    .size(None, stokesforge_render_egui::LABEL_SIZE),
+                    quantities::TEXT_FORMAT_SIZE.decimals
+                )
+            ),
         )
         .changed
     });
@@ -3235,6 +3381,85 @@ mod tests {
         assert!(grid > scale + 80.0, "several rows are laid out");
     }
 
+    /// #545: every text size of a graph is set in Graph Properties, in the tab
+    /// where its text is: the graph title size on General, the layer title size
+    /// on Plot Area, the axis title and tick label sizes on each Axes side
+    /// (none for a mirror, which follows the opposite axis). Each reads
+    /// « Auto (N) » with the size drawn, scale included. Witness: a row
+    /// missing from its tab, or the hint ignoring the scale.
+    #[test]
+    fn every_text_size_has_its_row_in_its_tab_and_auto_shows_the_drawn_size() {
+        let mut harness = harness(|spec| spec.text_scale = Some(1.5));
+        let context = test_support::context();
+        let rows = [
+            (
+                PlotSettingsTab::Graph,
+                None,
+                tr!("plot-title-size"),
+                "Auto (36)",
+            ),
+            (
+                PlotSettingsTab::PlotArea,
+                None,
+                tr!("plot-layer-title-size"),
+                "Auto (24)",
+            ),
+            (
+                PlotSettingsTab::Axes,
+                Some(PlotAxis::Left),
+                tr!("plot-axes-title-size"),
+                "Auto (24)",
+            ),
+            (
+                PlotSettingsTab::Axes,
+                Some(PlotAxis::Left),
+                tr!("plot-axes-tick-label-size"),
+                "Auto (21)",
+            ),
+            (
+                PlotSettingsTab::Legend,
+                None,
+                tr!("plot-text-size"),
+                "Auto (21)",
+            ),
+        ];
+        for (tab, axis, label, hint) in rows {
+            harness.open(tab, axis);
+            let painted = paint_window(&context, &mut harness.state, Vec::new());
+            assert!(is_painted(&painted, &label), "{tab:?}: row {label:?}");
+            let field = in_the_row(&painted, &label, hint);
+            assert!(!field.text.is_empty());
+        }
+        harness.open(PlotSettingsTab::Axes, Some(PlotAxis::Top));
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(!is_painted(&painted, &tr!("plot-axes-tick-label-size")));
+    }
+
+    /// #545: a size typed in a field is drawn at exactly that size, even under
+    /// a 150 % scale, and the field then shows what was typed.
+    #[test]
+    fn a_typed_axis_title_size_is_kept_under_a_scale_and_shown_as_typed() {
+        let mut harness = harness(|spec| spec.text_scale = Some(1.5));
+        harness.open(PlotSettingsTab::Axes, Some(PlotAxis::Left));
+        let context = test_support::context();
+        type_into(&context, &mut harness, "Auto (24)", "10");
+        let model = harness.model();
+        let axis = &model.panels[0].left;
+        assert_eq!(axis.title_font.size, Some(10.0));
+        // Drawn at 10, not 15.
+        assert_eq!(
+            axis.title_font
+                .resolved_size(model.graph_text(), stokesforge_render_egui::AXIS_DESC_SIZE),
+            10.0
+        );
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        let label = tr!("plot-axes-title-size");
+        let field = in_the_row(&painted, &label, "10");
+        assert_eq!(field.text, "10");
+        assert!(!is_painted(&painted, "Auto (24)"));
+        assert!(!is_painted(&painted, "15"));
+    }
+
     /// #176: the tab of a mirror axis offers neither title nor color, only
     /// to show it and to keep or not the tick labels.
     #[test]
@@ -3440,7 +3665,9 @@ mod tests {
             spec.frame_heights = vec![284.0];
         });
         harness.open(PlotSettingsTab::Graph, None);
-        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        // The General page is longer than the window since #545 (Font and Text
+        // scale): scroll to the bottom, where the Size section is.
+        let painted = scroll_down(&context, &mut harness.state, &tr!("plot-size"));
         let width = tr!("plot-size-width", unit = "cm");
         let height = tr!("plot-size-height", unit = "cm");
         assert!(
@@ -3635,6 +3862,52 @@ mod tests {
             "the plot area field follows"
         );
         harness.state.close_plot_settings();
+        harness.state.dispatch(Action::Undo);
+        assert_eq!(harness.model(), original, "one undo step");
+    }
+
+    /// #545: « Reset Parts to Graph Settings » puts a hand-set tick label size,
+    /// axis title size, legend font and free text size back to Auto, keeps the
+    /// graph Font, Text scale and the series colours, and is one undo step.
+    /// Witness: a field the reset forgets, a graph setting it clears, a button
+    /// greyed when only a size is set, or a second Ctrl+Z needed.
+    #[test]
+    fn the_reset_button_puts_sizes_and_fonts_back_to_auto_in_one_undo_step() {
+        let context = test_support::context();
+        let mut harness = harness(|spec| {
+            spec.text_font = "Fira Sans".into();
+            spec.text_scale = Some(1.5);
+            let panel = first_panel(spec);
+            panel.left.title_font.size = Some(22.0);
+            panel.bottom.tick_label_size = Some(9.0);
+            panel.legend.font.family = "Libertinus Serif".into();
+            panel
+                .annotations
+                .push(stokesforge_plot::AnnotationSpec::new("t", 0.0, 0.0));
+            panel.annotations[0].size = 40.0;
+            panel.annotations[0].follows_graph_size = false;
+        });
+        let original = harness.model();
+        assert_eq!(original.parts_with_own_text_color(), 0, "sizes only");
+        harness.open(PlotSettingsTab::Graph, None);
+        click_label(
+            &context,
+            &mut harness.state,
+            &tr!("plot-general-reset-parts"),
+        );
+        harness.state.close_plot_settings();
+        let model = harness.model();
+        let panel = &model.panels.as_slice()[0];
+        assert_eq!(panel.left.title_font.size, None);
+        assert_eq!(panel.bottom.tick_label_size, None);
+        assert_eq!(panel.legend.font.family, "");
+        assert!(panel.annotations[0].follows_graph_size);
+        assert_eq!(model.text_font, "Fira Sans");
+        assert_eq!(model.text_scale, Some(1.5));
+        assert_eq!(
+            panel.series[0].line.color,
+            original.panels.as_slice()[0].series[0].line.color
+        );
         harness.state.dispatch(Action::Undo);
         assert_eq!(harness.model(), original, "one undo step");
     }
@@ -3992,7 +4265,7 @@ mod tests {
             stokesforge_app_state::frame_sizes::figure_layout(&harness.model()).expect("layout");
         // The General page opens with the colors rows (#542): the Size section
         // starts below the first screen.
-        scroll_page(&context, &mut harness, -80.0);
+        scroll_page(&context, &mut harness, -110.0);
         let painted = paint_window(&context, &mut harness.state, Vec::new());
         for label in [
             tr!("plot-size-placement"),
@@ -4037,7 +4310,7 @@ mod tests {
         );
 
         scroll_to_top(&context, &mut harness);
-        scroll_page(&context, &mut harness, -80.0);
+        scroll_page(&context, &mut harness, -110.0);
         click_label(
             &context,
             &mut harness.state,
@@ -6471,7 +6744,7 @@ mod tests {
         let mut commit = true;
         let painted = texts(&image(context, Vec::new(), |ui| {
             commit = form(ui, "trial", |form| {
-                super::axis_editor(form, axis, computed, None, &mut env)
+                super::axis_editor(form, axis, computed, None, 1.0, &mut env)
             });
         }));
         (commit, painted)
@@ -6551,6 +6824,11 @@ mod tests {
             let note = tr!("plot-general-own-colors-note", count = count);
             assert!(is_painted(&painted, &note), "{note:?} missing");
         }
+        let painted = texts(&image(&context, Vec::new(), |ui| {
+            form(ui, "trial", |form| {
+                super::reset_parts_button(form, &mut spec)
+            });
+        }));
         assert!(is_painted(&painted, &tr!("plot-general-reset-parts")));
         let mut plain = PlotSpec::empty("Figure").with_panels(PanelSpec::at(0, 0));
         assert!(!super::reset_parts_enabled(&plain), "nothing to reset");
@@ -6559,6 +6837,11 @@ mod tests {
             !super::reset_parts_enabled(&plain),
             "a graph color is not a part's"
         );
+        // A hand-set size alone, with no own color, enables the button (#545).
+        first_panel(&mut plain).left.tick_label_size = Some(9.0);
+        assert!(super::reset_parts_enabled(&plain));
+        first_panel(&mut plain).left.tick_label_size = None;
+        assert!(!super::reset_parts_enabled(&plain));
         first_panel(&mut plain)
             .annotations
             .push(stokesforge_plot::AnnotationSpec::new("t", 0.0, 0.0));

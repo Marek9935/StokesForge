@@ -37,6 +37,9 @@ pub(crate) const SET_GRAPH_OPTIONS: &[&str] = &[
     "background",
     "stale_warning",
     "decimal_comma",
+    // The graph font and text scale (#545): the default of every text left on Auto.
+    "text_font",
+    "text_scale",
     // The targeted panel.
     "panel_title",
     // The X axis (bottom) and the Y axis (left or right depending on `axis`).
@@ -158,6 +161,9 @@ struct Changes {
     background: Option<String>,
     stale_warning: Option<bool>,
     decimal_comma: Option<bool>,
+    text_font: Option<String>,
+    /// Percent, `Some(None)` = Auto (100 %).
+    text_scale: Option<Option<f64>>,
     panel_title: Option<String>,
     x: AxisChange,
     y: AxisChange,
@@ -325,6 +331,31 @@ impl Changes {
                 "background" => changes.background = Some(color()?),
                 "stale_warning" => changes.stale_warning = Some(boolean()?),
                 "decimal_comma" => changes.decimal_comma = Some(boolean()?),
+                "text_font" => changes.text_font = Some(string()?.trim().to_owned()),
+                "text_scale" => {
+                    // A percentage (25 to 400), or `None` = Auto (100 %).
+                    changes.text_scale = Some(if value.is_none() {
+                        None
+                    } else {
+                        let (low, high) = (
+                            stokesforge_plot::GraphText::SCALE_RANGE.0 * 100.0,
+                            stokesforge_plot::GraphText::SCALE_RANGE.1 * 100.0,
+                        );
+                        let percent = value
+                            .extract::<f64>()
+                            .ok()
+                            .filter(|v| v.is_finite())
+                            .ok_or_else(|| invalid("text_scale must be a finite number"))?;
+                        if percent < low || percent > high {
+                            return Err(invalid(format!(
+                                "text_scale must be between {} and {} %",
+                                short_number(low),
+                                short_number(high)
+                            )));
+                        }
+                        Some(percent)
+                    })
+                }
                 "panel_title" => changes.panel_title = Some(string()?),
                 "x_title" => changes.x.title = Some(string()?),
                 "y_title" => changes.y.title = Some(string()?),
@@ -529,6 +560,12 @@ impl Changes {
         if let Some(comma) = self.decimal_comma {
             spec.decimal_comma = comma;
         }
+        if let Some(font) = &self.text_font {
+            spec.text_font.clone_from(font);
+        }
+        if let Some(percent) = self.text_scale {
+            spec.text_scale = percent.map(|percent| percent / 100.0);
+        }
         let panel = spec
             .panels
             .get_mut(layer)
@@ -701,7 +738,10 @@ fn set_graph_native(
 /// automatic), `text_color` and `axes_color` (`'#RRGGBB'`, `''` = automatic: the
 /// graph-level colours, which only the parts left on automatic follow, as the
 /// General tab does), `background` (`'#RRGGBB[AA]'`, `''` = white), `stale_warning`,
-/// `decimal_comma` (booleans). The panel `panel=(row, column)`: `panel_title`,
+/// `decimal_comma` (booleans), `text_font` (a family name, `''` = the embedded
+/// default) and `text_scale` (percent, 25 to 400, `None` = 100 %): the font and
+/// the scale of every text left on Auto (titles, ticks, legend, colour bar, new
+/// free texts); a text with its own font or size keeps it. The panel `panel=(row, column)`: `panel_title`,
 /// `legend_visible`, `legend_position` (`'top_left'`, `'top_right'`,
 /// `'bottom_left'`, `'bottom_right'`), `legend_text_from` (`'long_name'`,
 /// `'comments'`, `'x_prime'`, `'units'`, `'short_name'`, `'long_name_units'`,

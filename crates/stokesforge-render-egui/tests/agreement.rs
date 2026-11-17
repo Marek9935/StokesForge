@@ -1832,6 +1832,52 @@ fn the_two_backends_thin_the_symbols_the_same_way() {
     );
 }
 
+// -- #545: the graph font and text scale --
+
+/// A scale other than 100 % and a graph font: screen and export draw the same
+/// figure, and each setting really changes it (the witnesses, without which the
+/// agreement would hold on two identical unscaled figures). Free text and
+/// title included, so every role goes through the one resolution.
+#[test]
+fn the_backends_agree_with_a_text_scale_and_a_graph_font() {
+    let fixture = realistic();
+    let tree = fixture.project.tree();
+    let mut base = fixture.spec.clone();
+    base.title = "Graph".to_string();
+    base.panels
+        .get_mut(0)
+        .unwrap()
+        .annotations
+        .push(stokesforge_plot::AnnotationSpec::new("note", 0.5, 0.5));
+    let (plain, plain_drawn) = agree(tree, &base, SIZE, "no graph text setting");
+    for (what, font, scale) in [
+        ("scale 150 %", "", Some(1.5)),
+        ("graph font", "Libertinus Sans", None),
+        ("scale 150 % and graph font", "Libertinus Sans", Some(1.5)),
+        ("scale 60 %", "", Some(0.6)),
+        ("scale 25 %", "", Some(0.25)),
+    ] {
+        let mut spec = base.clone();
+        spec.text_font = font.to_string();
+        spec.text_scale = scale;
+        let (primitives, drawn) = agree(tree, &spec, SIZE, what);
+        // A font changes glyphs, not the primitives compared here: only the
+        // scale must move the figure.
+        if scale.is_some() {
+            assert_ne!(primitives, plain, "{what}: changed nothing");
+        }
+        if scale.is_some_and(|scale| scale > 1.0) {
+            // The page grows around the frame: the text got room.
+            assert_ne!(drawn.panels[0].axis_areas, plain_drawn.panels[0].axis_areas);
+        }
+    }
+    // 100 % and no font are the figure of a graph with no setting.
+    let mut spec = base.clone();
+    spec.text_scale = Some(1.0);
+    let (same, _) = agree(tree, &spec, SIZE, "scale 100 %");
+    assert_eq!(same, plain);
+}
+
 // -- #550: graph-level colours --
 
 /// The (uppercase hex) colour of every plain text of the egui figure.

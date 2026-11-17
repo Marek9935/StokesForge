@@ -211,6 +211,46 @@ fn set_graph_sets_the_legend_box_and_refuses_out_of_range_values() {
     assert_eq!(graph_spec(&b), before);
 }
 
+/// #545: `text_font` and `text_scale` (percent) set the graph defaults in one
+/// history entry, `None` and `''` clear them, a scale outside 25 to 400 and a
+/// non-number are refused without any write, and the scale does not touch a
+/// font size set by hand (it is a graph setting only).
+#[test]
+fn set_graph_sets_the_graph_font_and_text_scale() {
+    let b = bench();
+    run(&b, GRAPH);
+    run(
+        &b,
+        "pyst.set_graph(pyst.resolve('[G]'), text_font='Libertinus Sans', text_scale=150)",
+    );
+    let spec = graph_spec(&b);
+    assert_eq!(spec.text_font, "Libertinus Sans");
+    assert_eq!(spec.text_scale, Some(1.5));
+    assert_eq!(spec.graph_text().size(None, 24.0), 36.0);
+    // A hand-set title size stays what it is: the call wrote only the graph.
+    assert_eq!(spec.title_font.size, None);
+    run(
+        &b,
+        "pyst.set_graph(pyst.resolve('[G]'), text_font='', text_scale=None)",
+    );
+    let spec = graph_spec(&b);
+    assert_eq!((spec.text_font.as_str(), spec.text_scale), ("", None));
+    let before = graph_spec(&b);
+    for body in [
+        "pyst.set_graph(g, text_scale=24)",
+        "pyst.set_graph(g, text_scale=401)",
+        "pyst.set_graph(g, text_scale=-100)",
+        "pyst.set_graph(g, text_scale=float('nan'))",
+        "pyst.set_graph(g, text_scale='big')",
+        "pyst.set_graph(g, text_font=3)",
+    ] {
+        refused(&b, body);
+    }
+    assert_eq!(graph_spec(&b), before);
+    // The unknown-key message lists the new keys.
+    assert!(refused(&b, "pyst.set_graph(g, text_size=3)").contains("text_scale"));
+}
+
 #[test]
 fn set_graph_leaves_absent_keys_alone_and_targets_the_right_axis() {
     let b = bench();

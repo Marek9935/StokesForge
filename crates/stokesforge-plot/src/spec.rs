@@ -7,7 +7,7 @@ use stokesforge_id::NodeId;
 use crate::panel::{FreePage, PanelSpec};
 use crate::series::SeriesSpec;
 use crate::text_anchor::TextAnchor;
-use crate::text_font::TextFont;
+use crate::text_font::{GraphText, TextFont};
 
 /// The panels of a graph: **at least one, always**.
 ///
@@ -284,6 +284,13 @@ pub struct PlotSpec {
     /// hugs the grid). Read only on the regular grid, through
     /// [`PlotSpec::sanitized_grid_slack`].
     pub grid_slack: Option<GridSlack>,
+    /// Graph font (#545): the family of every text left on Auto, ticks and
+    /// colour-bar numbers included. Empty = the embedded default. A text whose
+    /// own family is set keeps it. Read through [`PlotSpec::graph_text`].
+    pub text_font: String,
+    /// Text scale (#545): multiplier of every Auto size; `None` = 100 %.
+    /// Read through [`PlotSpec::graph_text`], which sanitizes it.
+    pub text_scale: Option<f64>,
 }
 
 /// The empty space between the outer cells of a regular grid and the edge of
@@ -379,6 +386,22 @@ impl PlotSpec {
     pub fn sanitized_frame_widths(&self) -> Option<Vec<f64>> {
         (!self.frame_widths.is_empty())
             .then(|| sanitized_sizes(&self.frame_widths, self.columns(), FALLBACK_FRAME.0))
+    }
+
+    /// The graph-wide text settings, sanitized (#545): a blank family is none,
+    /// a missing or non-finite scale is 100 %, any other is clamped to
+    /// [`GraphText::SCALE_RANGE`].
+    pub fn graph_text(&self) -> GraphText<'_> {
+        let family = self.text_font.trim();
+        GraphText {
+            family: (!family.is_empty()).then_some(family),
+            scale: self
+                .text_scale
+                .filter(|scale| scale.is_finite())
+                .map_or(1.0, |scale| {
+                    scale.clamp(GraphText::SCALE_RANGE.0, GraphText::SCALE_RANGE.1)
+                }),
+        }
     }
 
     /// [`PlotSpec::grid_slack`] made usable (see [`GridSlack::sanitized`]);
@@ -583,6 +606,8 @@ impl Default for PlotSpec {
             layer_placement: LayerPlacement::Grid,
             free_page: None,
             grid_slack: None,
+            text_font: String::new(),
+            text_scale: None,
         }
     }
 }
