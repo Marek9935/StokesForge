@@ -160,8 +160,6 @@ struct Out {
     cursor: egui::CursorIcon,
     shapes: Vec<egui::epaint::ClippedShape>,
     cached: bool,
-    /// The rectangle the figure was drawn in.
-    rect: Rect,
     /// The viewport commands the frame asked for, in order.
     commands: Vec<egui::ViewportCommand>,
 }
@@ -200,7 +198,6 @@ fn frame_in(
         ..Default::default()
     };
     let mut cached = false;
-    let mut figure_rect = Rect::NOTHING;
     let mut output = context.run_ui(input, |ui| {
         // What the application does (#512): it feeds the drawing area, advances
         // a page-corner drag with this frame's pointer, sizes the figure, and
@@ -215,7 +212,6 @@ fn frame_in(
         let size = egui::vec2(layout.size.0 as f32, layout.size.1 as f32);
         let rect = Rect::from_min_size(Pos2::ZERO, size * scale);
         let rect = view.page_corner_rect((size.x, size.y)).unwrap_or(rect);
-        figure_rect = rect;
         cached = view
             .paint_scaled(ui, rect, &fixture.snapshot(), fixture.graph)
             .expect("painting");
@@ -232,7 +228,6 @@ fn frame_in(
         cursor: output.platform_output.cursor_icon,
         shapes: output.shapes,
         cached,
-        rect: figure_rect,
     }
 }
 
@@ -307,39 +302,6 @@ fn drag(
     // The page-edge message has its own test.
     signals.retain(|signal| !matches!(signal, GraphEvent::PageEdgeReached));
     signals
-}
-
-/// A page-corner drag with the free pointer (#512): press at `from`, a first
-/// move by `kick` (egui starts a drag only once the pointer has moved), then
-/// one frame per entry of `motions`, each moving the pointer by the entry (a
-/// zero entry: the hand stays still and no event is sent), one frame with
-/// nothing to let the display catch up, and the release. Frames are 0.05 s
-/// apart. `contain` is the drawing area of the host. Returns the events of the
-/// release, the rectangle the figure was drawn in after each frame and the
-/// cursor icon of the last frame of the drag.
-#[allow(clippy::too_many_arguments)]
-fn drag_pushed(
-    context: &egui::Context,
-    view: &mut GraphView,
-    fixture: &Fixture,
-    contain: Rect,
-    from: Pos2,
-    kick: egui::Vec2,
-    motions: &[egui::Vec2],
-    modifiers: egui::Modifiers,
-) -> (Vec<GraphEvent>, Vec<Rect>, egui::CursorIcon) {
-    let mut held = Held::begin_kicked(context, view, fixture, contain, from, kick, modifiers);
-    held.dt = 0.05;
-    let mut shown = Vec::new();
-    for motion in motions {
-        held.push(view, *motion, modifiers);
-        shown.push(view.display_rect().expect("drawn"));
-    }
-    let cursor = held.push(view, egui::Vec2::ZERO, modifiers).cursor;
-    shown.push(view.display_rect().expect("drawn"));
-    let mut signals = held.release(view, modifiers);
-    signals.retain(|signal| !matches!(signal, GraphEvent::PageEdgeReached));
-    (signals, shown, cursor)
 }
 
 fn click(
@@ -752,9 +714,8 @@ fn a_boundary_drag_trades_the_two_columns_and_keeps_the_figure_size() {
 
 /// The outer edge of a row, pulled inward, changes that row alone (#505): one
 /// event, only the first height down by 40, the slack on top 40, the image the
-/// same size, the preview held. Pulling it back outward eats the slack and stops at the page. An L
-/// corner still scales everything. Witness: the drag routed to the figure kind
-/// (every row would scale).
+/// same size, the preview held. Pulling it back outward eats the slack and stops at the page. Witness: the drag
+/// routed to the whole figure (every row would scale).
 #[test]
 fn an_outer_edge_drag_changes_one_row_and_makes_slack_not_a_smaller_figure() {
     let fixture = Fixture::grid(2, 2, false, false, false);
@@ -825,30 +786,6 @@ fn an_outer_edge_drag_changes_one_row_and_makes_slack_not_a_smaller_figure() {
     );
     let grown = layout_of(&context, &mut view, &fixture);
     assert_eq!(grown.size.1, layout.size.1, "the page never grows (P1)");
-
-    // The L corner is a page corner: it adds space below, the rows stay.
-    let (context, mut view) = in_mode(&fixture);
-    let (w, h) = (layout.size.0 as f32, layout.size.1 as f32);
-    let corner = Pos2::new(w + 4.0, h + 4.0);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        corner,
-        corner + egui::vec2(0.0, 30.0),
-        egui::Modifiers::NONE,
-    );
-    let [GraphEvent::GridFramesEdited {
-        heights,
-        figure: true,
-        slack: Some(slack),
-        ..
-    }] = signals.as_slice()
-    else {
-        panic!("one figure event expected, got {signals:?}");
-    };
-    assert_eq!(heights, &layout.frame_heights, "the rows keep their size");
-    assert_eq!(slack.bottom, f64::from(layout.grid_slack[3]) + 30.0);
 }
 
 /// #505 G9 (P2): Alt held at the press on an internal row line changes only the
@@ -1030,29 +967,6 @@ fn a_compact_fallback_grid_has_no_handle() {
         hover_at(&context, &mut view, &fixture, at, 3.0).cursor,
         egui::CursorIcon::Default
     );
-}
-
-/// The L page corners scale frames the layout does not have: on a compact
-/// fallback grid they are neither drawn nor grabbable. Witness: the `editable`
-/// check dropped from either the painting or the grab.
-#[test]
-fn a_compact_fallback_grid_has_no_page_corner() {
-    let fixture = Fixture::compact();
-    let (context, mut view) = in_mode(&fixture);
-    let layout = layout_of(&context, &mut view, &fixture);
-    let corner = Pos2::new(layout.size.0 as f32 + 4.0, layout.size.1 as f32 + 4.0);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        corner,
-        corner + egui::vec2(30.0, 30.0),
-        egui::Modifiers::NONE,
-    );
-    assert!(signals.is_empty(), "{signals:?}");
-    let out = hover_at(&context, &mut view, &fixture, corner, 3.0);
-    assert_eq!(out.cursor, egui::CursorIcon::Default);
-    assert_eq!(l_corners(&out.shapes), 0, "no corner is drawn");
 }
 
 /// The number of rectangles outlined with the 2.5 point accent stroke (the
@@ -1607,7 +1521,8 @@ fn a_compact_fallback_grid_cannot_move_a_graph() {
     assert!(after.is_empty(), "{after:?}");
 }
 
-/// The number of L page corner polylines (stroke width 2.5) painted.
+/// The number of L page corner polylines (stroke width 2.5) painted: none
+/// since #512.
 fn l_corners(shapes: &[egui::epaint::ClippedShape]) -> usize {
     fn walk(shape: &egui::Shape, count: &mut usize) {
         match shape {
@@ -1669,12 +1584,12 @@ fn regular_handles_are_drawn_on_every_edge_and_squares_on_internal_corners_only(
         (3, 4),
         "squares, pills of the top-left graph"
     );
-    assert_eq!(l_corners(&out.shapes), 4, "the L page corners");
+    assert_eq!(l_corners(&out.shapes), 0, "no L page corner");
     let single = Fixture::grid(1, 1, false, false, false);
     let (context, mut view) = in_mode(&single);
     let out = hover_at(&context, &mut view, &single, Pos2::new(-100.0, -100.0), 1.0);
     assert_eq!(marks(&out.shapes), (0, 4));
-    assert_eq!(l_corners(&out.shapes), 4, "even on a one-cell figure");
+    assert_eq!(l_corners(&out.shapes), 0, "even on a one-cell figure");
 }
 
 /// With empty space around the grid the mode draws the page dashed (#505), and
@@ -1713,55 +1628,6 @@ fn the_page_outline_is_dashed_only_when_a_grid_has_slack() {
     let (context, mut view) = in_mode(&fixture);
     let slacked = hover_at(&context, &mut view, &fixture, away, 1.0);
     assert!(page_dashes(&slacked.shapes) > 4, "a dashed page");
-}
-
-/// Ctrl held at the press of an L corner keeps the page's ratio (#505): the
-/// page grows by the larger relative change, the graphs keep their frames; a
-/// plain drag of the same movement does not keep it. Witness: the Ctrl branch
-/// ignored (`keep_ratio` always false).
-#[test]
-fn ctrl_on_an_l_corner_keeps_the_ratio_of_the_page() {
-    let fixture = Fixture::grid(2, 2, false, true, false);
-    let (context, mut view) = in_mode(&fixture);
-    let before = layout_of(&context, &mut view, &fixture);
-    let (w, h) = (before.size.0 as f32, before.size.1 as f32);
-    let corner = Pos2::new(w + 4.0, h + 4.0);
-    let grown = |modifiers| {
-        let (context, mut view) = in_mode(&fixture);
-        let signals = drag(
-            &context,
-            &mut view,
-            &fixture,
-            corner,
-            corner + egui::vec2(40.0, 10.0),
-            modifiers,
-        );
-        let [GraphEvent::GridFramesEdited {
-            figure: true,
-            slack: Some(slack),
-            ..
-        }] = signals.as_slice()
-        else {
-            panic!("one figure event expected, got {signals:?}");
-        };
-        (slack.right, slack.bottom)
-    };
-    assert_eq!(grown(egui::Modifiers::NONE), (40.0, 10.0));
-    let ctrl = egui::Modifiers {
-        ctrl: true,
-        ..egui::Modifiers::NONE
-    };
-    let (right, bottom) = grown(ctrl);
-    let ratio = f64::from(before.size.0) / f64::from(before.size.1 - before.title_band);
-    let (new_w, new_h) = (
-        f64::from(before.size.0) + right,
-        f64::from(before.size.1 - before.title_band) + bottom,
-    );
-    assert!(
-        (new_w / new_h - ratio).abs() < 0.01,
-        "{new_w} x {new_h} vs {ratio}"
-    );
-    assert!(right >= 40.0, "{right}");
 }
 
 /// F3 (#505): pulling an outer edge outward with no room left signals
@@ -1807,184 +1673,6 @@ fn a_blocked_outer_edge_says_so_once_per_drag() {
     assert_eq!(run(-30.0), 1);
     // Pulled down (inward): fine.
     assert_eq!(run(30.0), 0);
-}
-
-/// K1: an L corner of a Regular figure is a page corner. Pulled out it adds
-/// empty space on the two page edges that meet there (right and bottom for the
-/// bottom-right one, left and top for the top-left one), the graphs keep their
-/// frames; one event flagged as a figure resize, the page bigger; nothing
-/// without a drag. Witness: the old scaling path (`scaled_frames`) put back.
-#[test]
-fn an_l_corner_adds_empty_space_and_the_graphs_keep_their_size() {
-    let fixture = Fixture::grid(2, 2, false, true, false);
-    let (context, mut view) = in_mode(&fixture);
-    let before = layout_of(&context, &mut view, &fixture);
-    let (w, h) = (before.size.0 as f32, before.size.1 as f32);
-    let corner = Pos2::new(w + 4.0, h + 4.0);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        corner,
-        corner + egui::vec2(40.0, 30.0),
-        egui::Modifiers::NONE,
-    );
-    let [GraphEvent::GridFramesEdited {
-        widths,
-        heights,
-        figure: true,
-        slack: Some(slack),
-    }] = signals.as_slice()
-    else {
-        panic!("one figure event expected, got {signals:?}");
-    };
-    assert_eq!(widths, &before.frame_widths, "the graphs keep their size");
-    assert_eq!(heights, &before.frame_heights);
-    assert_eq!(
-        (slack.left, slack.top, slack.right, slack.bottom),
-        (0.0, 0.0, 40.0, 30.0)
-    );
-    let after = layout_of(&context, &mut view, &fixture);
-    assert_eq!(after.size, (before.size.0 + 40, before.size.1 + 30));
-    assert_eq!(after.frame_widths, before.frame_widths);
-    assert_eq!(after.frame_heights, before.frame_heights);
-    let (context, mut view) = in_mode(&fixture);
-    assert_eq!(
-        hover_at(
-            &context,
-            &mut view,
-            &fixture,
-            Pos2::new(w + 4.0, h + 4.0),
-            9.0
-        )
-        .cursor,
-        egui::CursorIcon::ResizeNwSe
-    );
-
-    // The top-left corner adds space on the left and top.
-    let (context, mut view) = in_mode(&fixture);
-    // The figure's top is under the graph title, as the page of a free figure.
-    let top_left = Pos2::new(-4.0, before.title_band as f32 - 4.0);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        top_left,
-        top_left - egui::vec2(40.0, 30.0),
-        egui::Modifiers::NONE,
-    );
-    let [GraphEvent::GridFramesEdited {
-        widths,
-        heights,
-        figure: true,
-        slack: Some(slack),
-    }] = signals.as_slice()
-    else {
-        panic!("one figure event expected, got {signals:?}");
-    };
-    assert_eq!(
-        (widths, heights),
-        (&before.frame_widths, &before.frame_heights)
-    );
-    assert_eq!(
-        (slack.left, slack.top, slack.right, slack.bottom),
-        (40.0, 30.0, 0.0, 0.0)
-    );
-
-    // No movement, no event.
-    let (context, mut view) = in_mode(&fixture);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        corner,
-        corner,
-        egui::Modifiers::NONE,
-    );
-    assert!(signals.is_empty(), "{signals:?}");
-}
-
-/// K1: pulled inward, an L corner removes the empty space and stops at the
-/// graphs; the padlock of Figure size does not apply. With no space left,
-/// pulling in does nothing. Witness: slack allowed below zero (`max(0.0)`).
-#[test]
-fn an_l_corner_pulled_inward_stops_at_the_graphs() {
-    let fixture = Fixture::grid(2, 2, false, true, false);
-    let mut spec = spec_of(&fixture);
-    spec.grid_slack = Some(stokesforge_plot::GridSlack {
-        left: 0.0,
-        top: 0.0,
-        right: 30.0,
-        bottom: 20.0,
-    });
-    fixture.replace(spec);
-    let (context, mut view) = in_mode(&fixture);
-    let before = layout_of(&context, &mut view, &fixture);
-    let (w, h) = (before.size.0 as f32, before.size.1 as f32);
-    let corner = Pos2::new(w + 4.0, h + 4.0);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        corner,
-        corner - egui::vec2(500.0, 500.0),
-        egui::Modifiers::NONE,
-    );
-    let [GraphEvent::GridFramesEdited {
-        widths,
-        heights,
-        figure: true,
-        slack: Some(slack),
-    }] = signals.as_slice()
-    else {
-        panic!("one figure event expected, got {signals:?}");
-    };
-    assert_eq!(widths, &before.frame_widths);
-    assert_eq!(heights, &before.frame_heights);
-    assert_eq!(
-        (slack.left, slack.top, slack.right, slack.bottom),
-        (0.0, 0.0, 0.0, 0.0),
-        "stops at the graphs"
-    );
-    let after = layout_of(&context, &mut view, &fixture);
-    assert_eq!(after.size, (before.size.0 - 30, before.size.1 - 20));
-}
-
-/// K1: the page edge snaps to the grid step like the lines, and Shift turns
-/// the snap off. Witness: the snap ignored.
-#[test]
-fn an_l_corner_snaps_to_the_grid_and_shift_does_not() {
-    let fixture = Fixture::grid(2, 2, false, true, false);
-    let (context, mut view) = in_mode(&fixture);
-    view.set_layout_grid(Some(50.0));
-    let before = layout_of(&context, &mut view, &fixture);
-    let (w, h) = (before.size.0 as f32, before.size.1 as f32);
-    let corner = Pos2::new(w + 4.0, h + 4.0);
-    let right = |modifiers| {
-        let (context, mut view) = in_mode(&fixture);
-        view.set_layout_grid(Some(50.0));
-        let signals = drag(
-            &context,
-            &mut view,
-            &fixture,
-            corner,
-            corner + egui::vec2(37.0, 0.0),
-            modifiers,
-        );
-        match signals.as_slice() {
-            [GraphEvent::GridFramesEdited {
-                slack: Some(slack), ..
-            }] => slack.right,
-            other => panic!("one figure event expected, got {other:?}"),
-        }
-    };
-    let snapped = right(egui::Modifiers::NONE);
-    assert_eq!(
-        (f64::from(before.size.0) + snapped) % 50.0,
-        0.0,
-        "{snapped}"
-    );
-    assert_eq!(right(SHIFT), 37.0);
 }
 
 // ---------------------------------------------------------------------------
@@ -2071,79 +1759,6 @@ fn a_corner_handle_of_the_selected_box_resizes_it() {
     assert_eq!(
         (frame.left, frame.top),
         (before.frame.left, before.frame.top)
-    );
-}
-
-/// K1: pulling a page corner of a Free figure resizes the page only: the
-/// graphs keep their frames (no frame in the event), one event. Witness: the
-/// boxes scaled with the page (`scaled_to_page`).
-#[test]
-fn a_page_corner_drag_resizes_the_page_and_the_boxes_stay() {
-    let fixture = Fixture::free_two_layers();
-    let (context, mut view) = in_mode(&fixture);
-    let page = view.layout_page().expect("page");
-    let boxes = view.layout_boxes();
-    let corner = screen(
-        &view,
-        page.left + page.width + 4.0,
-        page.top + page.height + 4.0,
-    );
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        corner,
-        corner + egui::vec2(100.0, 50.0),
-        SHIFT,
-    );
-    let (frames, new_page) = edited(&signals);
-    let new_page = new_page.expect("a page");
-    assert!(
-        (new_page.width - page.width - 100.0).abs() < 0.02,
-        "{new_page:?}"
-    );
-    assert!(
-        (new_page.height - page.height - 50.0).abs() < 0.02,
-        "{new_page:?}"
-    );
-    assert!(frames.is_empty(), "no box follows: {frames:?}");
-    for graph in boxes {
-        assert_eq!(box_of(&view, graph.base).frame, graph.frame);
-    }
-    // Pulled far inward from a bigger page it stops at the graphs.
-    let mut spec = spec_of(&fixture);
-    spec.free_page = Some(stokesforge_plot::FreePage {
-        width: page.width + 100.0,
-        height: page.height + 100.0,
-        ..page
-    });
-    fixture.replace(spec);
-    let (context, mut view) = in_mode(&fixture);
-    let big = view.layout_page().expect("page");
-    let corner = screen(
-        &view,
-        big.left + big.width + 4.0,
-        big.top + big.height + 4.0,
-    );
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        corner,
-        corner - egui::vec2(5000.0, 5000.0),
-        SHIFT,
-    );
-    let (frames, new_page) = edited(&signals);
-    let new_page = new_page.expect("a page");
-    assert!(frames.is_empty());
-    let right = view
-        .layout_boxes()
-        .iter()
-        .map(|graph| graph.outer.left + graph.outer.width)
-        .fold(f64::MIN, f64::max);
-    assert!(
-        (new_page.left + new_page.width - right).abs() < 0.02,
-        "{new_page:?} vs {right}"
     );
 }
 
@@ -2660,496 +2275,11 @@ fn the_drop_bands_stick_to_the_grid_outline_when_the_page_has_slack() {
 }
 
 // ---------------------------------------------------------------------------
-// #512: a page corner is under the pointer, grows 1:1 with it past the edge,
-// and the display zooms out
+// #512: the page has no corner handle; the cursor stays free
 // ---------------------------------------------------------------------------
 
-const PUSH: egui::Vec2 = egui::vec2(50.0, 0.0);
-
-/// The press point of the bottom-right page corner of a Free figure, the
-/// figure drawn at the origin at scale 1, and a drawing area that leaves
-/// `room` points to its right.
-fn free_corner_and_area(view: &GraphView, room: f32) -> (Pos2, Rect) {
-    let page = view.layout_page().expect("page");
-    let from = screen(
-        view,
-        page.left + page.width + 4.0,
-        page.top + page.height + 4.0,
-    );
-    let drawn = view.display_rect().expect("drawn");
-    (
-        from,
-        Rect::from_min_max(
-            Pos2::new(0.0, 0.0),
-            Pos2::new(drawn.max.x + room, drawn.max.y + 400.0),
-        ),
-    )
-}
-
-/// #512, Free: the pointer goes past the edge of the drawing area, the corner
-/// is at the edge, the page keeps growing with the pointer and the display
-/// zooms out: the corner is at the edge, the opposite corner did not move, the
-/// other corner moved toward it, and the page grew by more than the 6 x 50
-/// of motion (the display zoomed out while it was pushed). Witness: the figure drawn centred in the area at the press
-/// scale (the accessor returning `None`) puts the corner far beyond the edge.
-#[test]
-fn a_free_page_corner_pushed_past_the_edge_zooms_out_and_keeps_growing() {
-    let fixture = Fixture::free_two_layers();
-    let (context, mut view) = in_mode(&fixture);
-    let page = view.layout_page().expect("page");
-    let (from, contain) = free_corner_and_area(&view, 40.0);
-    let at_press = view.display_rect().expect("drawn");
-    let (signals, shown, _) = drag_pushed(
-        &context,
-        &mut view,
-        &fixture,
-        contain,
-        from,
-        egui::vec2(0.0, 8.0),
-        &[PUSH; 6],
-        egui::Modifiers::NONE,
-    );
-    let last = *shown.last().expect("frames");
-    assert!(
-        (last.max.x - contain.max.x).abs() < 1.0,
-        "{last:?} in {contain:?}"
-    );
-    assert_eq!(last.min, at_press.min, "the opposite corner did not move");
-    assert!(
-        last.max.y < at_press.max.y,
-        "the other corner went toward it"
-    );
-    let (_, new_page) = edited(&signals);
-    let grown = new_page.expect("a page").width - page.width;
-    assert!(
-        grown > 300.0 && grown < 400.0,
-        "{grown}: the 6 x 50 of motion, a little more once the display zooms out"
-    );
-}
-
-/// #512, Regular Grid: same as the Free one, on the figure corner. The page
-/// top (the anchor of a bottom corner) does not move either.
-/// Witness: the same (centred fit).
-#[test]
-fn a_grid_page_corner_pushed_past_the_edge_zooms_out_and_keeps_growing() {
-    let fixture = Fixture::grid(2, 2, false, false, false);
-    let (context, mut view) = in_mode(&fixture);
-    let layout = layout_of(&context, &mut view, &fixture);
-    let (w, h) = (layout.size.0 as f32, layout.size.1 as f32);
-    let band = layout.title_band as f32;
-    let from = Pos2::new(w + 4.0, h + 4.0);
-    let contain = Rect::from_min_max(Pos2::ZERO, Pos2::new(w + 40.0, h + 400.0));
-    let (signals, shown, _) = drag_pushed(
-        &context,
-        &mut view,
-        &fixture,
-        contain,
-        from,
-        egui::vec2(0.0, 8.0),
-        &[PUSH; 6],
-        egui::Modifiers::NONE,
-    );
-    let last = *shown.last().expect("frames");
-    assert!((last.max.x - contain.max.x).abs() < 1.0, "{last:?}");
-    let scale = view.display_scale().expect("scale");
-    assert!(scale < 1.0, "zoomed out: {scale}");
-    let top_of_page = last.min.y + band * scale;
-    assert!(
-        (top_of_page - band).abs() < 1.0,
-        "the page top stays at {band}, is at {top_of_page}"
-    );
-    let [GraphEvent::GridFramesEdited {
-        slack: Some(slack), ..
-    }] = signals.as_slice()
-    else {
-        panic!("one figure event expected, got {signals:?}");
-    };
-    assert!(slack.right > 300.0, "{}", slack.right);
-}
-
-/// #512: the pointer pushed on and on past the edge of the drawing area, on
-/// both axes (60 points more in every frame): the page stops at the longest size the geometry accepts and
-/// the display scale stops shrinking (the page shown does not shrink while it
-/// no longer grows). Returns the scales of the last frames and the final event.
-fn held_far_past_the_edge(
-    fixture: &Fixture,
-    from: Pos2,
-    contain: Rect,
-    frames: usize,
-) -> (Vec<f32>, Vec<GraphEvent>) {
-    let (context, mut view) = in_mode(fixture);
-    let none = egui::Modifiers::NONE;
-    let mut held = Held::begin_kicked(
-        &context,
-        &mut view,
-        fixture,
-        contain,
-        from,
-        egui::vec2(8.0, 8.0),
-        none,
-    );
-    held.dt = 0.05;
-    let mut scales = Vec::new();
-    for _ in 0..frames {
-        held.push(&mut view, egui::vec2(60.0, 60.0), none);
-        scales.push(view.display_scale().expect("scale"));
-    }
-    let tail = scales.split_off(scales.len() - 6);
-    let mut signals = held.release(&mut view, none);
-    signals.retain(|signal| !matches!(signal, GraphEvent::PageEdgeReached));
-    (tail, signals)
-}
-
-/// #512, Regular Grid: held long past the edge the page stops at the largest
-/// the geometry gives (2000 points of empty space per axis, what
-/// `GridSlack::sanitized` keeps) and the display scale freezes. Witness: the
-/// longest page left at `MAX_FIGURE_EXTENT` (the scale goes on shrinking and the
-/// sixth scale differs from the first).
-#[test]
-fn a_grid_page_corner_held_past_the_edge_stops_at_the_geometry_maximum_and_the_display_freezes() {
-    let fixture = Fixture::grid(2, 2, false, false, false);
-    let (context, mut view) = in_mode(&fixture);
-    let layout = layout_of(&context, &mut view, &fixture);
-    let (w, h) = (layout.size.0 as f32, layout.size.1 as f32);
-    let from = Pos2::new(w + 4.0, h + 4.0);
-    let contain = Rect::from_min_max(Pos2::ZERO, Pos2::new(w + 40.0, h + 40.0));
-    let (tail, signals) = held_far_past_the_edge(&fixture, from, contain, 70);
-    assert!(
-        tail.iter().all(|scale| *scale == tail[0]),
-        "the scale goes on shrinking: {tail:?}"
-    );
-    let [GraphEvent::GridFramesEdited {
-        slack: Some(slack), ..
-    }] = signals.as_slice()
-    else {
-        panic!("one figure event expected, got {signals:?}");
-    };
-    assert_eq!(slack.right, 2000.0, "{slack:?}");
-    assert_eq!(slack.bottom, 2000.0, "{slack:?}");
-}
-
-/// #512, Free: same, the page stops at `MAX_FIGURE_EXTENT` on both axes and the
-/// display scale freezes. Witness: a longest page beyond what `moved_page_corner`
-/// accepts (the scale keeps shrinking in the last frames).
-#[test]
-fn a_free_page_corner_held_past_the_edge_stops_at_the_geometry_maximum_and_the_display_freezes() {
-    let fixture = Fixture::free_two_layers();
-    let (_, view) = in_mode(&fixture);
-    let (from, contain) = free_corner_and_area(&view, 40.0);
-    let contain = Rect::from_min_max(contain.min, Pos2::new(contain.max.x, from.y + 40.0));
-    let (tail, signals) = held_far_past_the_edge(&fixture, from, contain, 70);
-    assert!(
-        tail.iter().all(|scale| *scale == tail[0]),
-        "the scale goes on shrinking: {tail:?}"
-    );
-    let (_, page) = edited(&signals);
-    let page = page.expect("a page");
-    assert_eq!(page.width, stokesforge_plot::MAX_FIGURE_EXTENT);
-    assert_eq!(page.height, stokesforge_plot::MAX_FIGURE_EXTENT);
-}
-
-/// #512, Regular Grid: pushed diagonally past the right and the bottom edges,
-/// both sides of the page grow in every frame, neither waiting for the other.
-/// Witness: the lengths read in one pushed axis only (the height stays still
-/// while the width grows).
-#[test]
-fn a_diagonal_push_grows_both_sides_of_a_grid_page_in_every_frame() {
-    let fixture = Fixture::grid(2, 2, false, false, false);
-    let (context, mut view) = in_mode(&fixture);
-    let layout = layout_of(&context, &mut view, &fixture);
-    let (w, h) = (layout.size.0 as f32, layout.size.1 as f32);
-    let from = Pos2::new(w + 4.0, h + 4.0);
-    let contain = Rect::from_min_max(Pos2::ZERO, Pos2::new(w + 40.0, h + 40.0));
-    let none = egui::Modifiers::NONE;
-    let mut held = Held::begin_kicked(
-        &context,
-        &mut view,
-        &fixture,
-        contain,
-        from,
-        egui::vec2(8.0, 8.0),
-        none,
-    );
-    held.dt = 0.05;
-    // 300 points past the right edge, 15 past the bottom one.
-    held.push(&mut view, egui::vec2(300.0, 43.0), none);
-    let page = |view: &GraphView| {
-        let rect = view.display_rect().expect("drawn");
-        let scale = view.display_scale().expect("scale");
-        (rect.width() / scale, rect.height() / scale)
-    };
-    let mut before = page(&view);
-    for _ in 0..8 {
-        held.push(&mut view, egui::vec2(30.0, 30.0), none);
-        let now = page(&view);
-        assert!(now.0 > before.0 + 1.0, "width: {before:?} -> {now:?}");
-        assert!(now.1 > before.1 + 1.0, "height: {before:?} -> {now:?}");
-        before = now;
-    }
-}
-
-/// #512: the raw motion of the mouse (`MouseMoved`) is not read at all by a
-/// page-corner drag: a huge one alone moves nothing, and with the frame that
-/// starts the drag it changes nothing either. Only the pointer position counts.
-/// Witness: a read of `MouseMoved` as a pointer movement (the page jumps by
-/// the 3000 points).
-#[test]
-fn the_raw_motion_of_the_mouse_moves_nothing() {
-    let fixture = Fixture::free_two_layers();
-    let (context, mut view) = in_mode(&fixture);
-    let page = view.layout_page().expect("page");
-    let (from, contain) = free_corner_and_area(&view, 40.0);
-    let none = egui::Modifiers::NONE;
-    let mut run = |events, time| {
-        frame_in(
-            &context,
-            &mut view,
-            &fixture,
-            events,
-            time,
-            none,
-            1.0,
-            Some(contain),
-        )
-    };
-    run(
-        vec![egui::Event::PointerMoved(from), button(from, true, none)],
-        0.1,
-    );
-    let to = from + egui::vec2(0.0, 8.0);
-    run(
-        vec![
-            egui::Event::MouseMoved(egui::vec2(3000.0, 3000.0)),
-            egui::Event::PointerMoved(to),
-        ],
-        0.15,
-    );
-    let before = run(vec![], 0.2).rect;
-    let after = run(vec![egui::Event::MouseMoved(egui::vec2(5000.0, 0.0))], 0.25).rect;
-    assert_eq!(before, after, "a raw motion alone moves nothing");
-    let signals = run(vec![button(to, false, none)], 0.3).events;
-    let (_, new_page) = edited(&signals);
-    let new_page = new_page.expect("a page");
-    assert!(
-        (new_page.width - page.width).abs() < 1.0
-            && (new_page.height - page.height - 8.0).abs() < 1.0,
-        "{new_page:?} vs {page:?}"
-    );
-}
-
-/// #512: pushed against the graphs with the snap on, the page stays exactly at
-/// the graphs, in both placements: the snap never rounds the edge up to the next
-/// line. Witness: the clamped length given to the geometry as it is (the Regular
-/// page grows by 2 points, the Free page ends on the grid line above the graphs).
-#[test]
-fn a_page_corner_pushed_against_the_graphs_does_not_snap_outward() {
-    let fixture = Fixture::grid(2, 2, false, true, false);
-    let (context, mut view) = in_mode(&fixture);
-    view.set_layout_grid(Some(50.0));
-    let before = layout_of(&context, &mut view, &fixture);
-    let corner = Pos2::new(before.size.0 as f32 + 4.0, before.size.1 as f32 + 4.0);
-    let signals = drag(
-        &context,
-        &mut view,
-        &fixture,
-        corner,
-        corner - egui::vec2(40.0, 40.0),
-        egui::Modifiers::NONE,
-    );
-    assert!(signals.is_empty(), "{signals:?}");
-
-    let pulled_in = |grid: Option<f64>| {
-        let fixture = Fixture::free_two_layers();
-        let (context, mut view) = in_mode(&fixture);
-        view.set_layout_grid(grid);
-        let (from, contain) = free_corner_and_area(&view, 40.0);
-        let (signals, _, _) = drag_pushed(
-            &context,
-            &mut view,
-            &fixture,
-            contain,
-            from,
-            egui::vec2(0.0, 8.0),
-            &[egui::vec2(-3000.0, 0.0)],
-            egui::Modifiers::NONE,
-        );
-        edited(&signals).1.expect("a page").width
-    };
-    assert_eq!(pulled_in(Some(50.0)), pulled_in(None));
-}
-
-/// #512, a near corner (top-left) of a grid: the title band is part of the
-/// figure that must stay in the area, the corner moves with the opposite
-/// (bottom-right) corner fixed on both axes.
-#[test]
-fn a_top_left_page_corner_pushed_past_the_edge_keeps_the_opposite_corner() {
-    let fixture = Fixture::grid(2, 2, false, true, false);
-    let (context, mut view) = in_mode(&fixture);
-    let layout = layout_of(&context, &mut view, &fixture);
-    let (w, h) = (layout.size.0 as f32, layout.size.1 as f32);
-    let band = layout.title_band as f32;
-    let from = Pos2::new(-4.0, band - 4.0);
-    let contain = Rect::from_min_max(Pos2::new(-30.0, -30.0), Pos2::new(w + 50.0, h + 50.0));
-    let (signals, shown, _) = drag_pushed(
-        &context,
-        &mut view,
-        &fixture,
-        contain,
-        from,
-        egui::vec2(-8.0, -8.0),
-        &[egui::vec2(-50.0, -50.0); 4],
-        egui::Modifiers::NONE,
-    );
-    let last = *shown.last().expect("frames");
-    assert!(
-        (last.max.x - w).abs() < 1.0 && (last.max.y - h).abs() < 1.0,
-        "the bottom-right corner stays at ({w}, {h}): {last:?}"
-    );
-    assert!(
-        last.min.x >= contain.min.x - 1.0 && last.min.y >= contain.min.y - 1.0,
-        "{last:?} stays in {contain:?}"
-    );
-    assert!(
-        (last.min.x - contain.min.x).abs() < 1.0 || (last.min.y - contain.min.y).abs() < 1.0,
-        "{last:?} reaches the edge on an axis"
-    );
-    let [GraphEvent::GridFramesEdited {
-        slack: Some(slack), ..
-    }] = signals.as_slice()
-    else {
-        panic!("one figure event expected, got {signals:?}");
-    };
-    assert!(slack.left >= 199.0 && slack.top >= 199.0, "{slack:?}");
-}
-
-/// #512: coming back inward right after an overflow, the corner follows the
-/// cursor at once (no dead zone) and the display does not zoom back in.
-/// Witness: the corner left beyond the edge by the overflow (no zoom-out) gives
-/// a corner still past the edge after the 10 points back.
-#[test]
-fn coming_back_in_after_the_edge_moves_the_corner_at_once() {
-    let fixture = Fixture::free_two_layers();
-    let (context, mut view) = in_mode(&fixture);
-    let (from, contain) = free_corner_and_area(&view, 40.0);
-    let mut motions = vec![PUSH; 4];
-    let pushed = motions.len() - 1;
-    motions.push(egui::vec2(-10.0, 0.0));
-    let (_, shown, _) = drag_pushed(
-        &context,
-        &mut view,
-        &fixture,
-        contain,
-        from,
-        egui::vec2(0.0, 8.0),
-        &motions,
-        egui::Modifiers::NONE,
-    );
-    // The figure is drawn in the frame of the pointer that moved it (no lag).
-    assert!((shown[pushed].max.x - contain.max.x).abs() < 1.0);
-    let back = shown[pushed + 1].max.x;
-    assert!(
-        (back - (contain.max.x - 10.0)).abs() < 1.5,
-        "{back} vs {}",
-        contain.max.x - 10.0
-    );
-}
-
-/// #512: inward, the page stops at the graphs and the way back out grows at
-/// once. Witness: the inward motion not clamped (the 200 points inward are
-/// repaid before the page grows again).
-#[test]
-fn the_inward_stop_at_the_graphs_leaves_no_dead_zone() {
-    let fixture = Fixture::grid(2, 2, false, false, false);
-    let (context, mut view) = in_mode(&fixture);
-    let layout = layout_of(&context, &mut view, &fixture);
-    let (w, h) = (layout.size.0 as f32, layout.size.1 as f32);
-    let from = Pos2::new(w + 4.0, h + 4.0);
-    let contain = Rect::from_min_max(Pos2::ZERO, Pos2::new(w + 40.0, h + 400.0));
-    let (_, shown, _) = drag_pushed(
-        &context,
-        &mut view,
-        &fixture,
-        contain,
-        from,
-        egui::vec2(0.0, 8.0),
-        &[
-            egui::vec2(-100.0, 0.0),
-            egui::vec2(-100.0, 0.0),
-            egui::vec2(10.0, 0.0),
-        ],
-        egui::Modifiers::NONE,
-    );
-    // The figure is drawn in the frame of the pointer that moved it (no lag).
-    assert!((shown[1].max.x - w).abs() < 0.5, "stopped at the graphs");
-    assert!(
-        (shown[2].max.x - shown[1].max.x - 10.0).abs() < 0.5,
-        "grows at once: {shown:?}"
-    );
-}
-
-/// #512: Ctrl keeps the ratio AND the snap: the leading side lands on the grid
-/// step, the other follows the ratio; Shift + Ctrl keeps the ratio with no
-/// snap. Witness: the old `!keep_ratio` filter on the grid (the leading side
-/// then lands off the step).
-#[test]
-fn ctrl_on_an_l_corner_keeps_the_ratio_and_the_snap() {
-    let fixture = Fixture::grid(2, 2, false, true, false);
-    let (context, mut view) = in_mode(&fixture);
-    let before = layout_of(&context, &mut view, &fixture);
-    let (w, h) = (
-        f64::from(before.size.0),
-        f64::from(before.size.1 - before.title_band),
-    );
-    let corner = Pos2::new(before.size.0 as f32 + 4.0, before.size.1 as f32 + 4.0);
-    let grown = |modifiers: egui::Modifiers| {
-        let (context, mut view) = in_mode(&fixture);
-        view.set_layout_grid(Some(50.0));
-        let signals = drag(
-            &context,
-            &mut view,
-            &fixture,
-            corner,
-            corner + egui::vec2(60.0, 10.0),
-            modifiers,
-        );
-        let [GraphEvent::GridFramesEdited {
-            slack: Some(slack), ..
-        }] = signals.as_slice()
-        else {
-            panic!("one figure event expected, got {signals:?}");
-        };
-        (w + slack.right, h + slack.bottom)
-    };
-    let ctrl = egui::Modifiers {
-        ctrl: true,
-        ..egui::Modifiers::NONE
-    };
-    let (new_w, new_h) = grown(ctrl);
-    let leading = if 60.0 / w >= 10.0 / h { new_w } else { new_h };
-    assert_eq!(leading % 50.0, 0.0, "{new_w} x {new_h}");
-    assert!(
-        (new_w / new_h - w / h).abs() < 0.01,
-        "{new_w} x {new_h} vs {}",
-        w / h
-    );
-    let both = egui::Modifiers {
-        ctrl: true,
-        shift: true,
-        ..egui::Modifiers::NONE
-    };
-    let (free_w, free_h) = grown(both);
-    let scale = ((w + 60.0) / w).max((h + 10.0) / h);
-    assert_eq!(
-        (free_w, free_h),
-        (
-            w + ((scale - 1.0) * w).round(),
-            h + ((scale - 1.0) * h).round()
-        )
-    );
-}
-
 /// #512: moving a graph (`MoveCell`) keeps the absolute pointer: raw motion
-/// changes nothing. Witness: the corner-follow rules applied to every kind.
+/// changes nothing. Witness: motion applied as a pointer movement in the drag.
 #[test]
 fn moving_a_cell_ignores_the_raw_motion() {
     let fixture = Fixture::grid(2, 2, false, false, false);
@@ -3172,155 +2302,18 @@ fn moving_a_cell_ignores_the_raw_motion() {
     assert_eq!(moved(&events), (0, MoveTarget::Cell { row: 1, column: 1 }));
 }
 
-/// A page-corner drag with the free pointer, step by step (#512): `begin`
-/// presses and moves the pointer by the kick, every `push` is one frame in
-/// which the pointer moves by a vector (zero: the hand stays still), `wait`
-/// is one frame with no event.
-struct Held<'a> {
-    context: &'a egui::Context,
-    fixture: &'a Fixture,
-    contain: Rect,
-    time: f64,
-    /// The seconds between two frames.
-    dt: f64,
-    /// The scale the figure is drawn at when no drag draws it (the one it has
-    /// at the press).
-    scale: f32,
-    at: Pos2,
-}
-
-impl<'a> Held<'a> {
-    fn begin(
-        context: &'a egui::Context,
-        view: &mut GraphView,
-        fixture: &'a Fixture,
-        contain: Rect,
-        from: Pos2,
-        modifiers: egui::Modifiers,
-    ) -> Self {
-        Self::begin_kicked(
-            context,
-            view,
-            fixture,
-            contain,
-            from,
-            egui::vec2(8.0, 0.0),
-            modifiers,
-        )
-    }
-
-    fn begin_kicked(
-        context: &'a egui::Context,
-        view: &mut GraphView,
-        fixture: &'a Fixture,
-        contain: Rect,
-        from: Pos2,
-        kick: egui::Vec2,
-        modifiers: egui::Modifiers,
-    ) -> Self {
-        let mut held = Held {
-            context,
-            fixture,
-            contain,
-            time: 0.1,
-            dt: 0.016,
-            scale: view.display_scale().unwrap_or(1.0),
-            at: from,
-        };
-        held.run(
-            view,
-            vec![
-                egui::Event::PointerMoved(from),
-                button(from, true, modifiers),
-            ],
-            modifiers,
-        );
-        held.push(view, kick, modifiers);
-        held
-    }
-
-    fn run(
-        &mut self,
-        view: &mut GraphView,
-        events: Vec<egui::Event>,
-        modifiers: egui::Modifiers,
-    ) -> Out {
-        self.time += self.dt;
-        frame_in(
-            self.context,
-            view,
-            self.fixture,
-            events,
-            self.time,
-            modifiers,
-            self.scale,
-            Some(self.contain),
-        )
-    }
-
-    /// One frame: the pointer moves by `motion`.
-    fn push(&mut self, view: &mut GraphView, motion: egui::Vec2, m: egui::Modifiers) -> Out {
-        if motion == egui::Vec2::ZERO {
-            return self.run(view, vec![], m);
-        }
-        self.at += motion;
-        let at = self.at;
-        self.run(view, vec![egui::Event::PointerMoved(at)], m)
-    }
-
-    /// One frame: the pointer goes to `to`.
-    fn go_to(&mut self, view: &mut GraphView, to: Pos2, m: egui::Modifiers) -> Out {
-        let by = to - self.at;
-        self.push(view, by, m)
-    }
-
-    /// One frame with no event: the hand stays still.
-    fn wait(&mut self, view: &mut GraphView, m: egui::Modifiers) -> Out {
-        self.run(view, vec![], m)
-    }
-
-    fn release(&mut self, view: &mut GraphView, m: egui::Modifiers) -> Vec<GraphEvent> {
-        let at = self.at;
-        self.run(view, vec![button(at, false, m)], m).events
-    }
-}
-
-fn figure_slack(signals: &[GraphEvent]) -> stokesforge_plot::GridSlack {
-    let [GraphEvent::GridFramesEdited {
-        slack: Some(slack), ..
-    }] = signals
-    else {
-        panic!("one figure event expected, got {signals:?}");
-    };
-    *slack
-}
-
-/// The page of the bottom-right corner of a Regular Grid, its press point, and
-/// a drawing area that leaves `room` points to the right of the figure.
-fn grid_corner(
-    context: &egui::Context,
-    view: &mut GraphView,
-    fixture: &Fixture,
-    room: f32,
-) -> (Pos2, Rect, f32) {
-    let layout = layout_of(context, view, fixture);
-    let (w, h) = (layout.size.0 as f32, layout.size.1 as f32);
-    (
-        Pos2::new(w + 4.0, h + 4.0),
-        Rect::from_min_max(Pos2::ZERO, Pos2::new(w + room, h + 400.0)),
-        w,
-    )
-}
-
-/// #512: the system cursor stays free for a whole page-corner drag, inside the
-/// drawing area and past it: no `CursorGrab` / `CursorPosition` command and
-/// never a hidden cursor. Witness: one `CursorGrab` send added to the drag
-/// fails the first assertion.
+/// #512: the system cursor stays free for a whole drag, inside the drawing area
+/// and past it: no `CursorGrab` / `CursorPosition` command and never a hidden
+/// cursor. Witness: one `CursorGrab` send added to the drag fails the first
+/// assertion.
 #[test]
-fn a_page_corner_drag_never_grabs_nor_moves_the_cursor_nor_hides_it() {
+fn a_drag_never_grabs_nor_moves_the_cursor_nor_hides_it() {
     let fixture = Fixture::grid(2, 2, false, false, false);
     let (context, mut view) = in_mode(&fixture);
-    let (from, contain, _) = grid_corner(&context, &mut view, &fixture, 100.0);
+    let layout = layout_of(&context, &mut view, &fixture);
+    let (w, h) = (layout.size.0 as f32, layout.size.1 as f32);
+    let contain = Rect::from_min_max(Pos2::ZERO, Pos2::new(w + 100.0, h + 400.0));
+    let from = middle(&view, 0);
     let none = egui::Modifiers::NONE;
     let mut frames = Vec::new();
     let mut time = 0.1;
@@ -3364,330 +2357,43 @@ fn a_page_corner_drag_never_grabs_nor_moves_the_cursor_nor_hides_it() {
     );
 }
 
-/// #512, snap on: the page glides to each new snapped size (it is between the
-/// old and the new one right after the move, and on the new one a moment
-/// later), and the release commits the snapped size whatever the glide had
-/// reached. Witness: the eased value committed (not a multiple of the step), or
-/// no glide (the page already on the target after one frame).
-#[test]
-fn with_the_snap_on_the_page_glides_and_the_release_commits_the_snapped_size() {
-    let fixture = Fixture::grid(2, 2, false, false, false);
-    let width = |context: &egui::Context, view: &mut GraphView| {
-        f64::from(layout_of(context, view, &fixture).size.0)
-    };
-    let none = egui::Modifiers::NONE;
-    let run = |frames_after: usize| {
-        let (context, mut view) = in_mode(&fixture);
-        view.set_layout_grid(Some(50.0));
-        let (from, contain, w) = grid_corner(&context, &mut view, &fixture, 600.0);
-        let mut held = Held::begin(&context, &mut view, &fixture, contain, from, none);
-        // Lands in the middle of a step, 20 points past the line below.
-        let page = f64::from(w);
-        let wanted = (page / 50.0).ceil() * 50.0 + 26.0 - page - 8.0;
-        held.push(&mut view, egui::vec2(wanted as f32, 0.0), none);
-        let mut seen = vec![width(&context, &mut view)];
-        for _ in 0..frames_after {
-            held.push(&mut view, egui::Vec2::ZERO, none);
-            seen.push(width(&context, &mut view));
-        }
-        let slack = figure_slack(&held.release(&mut view, none));
-        (page, seen, slack.right)
-    };
-    let (page, seen, committed) = run(1);
-    assert_eq!(
-        (page + committed) % 50.0,
-        0.0,
-        "snapped: {page} + {committed}"
-    );
-    let target = page + committed;
-    assert!(
-        seen[0] > page && seen[0] < target - 0.5,
-        "gliding: {} between {page} and {target}",
-        seen[0]
-    );
-    let (_, settled, committed_later) = run(40);
-    assert_eq!(*settled.last().expect("frames"), target, "arrives");
-    assert_eq!(committed_later, committed);
-}
-
-/// #512: Ctrl pressed after the grab keeps the ratio the page had at the press,
-/// at once, in the same drag; released, the drag goes back to the plain one.
-/// Witness: `keep_ratio` frozen at the press (the first case gives the plain
-/// result, the second the ratio one).
-#[test]
-fn ctrl_pressed_or_released_during_the_drag_takes_effect_at_once() {
-    let fixture = Fixture::grid(2, 2, false, false, false);
-    let none = egui::Modifiers::NONE;
-    let ctrl = egui::Modifiers { ctrl: true, ..none };
-    let ratio = {
-        let (context, mut view) = in_mode(&fixture);
-        let layout = layout_of(&context, &mut view, &fixture);
-        f64::from(layout.size.1 - layout.title_band) / f64::from(layout.size.0)
-    };
-    // (at the press, during the drag, at the release) -> (right, bottom)
-    let run = |press: egui::Modifiers, during: egui::Modifiers| {
-        let (context, mut view) = in_mode(&fixture);
-        let (from, contain, _) = grid_corner(&context, &mut view, &fixture, 600.0);
-        let mut held = Held::begin(&context, &mut view, &fixture, contain, from, press);
-        held.push(&mut view, egui::vec2(40.0, 0.0), press);
-        held.push(&mut view, egui::Vec2::ZERO, during);
-        let slack = figure_slack(&held.release(&mut view, during));
-        (slack.right, slack.bottom)
-    };
-    let (plain_right, plain_bottom) = run(none, none);
-    assert_eq!(plain_bottom, 0.0, "no ratio: the height stays");
-    let (right, bottom) = run(none, ctrl);
-    assert_eq!(right, plain_right, "the leading side is the same");
-    assert!(
-        (bottom - right * ratio).abs() <= 1.0,
-        "ratio kept: {right} x {bottom} (ratio {ratio})"
-    );
-    // Released, the drag is plain again from where the corner is shown (the
-    // cursor stays on it): the follower side keeps its ratio length and the
-    // next pull of the height is added to it, with no jump back.
-    let released = run(ctrl, none);
-    assert_eq!(released.0, plain_right);
-    assert!(
-        (released.1 - plain_right * ratio).abs() <= 1.0,
-        "the corner stays where it was shown: {released:?}"
-    );
-}
-
-/// #512: Shift pressed after the grab drops the snap at once (the committed
-/// size is the raw one, not on a grid line). Witness: the snap read at the
-/// press.
-#[test]
-fn shift_pressed_during_the_drag_drops_the_snap_at_once() {
-    let fixture = Fixture::grid(2, 2, false, false, false);
-    let none = egui::Modifiers::NONE;
-    let shift = egui::Modifiers {
-        shift: true,
-        ..none
-    };
-    let run = |during: egui::Modifiers| {
-        let (context, mut view) = in_mode(&fixture);
-        view.set_layout_grid(Some(50.0));
-        let (from, contain, w) = grid_corner(&context, &mut view, &fixture, 600.0);
-        let mut held = Held::begin(&context, &mut view, &fixture, contain, from, none);
-        held.push(&mut view, egui::vec2(33.0, 0.0), none);
-        held.push(&mut view, egui::Vec2::ZERO, during);
-        let right = figure_slack(&held.release(&mut view, during)).right;
-        (f64::from(w), right)
-    };
-    let (page, snapped) = run(none);
-    assert_eq!((page + snapped) % 50.0, 0.0);
-    let (_, raw) = run(shift);
-    // 8 of kick and the 33 of the push.
-    assert_eq!(raw, 8.0 + 33.0, "the raw pull");
-}
-
-fn with_ctrl() -> egui::Modifiers {
-    egui::Modifiers {
-        ctrl: true,
-        ..egui::Modifiers::NONE
-    }
-}
-
-/// #512, Ctrl: moving the mouse perpendicular to the ratio line builds no
-/// hidden travel, so the way back moves the corner at once. Witness: the raw
-/// accumulator not projected onto the shown corner each frame (the 20 points
-/// of height pulled inward are repaid before the corner answers).
-#[test]
-fn with_ctrl_moving_off_the_ratio_line_leaves_no_dead_zone() {
-    let fixture = Fixture::grid(2, 2, false, false, false);
-    let (context, mut view) = in_mode(&fixture);
-    let (from, contain, _) = grid_corner(&context, &mut view, &fixture, 600.0);
-    let ctrl = with_ctrl();
-    let mut held = Held::begin(&context, &mut view, &fixture, contain, from, ctrl);
-    for _ in 0..5 {
-        held.push(&mut view, egui::vec2(0.0, -4.0), ctrl);
-    }
-    let before = view.display_rect().expect("drawn").max;
-    held.push(&mut view, egui::vec2(0.0, 6.0), ctrl);
-    let after = view.display_rect().expect("drawn").max;
-    assert!(
-        after.y - before.y > 4.0 && after.x > before.x,
-        "the corner answers at once: {before:?} -> {after:?}"
-    );
-}
-
-/// #512: the figure of a frame is sized and placed from this frame's pointer
-/// (the host advances the drag before it sizes the figure). Witness: the drag
-/// stepped during the paint, after the rectangle was taken (the figure is a
-/// frame behind: the rectangle does not move in the frame of the push).
-#[test]
-fn the_figure_follows_the_pointer_of_the_same_frame() {
-    let fixture = Fixture::grid(2, 2, false, false, false);
-    let (context, mut view) = in_mode(&fixture);
-    let (from, contain, _) = grid_corner(&context, &mut view, &fixture, 600.0);
-    let none = egui::Modifiers::NONE;
-    let mut held = Held::begin(&context, &mut view, &fixture, contain, from, none);
-    let before = held.push(&mut view, egui::Vec2::ZERO, none).rect;
-    let after = held.push(&mut view, egui::vec2(30.0, 0.0), none).rect;
-    assert!(
-        (after.max.x - before.max.x - 30.0).abs() < 0.5,
-        "{before:?} -> {after:?}"
-    );
-}
-
 // ---------------------------------------------------------------------------
 // #512: the growth past the edge of the drawing area
 // ---------------------------------------------------------------------------
 
-/// What a drag with the pointer held past the right edge gave.
-struct Pushed {
-    /// The page width in the preview after each frame (the first frame is the
-    /// move of the pointer past the edge).
-    widths: Vec<f64>,
-    /// The rectangle the figure was drawn in after each frame.
-    rects: Vec<Rect>,
-    /// The rectangle the figure had at the press.
-    at_press: Rect,
-    /// The page at the press.
-    page: stokesforge_plot::FreePage,
-    /// The display scale after the last frame.
-    scale: f32,
-    /// The events of the release.
-    signals: Vec<GraphEvent>,
-}
-
-/// A Free page-corner drag: press at the bottom-right corner (the figure drawn
-/// at `scale`), the pointer goes in one move to `past` points beyond the right
-/// edge of the drawing area (`past` < 0: before the left edge, on the anchor's
-/// side; `down`: also that far below the bottom edge) and stays there. One
-/// frame per entry of `dts`, the seconds since the previous frame.
-fn still_past_the_edge(past: f32, down: Option<f32>, dts: &[f64], scale: f32) -> Pushed {
-    let fixture = Fixture::free_two_layers();
-    let (context, mut view) = in_mode(&fixture);
-    let none = egui::Modifiers::NONE;
-    if scale != 1.0 {
-        frame_with(&context, &mut view, &fixture, vec![], 0.05, none, scale);
+/// #512 (L1): the four L-shaped page corners are gone, on purpose. A press at
+/// the place where one used to be, a few points outside the page, starts no
+/// drag (no event, in Free, on a regular grid, on a compact fallback grid), the
+/// hover cursor there is not a resize cursor and no L polyline is drawn.
+/// Witness: the page corner hit test put back.
+#[test]
+fn a_press_at_the_former_page_corner_starts_no_drag() {
+    for fixture in [
+        Fixture::grid(2, 2, false, false, false),
+        Fixture::free_two_layers(),
+        Fixture::compact(),
+    ] {
+        let (context, mut view) = in_mode(&fixture);
+        let layout = layout_of(&context, &mut view, &fixture);
+        let (w, h) = (layout.size.0 as f32, layout.size.1 as f32);
+        for corner in [
+            Pos2::new(w + 4.0, h + 4.0),
+            Pos2::new(-4.0, h + 4.0),
+            Pos2::new(w + 4.0, -4.0),
+            Pos2::new(-4.0, -4.0),
+        ] {
+            let signals = drag(
+                &context,
+                &mut view,
+                &fixture,
+                corner,
+                corner + egui::vec2(40.0, 30.0),
+                egui::Modifiers::NONE,
+            );
+            assert!(signals.is_empty(), "{corner:?}: {signals:?}");
+            let out = hover_at(&context, &mut view, &fixture, corner, 3.0);
+            assert_eq!(out.cursor, egui::CursorIcon::Default, "{corner:?}");
+            assert_eq!(l_corners(&out.shapes), 0, "no corner is drawn");
+        }
     }
-    let page = view.layout_page().expect("page");
-    let (from, contain) = free_corner_and_area(&view, 40.0);
-    let at_press = view.display_rect().expect("drawn");
-    let mut held = Held::begin(&context, &mut view, &fixture, contain, from, none);
-    // The grab is a few points from the corner, on each axis.
-    let grab = from - at_press.max;
-    let target = Pos2::new(
-        if past >= 0.0 {
-            contain.max.x + past + grab.x
-        } else {
-            contain.min.x + past + grab.x
-        },
-        down.map_or(held.at.y, |down| contain.max.y + down + grab.y),
-    );
-    let mut out = Pushed {
-        widths: Vec::new(),
-        rects: Vec::new(),
-        at_press,
-        page,
-        scale,
-        signals: Vec::new(),
-    };
-    for (i, dt) in dts.iter().enumerate() {
-        held.dt = *dt;
-        let frame = if i == 0 {
-            held.go_to(&mut view, target, none)
-        } else {
-            held.wait(&mut view, none)
-        };
-        out.widths.push(view.layout_page().expect("page").width);
-        out.rects.push(frame.rect);
-    }
-    out.scale = view.display_scale().expect("scale");
-    out.signals = held.release(&mut view, none);
-    out
-}
-
-/// #512: pushed on the anchor side (the pointer before the left edge, the
-/// anchor being the left corner) nothing grows: the page stops at its shortest.
-/// Witness: an unsigned push (the left side grows the page).
-#[test]
-fn a_push_on_the_anchor_side_grows_nothing() {
-    let pushed = still_past_the_edge(-60.0, None, &[0.05; 8], 1.0);
-    assert!(
-        pushed
-            .widths
-            .iter()
-            .all(|width| *width <= pushed.page.width),
-        "{:?} from {}",
-        pushed.widths,
-        pushed.page.width
-    );
-    assert!(
-        pushed.signals.is_empty(),
-        "the page stays as it is: {:?}",
-        pushed.signals
-    );
-}
-
-/// #512: a diagonal push grows both sides, each at its own speed.
-/// Witness: only the first pushed axis grows.
-#[test]
-fn a_diagonal_push_grows_both_sides() {
-    let pushed = still_past_the_edge(20.0, Some(40.0), &[0.05; 8], 1.0);
-    let (_, new_page) = edited(&pushed.signals);
-    let new_page = new_page.expect("a page");
-    assert!(new_page.width > pushed.page.width + 50.0, "{new_page:?}");
-    assert!(new_page.height > pushed.page.height + 50.0, "{new_page:?}");
-}
-
-/// #512: the opposite corner never moves on the screen, during the whole drag,
-/// the zoom-out included. Witness: the figure drawn centred in the area (the
-/// anchor drifts with the zoom).
-#[test]
-fn the_opposite_corner_never_moves_on_the_screen_during_the_drag() {
-    let pushed = still_past_the_edge(200.0, Some(200.0), &[0.05; 20], 1.0);
-    assert!(pushed.scale < 0.9, "zoomed out: {}", pushed.scale);
-    for rect in &pushed.rects {
-        assert!(
-            (rect.min - pushed.at_press.min).length() < 0.01,
-            "{rect:?} vs {:?}",
-            pushed.at_press
-        );
-    }
-}
-
-/// #512: once the button is released the drag is over: the pointer left past
-/// the edge grows nothing any more. Witness: the growth not tied to the drag
-/// (a page still growing after the release).
-#[test]
-fn after_the_release_nothing_grows() {
-    let fixture = Fixture::free_two_layers();
-    let (context, mut view) = in_mode(&fixture);
-    let none = egui::Modifiers::NONE;
-    let (from, contain) = free_corner_and_area(&view, 40.0);
-    let mut held = Held::begin(&context, &mut view, &fixture, contain, from, none);
-    held.dt = 0.05;
-    held.go_to(&mut view, Pos2::new(contain.max.x + 24.0, held.at.y), none);
-    held.wait(&mut view, none);
-    let signals = held.release(&mut view, none);
-    assert!(edited(&signals).1.is_some());
-    assert!(!view.layout_dragging());
-    for _ in 0..4 {
-        let out = held.wait(&mut view, none);
-        assert!(out.events.is_empty(), "{:?}", out.events);
-    }
-}
-
-/// #512: the pointer held still past the edge for many frames, with time
-/// advancing, grows nothing: only movement grows the page, never time.
-/// Witness: a growth per frame added in `follow_page_corner` (a speed law
-/// brought back) makes the widths climb after the first frame.
-#[test]
-fn a_hand_still_past_the_edge_grows_nothing() {
-    let pushed = still_past_the_edge(20.0, None, &[0.05; 40], 1.0);
-    assert!(
-        pushed.widths[0] > pushed.page.width + 10.0,
-        "the move past the edge grew the page: {:?}",
-        pushed.widths
-    );
-    assert!(
-        pushed.widths.iter().all(|w| *w == pushed.widths[0]),
-        "{:?}",
-        pushed.widths
-    );
-    let (_, committed) = edited(&pushed.signals);
-    assert!((committed.expect("a page").width - pushed.widths[0]).abs() <= 1.0);
 }

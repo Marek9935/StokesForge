@@ -252,7 +252,7 @@ pub fn scaled_to_page(boxes: &[GraphBox], from: FreePage, to: FreePage) -> Vec<(
         .collect()
 }
 
-/// Smallest page extent the page corners can give, in points.
+/// Smallest page extent, in points.
 pub const MIN_PAGE_EXTENT: f64 = 72.0;
 
 /// Figure pixels to stored page coordinates (the title band is above the
@@ -382,13 +382,6 @@ pub enum LayoutHandle {
         high: usize,
         /// Base of the graph on the pointer's side (`low` if exactly on the line).
         near: usize,
-    },
-    /// A corner of the page: `right` / `bottom` say which one.
-    Page {
-        /// The right corner (else the left one).
-        right: bool,
-        /// The bottom corner (else the top one).
-        bottom: bool,
     },
 }
 
@@ -564,49 +557,19 @@ fn edge_hit(
     best.map(|(_, handle)| handle)
 }
 
-/// The handle under the stored point `(x, y)`, all in points. Order: the page
-/// corner handles (a square zone just outside each page corner, twice the edge
-/// reach wide); the edges of the `selected` boxes (active first), which win over a box
+/// The handle under the stored point `(x, y)`, all in points. Order: the edges
+/// of the `selected` boxes (active first), which win over a box
 /// drawn in front of them; then the boxes front to back, where the edges and
 /// corners resize (see [`LayoutReach`]) and anywhere else inside the outer
 /// rectangle moves. The inside of a selected box never wins over a box in front.
 pub fn layout_handle_at(
     boxes: &[GraphBox],
     selected: &[usize],
-    page: FreePage,
     x: f64,
     y: f64,
     reach: LayoutReach,
 ) -> Option<LayoutHandle> {
     let tolerance = reach.edge_points();
-    let zone = 2.0 * tolerance;
-    for right in [false, true] {
-        for bottom in [false, true] {
-            let corner_x = if right {
-                page.left + page.width
-            } else {
-                page.left
-            };
-            let corner_y = if bottom {
-                page.top + page.height
-            } else {
-                page.top
-            };
-            let in_x = if right {
-                x > corner_x && x <= corner_x + zone
-            } else {
-                x < corner_x && x >= corner_x - zone
-            };
-            let in_y = if bottom {
-                y > corner_y && y <= corner_y + zone
-            } else {
-                y < corner_y && y >= corner_y - zone
-            };
-            if in_x && in_y {
-                return Some(LayoutHandle::Page { right, bottom });
-            }
-        }
-    }
     for base in selected {
         if let Some(graph) = boxes.iter().find(|graph| graph.base == *base) {
             if let Some(handle) = edge_hit(boxes, graph, x, y, reach) {
@@ -1089,78 +1052,6 @@ pub fn moved_boundary(
     (frames, guides)
 }
 
-/// The page after dragging its `corner` (`(right, bottom)`) by `delta`
-/// points (#505, K1): the two page edges that meet there move, the opposite
-/// corner stays, and **the graph boxes are not touched**: the page gains or
-/// loses empty space. Inward it stops at the bounding box of the outer
-/// rectangles of the `boxes` (a page already smaller than the graphs is never
-/// pushed further in); the extent stays in `[MIN_PAGE_EXTENT,
-/// MAX_FIGURE_EXTENT]`. With `snap.enabled` and a grid, the dragged edge snaps
-/// to the grid lines of the page origin before the bounds. Rounded to a
-/// hundredth of a point.
-pub fn moved_page_corner(
-    boxes: &[GraphBox],
-    start: FreePage,
-    corner: (bool, bool),
-    delta: (f64, f64),
-    snap: Snap,
-) -> FreePage {
-    let (dx, dy) = (round_hundredth(delta.0), round_hundredth(delta.1));
-    let (mut left, mut top) = (f64::INFINITY, f64::INFINITY);
-    let (mut right, mut bottom) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
-    for graph in boxes {
-        let o = graph.outer;
-        left = left.min(o.left);
-        top = top.min(o.top);
-        right = right.max(o.left + o.width);
-        bottom = bottom.max(o.top + o.height);
-    }
-    // `(near, far)` limits the dragged edge may not cross going inward.
-    let axis = |origin: f64, extent: f64, d: f64, far: bool, bbox: (f64, f64)| -> (f64, f64) {
-        if extent.is_nan() || extent <= 0.0 || !d.is_finite() {
-            return (origin, extent);
-        }
-        let (mut low, mut high) = (origin, origin + extent);
-        if far {
-            high += d;
-        } else {
-            low += d;
-        }
-        if snap.enabled {
-            let edge = if far { high } else { low };
-            if let Some(offset) = grid_offset(&[edge], origin, snap.grid) {
-                if far {
-                    high += offset;
-                } else {
-                    low += offset;
-                }
-            }
-        }
-        if bbox.0 <= bbox.1 {
-            if far {
-                high = high.max(bbox.1.min(origin + extent));
-            } else {
-                low = low.min(bbox.0.max(origin));
-            }
-        }
-        let new_extent = (high - low).clamp(MIN_PAGE_EXTENT, MAX_FIGURE_EXTENT);
-        let low = if far {
-            origin
-        } else {
-            origin + extent - new_extent
-        };
-        (round_hundredth(low), round_hundredth(new_extent))
-    };
-    let (left, width) = axis(start.left, start.width, dx, corner.0, (left, right));
-    let (top, height) = axis(start.top, start.height, dy, corner.1, (top, bottom));
-    FreePage {
-        left,
-        top,
-        width,
-        height,
-    }
-}
-
 /// The frames of **Fit Layout to Page** in Free (#505, K1), the inverse of
 /// [`page_fitted_to_layers`]: the graph boxes are mapped affinely from their
 /// bounding box to the `page` ([`scaled_to_page`]), bands frozen, one factor
@@ -1329,27 +1220,15 @@ mod tests {
     }
 
     #[test]
-    fn layout_handles_page_corners_first_then_boxes_front_to_back() {
+    fn layout_handles_go_to_the_boxes_front_to_back() {
         let a = gbox(0, 100.0, 50.0, 200.0, 100.0); // outer 40..310 x 40..190
         let b = gbox(1, 200.0, 50.0, 200.0, 100.0); // overlaps a
         let boxes = [a, b];
-        let at = |x, y| layout_handle_at(&boxes, &[], PAGE, x, y, LayoutReach::at_scale(4.0, 1.0));
-        // Outside the bottom-right page corner, within 8 pt.
-        assert_eq!(
-            at(804.0, 604.0),
-            Some(LayoutHandle::Page {
-                right: true,
-                bottom: true
-            })
-        );
-        assert_eq!(
-            at(-3.0, -3.0),
-            Some(LayoutHandle::Page {
-                right: false,
-                bottom: false
-            })
-        );
-        // Inside the page near its corner: not a page handle.
+        let at = |x, y| layout_handle_at(&boxes, &[], x, y, LayoutReach::at_scale(4.0, 1.0));
+        // Off every box, including just outside a page corner (#512: none).
+        assert_eq!(at(804.0, 604.0), None);
+        assert_eq!(at(-3.0, -3.0), None);
+        // Inside the page near its corner: nothing there either.
         assert_eq!(at(5.0, 5.0), None);
         // Overlap: the front box (1) wins, inside it moves.
         let Some(LayoutHandle::Box { base, edges }) = at(250.0, 100.0) else {
@@ -1528,38 +1407,6 @@ mod tests {
     }
 
     #[test]
-    fn dragging_a_page_corner_moves_it_and_keeps_the_opposite_one() {
-        let p = page(10.0, 20.0, 800.0, 600.0);
-        let r = moved_page_corner(&[], p, (true, true), (50.0, -30.0), no_snap());
-        assert_eq!(r, page(10.0, 20.0, 850.0, 570.0));
-        let r = moved_page_corner(&[], p, (false, false), (40.0, 25.0), no_snap());
-        assert_eq!((r.left, r.top), (50.0, 45.0));
-        assert_eq!((r.left + r.width, r.top + r.height), (810.0, 620.0));
-        // Minimum 72 each way, opposite corner kept.
-        let r = moved_page_corner(&[], p, (true, true), (-5000.0, -5000.0), no_snap());
-        assert_eq!((r.width, r.height), (72.0, 72.0));
-        let r = moved_page_corner(&[], p, (false, true), (5000.0, 0.0), no_snap());
-        assert_eq!(r.left + r.width, 810.0);
-        assert_eq!(r.width, 72.0);
-        // Grid: the dragged corner lands on a line from the page origin.
-        let g = Snap {
-            grid: Some(50.0),
-            threshold: 0.0,
-            enabled: true,
-        };
-        let r = moved_page_corner(&[], p, (true, true), (47.0, 3.0), g);
-        assert_eq!((r.width, r.height), (850.0, 600.0));
-        let off = Snap {
-            enabled: false,
-            ..g
-        };
-        assert_eq!(
-            moved_page_corner(&[], p, (true, true), (47.0, 3.0), off).width,
-            847.0
-        );
-    }
-
-    #[test]
     fn scaling_to_a_page_maps_the_outer_rectangles_and_keeps_the_gutters() {
         let a = gbox(0, 100.0, 50.0, 200.0, 100.0); // outer 40,40 270x150
         let from = page(0.0, 0.0, 800.0, 600.0);
@@ -1605,7 +1452,7 @@ mod tests {
         y: f64,
         scale: f64,
     ) -> Option<LayoutHandle> {
-        layout_handle_at(boxes, selected, PAGE, x, y, reach(scale))
+        layout_handle_at(boxes, selected, x, y, reach(scale))
     }
 
     fn pair() -> [GraphBox; 2] {
@@ -2161,63 +2008,6 @@ mod page_corner_tests {
                 stack: 0,
             },
         }
-    }
-
-    fn no_snap_at_all() -> Snap {
-        Snap {
-            grid: None,
-            threshold: 0.0,
-            enabled: false,
-        }
-    }
-
-    /// K1: a page corner pulled inward stops at the bounding box of the graphs
-    /// (outer rectangles), on both sides; outward it grows freely. The boxes
-    /// are not an output. Witness: no bounding box limit (the page goes to the
-    /// 72 point minimum).
-    #[test]
-    fn a_page_corner_pulled_inward_stops_at_the_graphs() {
-        let page = FreePage {
-            left: 0.0,
-            top: 0.0,
-            width: 800.0,
-            height: 400.0,
-        };
-        // The graphs occupy x 100..700, y 50..300.
-        let boxes = [
-            boxed(0, 100.0, 50.0, 300.0, 250.0),
-            boxed(1, 400.0, 50.0, 300.0, 250.0),
-        ];
-        let snap = no_snap_at_all();
-        let far = moved_page_corner(&boxes, page, (true, true), (-100_000.0, -100_000.0), snap);
-        assert_eq!(
-            (far.left, far.top, far.width, far.height),
-            (0.0, 0.0, 700.0, 300.0)
-        );
-        let near = moved_page_corner(&boxes, page, (false, false), (100_000.0, 100_000.0), snap);
-        assert_eq!(
-            (
-                near.left,
-                near.top,
-                near.left + near.width,
-                near.top + near.height
-            ),
-            (100.0, 50.0, 800.0, 400.0)
-        );
-        let out = moved_page_corner(&boxes, page, (false, true), (-40.0, 25.0), snap);
-        assert_eq!(
-            (out.left, out.top, out.width, out.height),
-            (-40.0, 0.0, 840.0, 425.0)
-        );
-        // A page already smaller than the graphs is not pushed further in.
-        let small = FreePage {
-            left: 0.0,
-            top: 0.0,
-            width: 500.0,
-            height: 400.0,
-        };
-        let same = moved_page_corner(&boxes, small, (true, true), (-50.0, 0.0), snap);
-        assert_eq!(same.width, 500.0);
     }
 
     /// K1: Fit Layout to Page maps the bounding box of the graphs to the page,

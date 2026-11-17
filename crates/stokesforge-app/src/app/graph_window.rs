@@ -381,7 +381,7 @@ pub(super) fn graph_view_contents(
         egui::Sense::hover(),
     );
     // In the mode, the rulers take a strip at the top and at the left, and the
-    // figure leaves the room the page corner handles need around it.
+    // figure leaves a margin around it (`LAYOUT_GRAB_MARGIN`).
     let strips = layout_mode.then(|| super::page_layout::split_strips(area));
     let outer = strips.as_ref().map_or(area, |strips| strips.figure);
     let contain = if layout_mode {
@@ -425,8 +425,9 @@ pub(super) fn graph_view_contents(
         contain.center(),
         egui::vec2(fig_w as f32 * scale, fig_h as f32 * scale),
     );
-    // #512: while a page corner is dragged, the figure is drawn anchored at the
-    // opposite corner of the page, at the scale of the drag, so the corner stays
+    // #512: a gesture that grows the page (none since L1 removed the page
+    // corners; L2/L3 reuse this) draws the figure anchored at the opposite
+    // corner of the page, at the scale of the drag, so the dragged point stays
     // under the cursor; the display zooms out at the edge of `contain`. The
     // centred fit above comes back at the release.
     let rect = if layout_mode {
@@ -437,8 +438,7 @@ pub(super) fn graph_view_contents(
         rect
     };
     let mut figure_ui = ui.new_child(egui::UiBuilder::new().max_rect(outer));
-    // The page corner handles of the Page Layout Mode sit in the margin the
-    // mode leaves inside `outer` (#426).
+    // The Page Layout Mode leaves a margin inside `outer` (#426).
     figure_ui.set_clip_rect(ui.clip_rect().intersect(outer));
     // A transparent background ("None" color, or partial opacity) shows on
     // white: without it, the figure would take the color of the window,

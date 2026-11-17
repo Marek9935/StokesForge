@@ -194,8 +194,8 @@ pub enum GraphEvent {
         widths: Vec<f64>,
         /// Frame height of every row.
         heights: Vec<f64>,
-        /// An L corner was pulled, a page corner that adds or removes empty
-        /// space (else a boundary or a graph corner was pulled).
+        /// Always `false` since the page corners were removed (#512, L1): a
+        /// boundary, a graph corner or an outer edge was pulled.
         figure: bool,
         /// The empty space around the grid after an outer edge was pulled
         /// (#505); `None` for every other gesture (the slack stays as it is).
@@ -217,7 +217,7 @@ pub enum GraphEvent {
         target: stokesforge_core::compose::MoveTarget,
     },
     /// A gesture of the Page Layout Mode ended on a free figure (#426): a graph
-    /// box moved or resized, the page corner pulled, or a burst of arrow-key
+    /// box moved or resized, or a burst of arrow-key
     /// nudges. Every moved frame (by base layer, stack kept) and the page the
     /// figure keeps, to commit as **one** change of the model. Nothing is
     /// signalled during the gesture. The preview stays displayed until the
@@ -226,7 +226,7 @@ pub enum GraphEvent {
         /// New frame of each moved or resized layer, by base layer.
         frames: Vec<(usize, FreeFrame)>,
         /// The page, in stored page coordinates (frozen during a box gesture,
-        /// the new one for a page corner drag).
+        /// the new one when a later lot makes a gesture grow it).
         page: Option<stokesforge_plot::FreePage>,
     },
     /// Double click on a title: edit it in place (issue #53).
@@ -339,8 +339,7 @@ struct FramePreview {
     /// outer edge to (#505); with `grid`.
     slack: Option<stokesforge_plot::GridSlack>,
     /// The frames the Page Layout Mode is moving or scaling (#426): base
-    /// layer and frame, several at once for a page corner drag or a nudge of
-    /// a selection.
+    /// layer and frame, several at once for a nudge of a selection.
     frees: Vec<(usize, FreeFrame)>,
     /// The page the Page Layout Mode previews (frozen during a box gesture).
     page: Option<stokesforge_plot::FreePage>,
@@ -1740,8 +1739,7 @@ impl GraphView {
     ) -> Result<bool, RenderError> {
         let spec = graph_spec(&snapshot.tree, graph)?;
         let context = ui.ctx().clone();
-        // The page corner handles of the Page Layout Mode sit outside the page
-        // (#426): the area reaches farther in the mode.
+        // The area reaches farther than the page in the Page Layout Mode (#426).
         let grab = if self.layout.mode {
             LAYOUT_GRAB_MARGIN
         } else {
