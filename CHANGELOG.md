@@ -24,6 +24,8 @@ without a message, see `docs/persistence.md`).
 
 ## [Unreleased]
 
+## [1.2.0] - undated
+
 ### Added
 
 - Graph Properties: every text size is a field, with **Auto (N)** showing the size actually drawn: **Title size** (General), **Layer title size** (Plot Area), **Axis title size** and **Tick label size** (Axes, per axis), next to the Legend tab's size (fr « Taille du titre », « Taille du titre du calque », « Taille du titre de l'axe », « Taille des étiquettes de graduation »). A size typed by hand is kept as typed whatever the **Text scale (%)**. The `.stf` file gains an additive per-axis `tick_label_size` (format version unchanged; an older version that saves such a file again drops it without a message) (#545).
