@@ -344,6 +344,30 @@ to the bounding box). Witness `tests/witnesses/v1/project.stf` regenerated with
 a page; the old-record case is in `schema.rs`, the hostile case in
 `b13_hostile_free_frames...`.
 
+## Graph font and text scale (#545)
+
+`PlotSpecRecord` gained `text_font` (string, empty = the embedded default) and
+`text_scale` (`Option<f64>`, a multiplier, absent = 100 %), both
+`#[serde(default, skip_serializing_if = …)]`, and `AnnotationSpecRecord` gained
+`follows_graph_size` (bool, `#[serde(default, skip_serializing_if = "Not::not")]`):
+a free text created since #545 follows the axis-title size times the scale, while
+every text read from an older file reads `false` and keeps its stored `size`. A
+graph without them writes the same bytes as before, so **`FORMAT_VERSION` did
+not move**; `tests/witnesses/v1` was regenerated with non-default values and the
+previous witness is kept as `v1-before-text-settings` (it reads back with no font,
+no scale and texts that do not follow the graph). `PlotSpec::graph_text()` reads
+them (a non-finite scale is 100 %, others are clamped to 25 to 400 %). An older
+version that re-saves the file drops them without a message. The hostile case is
+in `b13_spec_bounds`.
+
+`AxisSpecRecord` also gained `tick_label_size` (`Option<f64>`, the size of the
+tick numbers of that axis, `#[serde(default, skip_serializing_if = "Option::is_none")]`;
+absent = Auto). An axis without it writes the same bytes as before, so
+**`FORMAT_VERSION` did not move**; `tests/witnesses/v1` was regenerated with a
+non-default value (`v1-before-text-settings` keeps the previous one, which reads
+back with Auto tick numbers). An older version that re-saves the file drops it
+without a message.
+
 ## Regular Grid: the empty space around the grid (#505)
 
 `PlotSpecRecord` gained `grid_slack` (`Option<GridSlackRecord>`: `left`, `top`,
@@ -993,6 +1017,16 @@ The default theme of new graphs is `new_graph_theme` in `preferences.json` (a
 `builtin:` or `user:` key, `null` for none; a deleted theme reads as none). It
 is applied by `AppState::with_new_graph_defaults` through the theme engine with
 every family but Texts and Axis ranges; graphs made by scripts do not take it.
+
+## Graph-level text and axes colours: additive fields (#550)
+
+`PlotSpecRecord` gains `text_color` and `axes_color` (`#[serde(default,
+skip_serializing_if = "String::is_empty")]`): empty = automatic, not written
+when empty, so a file without them is byte-identical to before and reads back
+empty. They are also part of a theme's style (same record). **`FORMAT_VERSION`
+did not move.** A 1.1 reader that saves the file again drops them without a
+message. Witness `tests/witnesses/v1/project.stf` regenerated with non-default
+values (`v1-before-themes` still reads back).
 
 ## Accepted limits (2026-10-20, after #302-#305)
 

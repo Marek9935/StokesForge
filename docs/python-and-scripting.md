@@ -441,7 +441,9 @@ test will read. The Y keys target the `axis` axis (`left` by default, `right`).
 |---|---|
 | `title`, `panel_title`, `x_title`, `y_title` | strings (Typst markup for the titles) |
 | `title_visible`, `stale_warning`, `decimal_comma` | booleans (graph) |
+| `text_font`, `text_scale` | the graph font (a family name, `""` = the embedded default) and the text scale (percent, 25 to 400, refused outside; `None` = 100 %) of Graph Properties › General (#545): the default of every text left on Auto (titles, tick numbers, legend, colour bar, new free texts). A text with its own font or size keeps it: the scale does not multiply a size set by hand. Added to `PYST_API_VERSION` 0.11 |
 | `title_color`, `background` | `#RRGGBB` or `#RRGGBBAA`; `""` = automatic (title) or white (background) |
+| `text_color`, `axes_color` | `#RRGGBB`; `""` = automatic. The graph-level colours (#550, General tab « Text color » and « Axes color »): they write only the graph's own fields, so a part (axis title, scale, free text, layer title, legend) with its own colour keeps it and the parts left on automatic follow. There is no read-back |
 | `x_scale`, `y_scale` | `linear` or `log` |
 | `x_from`/`x_to`, `y_from`/`y_to` | both together, finite and different, positive on a log axis; `from > to` draws the axis reversed (and marks the axis as inverted, #344); switch the framing to manual |
 | `x_auto_range`, `y_auto_range` | `True` computes the automatic range **once**, with the default margins (a script has no preferences), and writes it as From/To (#529): the axis does not follow the data afterwards (contradictory with bounds given in the same call). Like every graph written by a script (`plot`, `set_graph`, series groups), a new axis range is frozen at the write; a surface of keys unchanged, so `__api_version__` does not move |
@@ -777,7 +779,7 @@ difference with the module actually built, saying which one.
 ### API version (#356)
 
 `pyst.__api_version__` is a string `"MAJOR.MINOR"`, the constant
-`PYST_API_VERSION` of `stokesforge-script/src/surface.rs` (currently `"0.10"`).
+`PYST_API_VERSION` of `stokesforge-script/src/surface.rs` (currently `"0.12"`).
 It is independent of the software version.
 
 - **Alpha, `0.x`**: any change of the list (addition or break) raises the minor
@@ -923,9 +925,13 @@ symbol_every
 title
 title_visible
 title_color
+text_color
+axes_color
 background
 stale_warning
 decimal_comma
+text_font
+text_scale
 panel_title
 x_title
 y_title

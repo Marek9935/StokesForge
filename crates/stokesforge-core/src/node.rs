@@ -38,6 +38,11 @@ pub struct WindowMeta {
 
 /// Kind of a node and its own content. Child lists are ordered:
 /// that order is what is displayed and persisted.
+// `Graph` carries a whole `PlotSpec`, much bigger than the other kinds: a node
+// is read in place from the tree, and boxing the spec would only add one
+// indirection to every access (the graph-level text colours and font pushed it
+// past the lint's threshold, #545 and #550).
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum NodeKind {
     /// Storage folder: contains folders and windows.

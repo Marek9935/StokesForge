@@ -350,6 +350,7 @@ pyst.plot(y2, x, graph=g, line_style="dash", label="Blank")
 | `title`, `panel_title`, `x_title`, `y_title` | Text |
 | `title_visible`, `stale_warning`, `decimal_comma` | `True` or `False` |
 | `title_color`, `background` | `"#RRGGBB"` or `"#RRGGBBAA"`. An empty text means automatic (title) or white (background). |
+| `text_color`, `axes_color` | `"#RRGGBB"`. The graph's text color and axes color, as in the General tab of Graph Properties: only the parts left on automatic color follow them; a part with its own color keeps it. An empty text means automatic. |
 | `x_scale`, `y_scale` | `"linear"` or `"log"` |
 | `x_from`, `x_to`, `y_from`, `y_to` | Axis range, both bounds together. The axis then has a fixed range. |
 | `x_auto_range`, `y_auto_range` | `True` returns the axis to automatic range |

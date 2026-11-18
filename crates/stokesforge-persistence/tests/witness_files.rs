@@ -498,6 +498,32 @@ fn a_file_written_before_script_settings_reads_back_without_any() {
     }
 }
 
+/// The V1 witness as it was before the graph font and text scale (#545): the
+/// fields are absent from it, so it reads back with the default font, 100 %,
+/// and free texts that keep their stored size (they do not follow the graph).
+#[test]
+fn a_file_written_before_the_graph_text_settings_reads_back_unchanged() {
+    let path = witnesses_dir()
+        .join("v1-before-text-settings")
+        .join("project.stf");
+    let (read_back, _, report) = load_with_report(&path).expect("the old witness reads back");
+    assert!(report.is_clean(), "{report:?}");
+    let mut graphs = 0;
+    for (_, node) in read_back.tree().iter() {
+        let stokesforge_core::NodeKind::Graph { spec, .. } = node.kind() else {
+            continue;
+        };
+        graphs += 1;
+        assert!(spec.text_font.is_empty());
+        assert_eq!(spec.text_scale, None);
+        assert_eq!(spec.graph_text(), stokesforge_plot::GraphText::NEUTRAL);
+        for panel in spec.panels.iter() {
+            assert!(panel.annotations.iter().all(|a| !a.follows_graph_size));
+        }
+    }
+    assert!(graphs > 0);
+}
+
 #[test]
 fn the_written_format_does_not_drift_without_a_version_change() {
     let file = std::fs::read(v1_file()).expect("witness present");

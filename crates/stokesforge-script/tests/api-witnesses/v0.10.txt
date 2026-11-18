@@ -36,7 +36,6 @@ enum kind	folder
 enum kind	graph
 enum kind	matrix
 enum kind	note
-enum kind	script_settings
 enum kind	unknown
 enum kind	workbook
 enum kind	worksheet
@@ -162,9 +161,7 @@ module pyst	function set_graph(graph, *, panel=(0, 0), axis='left', unit='cm', *
 module pyst	function set_group_style(graph, group, *, panel=(0, 0), line_style=None, line_width=None, symbol=None, symbol_size=None)
 module pyst	function set_note(note, text)
 module pyst	function set_series_group(graph, index, group, *, panel=(0, 0))
-module pyst	function set_settings(target, values)
 module pyst	function set_values(handle, values, *, expected_version=None)
-module pyst	function settings(target)
 module pyst	function themes()
 module pyst	function undo()
 module pyst	function ungroup(graph, group, *, panel=(0, 0))
@@ -208,6 +205,7 @@ options set_column_meta	keep_data
 options set_column_meta	long_name
 options set_column_meta	role
 options set_column_meta	unit
+options set_graph	axes_color
 options set_graph	background
 options set_graph	decimal_comma
 options set_graph	figure_height
@@ -234,6 +232,7 @@ options set_graph	plot_left
 options set_graph	plot_top
 options set_graph	plot_width
 options set_graph	stale_warning
+options set_graph	text_color
 options set_graph	title
 options set_graph	title_color
 options set_graph	title_visible
