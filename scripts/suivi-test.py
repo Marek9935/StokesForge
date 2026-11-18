@@ -4142,8 +4142,8 @@ class LabelBase(Base):
         self.fstate["tags"].insert(0, {"name": name, "commit": {"id": sha}})
         self.save_fake()
 
-    def gh_run(self, jobs, sha=TAG_SHA, run_id=1, created="2026-11-05T10:00:00Z"):
-        self.gh.runs.append({"id": run_id, "head_sha": sha, "created_at": created, "name": "CI"})
+    def gh_run(self, jobs, sha=TAG_SHA, run_id=1, created="2026-11-05T10:00:00Z", status="completed"):
+        self.gh.runs.append({"id": run_id, "head_sha": sha, "created_at": created, "name": "CI", "status": status})
         self.gh.jobs[run_id] = jobs
 
     def declare(self, n, kind, jobs=None, human="", **extra):
@@ -4579,11 +4579,65 @@ class TestTagReport(LabelBase):
         self.seed("v1.0.0")
         self.issue(1, ["attente-rc"])
         self.declare(1, "rc", jobs=["test-linux-packages"])
-        self.gh_run([gh_job("release-linux")])
+        self.gh_run([gh_job("release-linux")], status="completed")
         self.tag("v1.0.1-rc1")
         suivi.tag_pass(NOW)
         self.assertIn("missing (no proof)", self.load_fake()["issues"]["1"]["notes"][0])
         self.assertFalse(os.path.exists(os.path.join(self.state, "tests")))
+
+    def notes(self):
+        return [w for w in self.writes() if w["path"].endswith("/notes")]
+
+    def test_a_job_not_listed_yet_while_the_run_is_open_defers_until_it_completes(self):
+        self.seed("v1.0.0")
+        self.issue(1, ["attente-rc"])
+        self.declare(1, "rc", jobs=["dist-windows", "publier"])
+        self.gh_run([gh_job("dist-windows")], status="in_progress")
+        self.tag("v1.0.1-rc1")
+        suivi.tag_pass(NOW)
+        self.assertEqual(self.writes(), [])
+        self.assertNotIn("v1.0.1-rc1", jload(suivi.tags_path())["seen"])
+        self.gh.jobs[1] = [gh_job("dist-windows"), gh_job("publier")]
+        self.gh.runs[0]["status"] = "completed"
+        suivi.tag_pass(NOW + 1)
+        self.assertEqual(len(self.notes()), 1)
+        self.assertTrue(os.path.exists(os.path.join(self.state, "tests", "1-1.json")))
+
+    def test_a_job_not_listed_after_the_cap_is_reported_missing(self):
+        self.seed("v1.0.0")
+        self.issue(1, ["attente-rc"])
+        self.declare(1, "rc", jobs=["dist-windows", "publier"])
+        self.gh_run([gh_job("dist-windows")], status="in_progress")
+        self.tag("v1.0.1-rc1")
+        with mock.patch.dict(os.environ, {"SF_SUIVI_TAG_CAP": "100"}):
+            suivi.tag_pass(NOW)
+            self.assertEqual(self.writes(), [])
+            suivi.tag_pass(NOW + 200)
+        self.assertEqual(len(self.notes()), 1)
+        self.assertIn("missing (no proof)", self.load_fake()["issues"]["1"]["notes"][0])
+        self.assertFalse(os.path.exists(os.path.join(self.state, "tests")))
+        self.assertIn("v1.0.1-rc1", jload(suivi.tags_path())["seen"])
+
+    def test_an_open_run_with_every_declared_job_ok_is_reported_now(self):
+        self.seed("v1.0.0")
+        self.issue(1, ["attente-rc"])
+        self.declare(1, "rc", jobs=["dist-windows", "publier"])
+        self.gh_run([gh_job("dist-windows"), gh_job("publier")], status="in_progress")
+        self.tag("v1.0.1-rc1")
+        suivi.tag_pass(NOW)
+        self.assertEqual(len(self.notes()), 1)
+        self.assertTrue(os.path.exists(os.path.join(self.state, "tests", "1-1.json")))
+
+    def test_pages_missing_does_not_delay_the_report_of_an_open_run(self):
+        self.seed("v1.0.0")
+        self.paused(1)
+        self.issue(1, ["attente-final"])
+        self.declare(1, "final", jobs=["release-linux", "pages"])
+        self.gh_run([gh_job("release-linux")], status="in_progress")
+        self.tag("v1.1.0")
+        suivi.tag_pass(NOW)
+        self.assertEqual(len(self.notes()), 1)
+        self.assertIn("`pages`: missing", self.load_fake()["issues"]["1"]["notes"][0])
 
     def test_hand_placed_label_reports_all_release_jobs_with_a_generic_card(self):
         self.seed("v1.0.0")
@@ -4610,6 +4664,12 @@ class TestTagReport(LabelBase):
         self.assertEqual(self.writes(), [])
         self.assertFalse(os.path.exists(os.path.join(self.state, "tags.json")))
         self.assertNotEqual(self.run_cli("tag-check", "v1.0.1", env=env).returncode, 0)   # --dry-run is required
+        self.gh.runs[0]["status"] = "in_progress"                    # a job not listed yet: --dry-run still decides
+        self.gh.jobs[1] = []
+        r = self.run_cli("tag-check", "v1.0.1", "--dry-run", env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("release-linux=missing", r.stdout)
+        self.assertEqual(self.writes(), [])
 
     def test_status_shows_the_sync_state(self):
         suivi.write_json(suivi.labels_path(), {"checked_at": time.time(), "ok": False, "reason": "glab failed (exit 1)",
