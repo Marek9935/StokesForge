@@ -425,7 +425,7 @@ select a graph in the foreground with nothing selected in it, Ctrl+C, then
 (`wl-paste -t image/png > figure.png` to read a representation).
 
 **Tabs** (`state::PlotSettingsTab`, `plot-tab-*` keys, in English):
-"General" (title and its color, background, Text color and Axes color), "Plot Area" (layer title,
+"General" (title and its color, background, Text color and Axes color, Font and Text scale), "Plot Area" (layer title,
 grid lines), "Axes" (one side of the cell at a time, chosen in the vertical
 strip at the left of the page: axis title (quantity and units), scale, display,
 axis color; see "Axes tab: four sides" below),
@@ -449,15 +449,42 @@ Typst text (interface side: "Math", #322) goes through `formula_field`; any othe
 The test `each_reminder_example_compiles` checks that each example compiles. A
 series name left empty takes that of the column, displayed as is.
 
+**Graph font and Text scale (General tab, #545)**: two rows under the global
+colour rows (`global_text_rows` in `plot_settings.rs`), stored on the graph
+(`PlotSpec::text_font`, `text_scale`) and **read by rendering**, not written into
+the local fields. **Font** is the same list as the format toolbar (« Graph font »
+= the embedded default); **Text scale (%)** takes 25 to 400, Auto = 100 %. Every
+text left on Auto follows them (graph and layer titles, axis titles, tick
+numbers, legend, colour bar, free texts created since #545); a text whose family
+or size was set by hand keeps it, the size absolute (`GraphText`, `stokesforge-plot`: the one place
+that decides, see `docs/rendering.md` § Graph font and text scale). The format
+toolbar's size shows « Auto (N) » with the size drawn, scale included. The window
+is one history step (`GraphProperties`); Cancel writes nothing. The Title fonts
+theme family carries both. `pyst.set_graph(text_font=…, text_scale=…)`.
+
+**Every text size is a field of Graph Properties (#545, after the trial)**, an
+Auto-capable number field like the Legend tab's (`text_size_row`,
+`quantities::TEXT_FORMAT_SIZE`): General › **Title size** under Title color,
+Plot Area › **Layer title size** under Layer title, Axes › **Axis title size**
+under the axis title color and **Tick label size** under Show tick labels
+(Display; none on a mirror axis, which follows the opposite one), Legend ›
+**Font size (pt)**. Auto reads « Auto (N) », N = built-in size times the graph
+scale, in full (the size field is `wide`); a typed size is **absolute** (the
+scale does not multiply it, and the field shows what was typed). The tick label
+size is `AxisSpec::tick_label_size` (`Option<f64>`, per axis), classed in the
+Axes theme family, read through `GraphText::size` for measuring, tick count,
+edge reserves and drawing. Both views (toolbar, Graph Properties) edit the same
+fields; the window stays one history step.
+
 **Global colors (General tab, #542)**: Text color and Axes color
 (`plot-general-text-color`, `plot-general-axes-color`; the background is the row
 above them; they were on the Theme tab, form 514-4 V5) are laid out with the
 other rows of the General form (`global_color_rows` in `plot_settings.rs`, no
-collapsible section, S-L5). A global color is **written into all the local
-fields** (graph title, title and scale of each axis of each panel, free texts;
-`PlotSpec::set_text_color`/`set_axes_color`): the last setting overwrites what
-had been set one by one, and nothing more is remembered (the `.stf` format does
-not change). Painting writes nothing: a value is written only when the user
+collapsible section, S-L5). A global color is **written into the graph-level
+field only** (`PlotSpec::text_color` / `axes_color`, through
+`set_text_color`/`set_axes_color`, #550): a part with its own colour keeps it,
+and the parts left on automatic follow the global colour (resolution order in
+`docs/rendering.md`). Under each row a grey note says how many parts have their own color (`PlotSpec::parts_with_own_text_color` / `parts_with_own_axes_color`, plural key `plot-general-own-colors-note`); the button « Reset Parts to Graph Settings » (`plot-general-reset-parts`, `PlotSpec::reset_parts_to_graph`, below the Font and Text scale rows, greyed when no part has its own color, font or size: `reset_parts_enabled` adds `parts_with_own_font_or_size`) clears those own colors and puts every hand-set font family and size back to Auto in the draft (graph title, layer titles, axis titles, per-axis `tick_label_size`, legend font, free texts: family empty and `follows_graph_size = true`; one undo step on OK). It never touches the graph's Font, Text scale, Text color and Axes color, the curves, the graph title's own Title color, the backgrounds, the legend frame or the tick mark colors. The Auto choice of a part's color picker reads « Auto (graph color) » (`plot-color-auto-graph`); the General rows keep « Auto (contrasts with background) ». Light and Dark put every part back to automatic (G2). Painting writes nothing: a value is written only when the user
 changed it. Everything stays in the draft of the window: a single history step
 on confirmation. `stokesforge_plot::THEMES` (Light and Dark) now only holds the
 colors of the two first built-in themes (`builtin_themes`); the old two-button
@@ -535,8 +562,8 @@ Light (`light`) and Dark (`dark`), colour-only as before; then seven full-style
 themes, each built with the ordinary constructors and passed through
 `GraphTheme::capture` (so it holds no data): **Publication** (`publication`: one
 layer, plot area 8.5 cm wide, closed frame, ticks inside, black and greys,
-8-9 pt texts), **Publication Wide** (`publication-wide`: 17 cm), **Presentation**
-(`presentation`: large texts, 3 pt lines), **Fit + Residuals** (`fit-residuals`:
+text scale 60 %, every text on Auto), **Publication Wide** (`publication-wide`: 17 cm), **Presentation**
+(`presentation`: text scale 150 %, texts on Auto, 3 pt lines), **Fit + Residuals** (`fit-residuals`:
 two stacked layers, plot area heights 3:1, X numbers and title only under the
 bottom layer, data as red points and the fit as a line, residuals as points),
 **Kinetics** (`kinetics`: a group on the Viridis gradient, colour bar on the
@@ -1041,11 +1068,11 @@ cursors, so outside the mode the plot area of a Free layer behaves like a Regula
 graph's: a plain drag does nothing. The mode signals `GraphEvent::LayoutEdited`,
 which `graph_window.rs` turns into `Action::SetFreeLayout` (one `EditPlotSpec`,
 `PlotEditKind::MoveLayer` when only positions change, `ResizeLayer` when a size does,
-`ResizeFigure` when the page does). On a **Regular Grid** the outer edge of the first and last row and column, over a graph, is a handle too (#505): `GraphEvent::GridFramesEdited` carries the new `slack` (`Some` only for that gesture), `Action::SetGridFrames { slack }` writes `PlotSpec::grid_slack` with the frames (`Resize Plot Area`), and the empty space is drawn inside the figure with a dashed page outline. Rule P1: the page size changes only through the page tools (L corners, Figure size, Fit Page to Layout); an outer edge pulled outward and the Alt-held "row alone" drag of an internal line (P2; Shift is snap off everywhere) stop when the slack is used up (screen only, not in the export, which keeps the space). The strip and the Layout menu have **Fit Page to Layout** (`Action::FitPageToLayout`, `PlotEditKind::FitPage`, `frame_sizes::spec_fitted_to_layers`): Grid clears the slack, Free sets `free_page` to the bounding box of the graph boxes (`free_gesture::page_fitted_to_layers`; the margin of a new figure is already in the boxes, `FIT_PAGE_EXTRA_MARGIN` adds none); nothing to fit sends nothing. The four L corners are **page corners** (K1): dragging one moves the two page edges that meet there, so it adds or removes empty space and moves or resizes no graph. On a Regular Grid `GraphEvent::GridFramesEdited { figure: true, slack: Some(..) }` carries the frames unchanged and the new slack (`grid_gesture::page_corner_slack`; `Action::SetGridFrames`, history `Resize Figure`); in Free `LayoutEdited { frames: [], page }` (`free_gesture::moved_page_corner`, the page keeps its opposite corner; `Action::SetFreeLayout`). Inward they stop at the graphs; they snap like the lines and Shift turns the snap off; the padlock of Figure size does not apply. A page corner keeps under the cursor (#512, `stokesforge-render-egui/src/corner_follow.rs`): the opposite corner does not move on the screen; `graph_window.rs` draws the figure, during the drag, in `GraphView::page_corner_rect` (anchored at that corner, at the scale of the drag; the host feeds `set_layout_contain(contain)` each frame) instead of the centred fit, and the rulers and the handles follow the drawn rectangle. At the edge of `contain` the display zooms out while the page keeps growing (`follow_step`: one uniform scale that only shrinks, the length clamped to what the graphs and `MAX_FIGURE_EXTENT` allow, so coming back has no dead zone); at the release the page re-fits. The frame that starts the drag counts only the absolute movement (the raw motion it holds is the travel to the handle), and a side held at the graphs is handed to the geometry as "far inward" so the snap cannot round it up to the next line. Only `DragKind::Figure` and `DragKind::Free { handle: Page }` (`CornerFollow`); every other drag keeps the absolute pointer and the scale frozen at the press. Ctrl, held at any moment of the drag (pressed or released along the way it acts at once), keeps the ratio the page had at the press exactly and the snap (`page_corner_ratio_delta`: the leading side snaps, Shift turns the snap off, also live). With the snap on, the scale and the cursor follow the raw pointer and the page glides to each snapped size (60 ms ease; the release commits the snapped one). The mouse locks only once a probe at the start of the drag found a relative device (`PointerSource`); an absolute device (VM tablet, Xwayland) keeps the system cursor and the absolute pointer. The mouse is locked for the gesture only (`corner_lock.rs`: `CursorGrab::Locked`, the system cursor hidden, a cursor drawn at the corner; at the release `CursorPosition` then `CursorGrab(None)`) under a lease renewed by every pass of the viewport where the drag lives, taken back by an `egui::Plugin` at the end of the first pass that does not renew it. **Fit Layout to Page** (`Action::FitLayoutToPage { graph }`, `PlotEditKind::FitLayout`, `frame_sizes::spec_layout_fitted_to_page`; strip and Layout menu, the padlock plays no part) is the inverse of Fit Page to Layout: the graphs scale to fill the page, which keeps its size (Grid: `grid_gesture::layout_fitted_to_page`, one factor per axis through `scaled_axis`, slack to 0; Free: `free_gesture::boxes_fitted_to_page`). Always one factor per axis, padlock open or closed; nothing to do sends nothing. On a **Regular Grid** (#491) a drag that starts inside a graph, off
+`ResizeFigure` when the page does). On a **Regular Grid** the outer edge of the first and last row and column, over a graph, is a handle too (#505): `GraphEvent::GridFramesEdited` carries the new `slack` (`Some` only for that gesture), `Action::SetGridFrames { slack }` writes `PlotSpec::grid_slack` with the frames (`Resize Plot Area`), and the empty space is drawn inside the figure with a dashed page outline. Rule P1: the page size changes through the page tools (Figure size, Fit Page to Layout), in Free through a graph box moved, nudged or resized past the page (#512: `free_gesture::moved_box` and `nudged_box` return the grown page, `LayoutEdited` carries it, `Action::SetFreeLayout` keeps the gesture's label `Move Layer` / `Resize Layer` even when the page grows, and the typed Figure size is its own `Action::SetFreeFigure`, `Resize Figure`) and through an outer edge pulled outward or the Alt-held "row alone" drag of an internal line (P2; Shift is snap off everywhere): they eat the slack of their side first, then the page grows by the rest (#512; the slack is screen only, the export keeps the space). The history label stays `Resize Plot Area`; `set_grid_frames` does not announce the edit to the padlock of Figure size (`adopt_size_lock` stays for `figure: true`), so the lock takes the new proportions from the new image. The strip and the Layout menu have **Fit Page to Layout** (`Action::FitPageToLayout`, `PlotEditKind::FitPage`, `frame_sizes::spec_fitted_to_layers`): Grid clears the slack, Free sets `free_page` to the bounding box of the graph boxes (`free_gesture::page_fitted_to_layers`; the margin of a new figure is already in the boxes, `FIT_PAGE_EXTRA_MARGIN` adds none); nothing to fit sends nothing. There are no page corners (#512): the four L-shaped handles were removed on purpose, by the user's decision, and are never to be reimplemented. `stokesforge-render-egui/src/handle_follow.rs` (the follow of the dragged handle, the zoom-out at the edge of the drawing area, the rule that nothing shrinks while the pointer is outside) and its host plumbing (`GraphView::handle_drag_rect`, `set_layout_contain`, `advance_handle_drag`, called from `graph_window.rs`) serve the outer edges and Alt lines of a Regular Grid and the moves and resizes of Free graph boxes (`free_follow`: the leading edge of the box is the handle, the anchor the opposite page side, chosen live for a move). **Fit Layout to Page** (`Action::FitLayoutToPage { graph }`, `PlotEditKind::FitLayout`, `frame_sizes::spec_layout_fitted_to_page`; strip and Layout menu, the padlock plays no part) is the inverse of Fit Page to Layout: the graphs scale to fill the page, which keeps its size (Grid: `grid_gesture::layout_fitted_to_page`, one factor per axis through `scaled_axis`, slack to 0; Free: `free_gesture::boxes_fitted_to_page`). Always one factor per axis, padlock open or closed; nothing to do sends nothing. On a **Regular Grid** (#491) a drag that starts inside a graph, off
 every handle, and the arrow keys move that graph: `GraphEvent::GridCellMoved` becomes `Action::MoveGridCell`
 (one `EditPlotSpec`, `PlotEditKind::MoveLayer`), whose work is `compose::move_cell` (to a cell: swap or
 hole; or `MoveTarget::NewLine` at a grid position, or `Beside` the cell of a layer, a new column or row made by `open_line`, the same code as
-`insert_cell`); a column or row left empty goes through `close_empty_lines`, the collapse `remove_cell`
+`insert_cell`; the new line takes the **moved graph's own** column width / row height (`sized_like`, #512), where `insert_cell` uses the reference's); a column or row left empty goes through `close_empty_lines`, the collapse `remove_cell`
 uses too. A release on an internal line between two graphs is a `MoveTarget::Beside` too (`GraphView::drop_place`, #504), so it is the same single `MoveLayer` step. Only the `row` / `column` of the moved layers change, never the layer numbers. The four edge bands
 (`stokesforge_render_egui::edge_band`, #503) are shared with the drop of workbook columns in `graph_window.rs`.
 `FigureFollow` also remembers the image's origin (`free_origin`):

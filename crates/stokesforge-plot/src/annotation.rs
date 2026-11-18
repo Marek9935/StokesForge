@@ -2,6 +2,7 @@
 
 use crate::series::SeriesAxis;
 use crate::spec::PlotSpec;
+use crate::text_font::GraphText;
 
 /// A text placed on a panel, **anchored to the data**: it follows the zoom and
 /// pan of the view like a series point.
@@ -28,6 +29,11 @@ pub struct AnnotationSpec {
     /// Text size in the Plotters sense (like the pipeline sizes:
     /// 16 = axis title).
     pub size: f64,
+    /// The size follows the graph (#545): the text is drawn at the size of an
+    /// axis title times the graph text scale, and [`Self::size`] is not read.
+    /// `false` = [`Self::size`] is absolute (a size set by hand, and every text
+    /// written before this marker). Setting a size by hand clears it.
+    pub follows_graph_size: bool,
     /// Rotation in degrees, counter-clockwise (trigonometric), around the
     /// center of the text.
     pub rotation: f64,
@@ -72,6 +78,7 @@ impl AnnotationSpec {
             axis: SeriesAxis::Left,
             color: String::new(),
             size: Self::DEFAULT_SIZE,
+            follows_graph_size: true,
             rotation: 0.0,
             font: String::new(),
             width: None,
@@ -98,6 +105,19 @@ impl AnnotationSpec {
         } else {
             Self::DEFAULT_SIZE
         }
+    }
+
+    /// The size plotted under the graph settings (#545): [`Self::size`] when
+    /// set by hand, else the size of an axis title times the graph scale
+    /// (see [`GraphText::size`]).
+    pub fn resolved_size(&self, graph: GraphText<'_>) -> f64 {
+        let local = (!self.follows_graph_size).then_some(self.size);
+        graph.size(local, Self::DEFAULT_SIZE)
+    }
+
+    /// The family plotted under the graph settings (#545), `None` = default.
+    pub fn resolved_family<'x>(&'x self, graph: GraphText<'x>) -> Option<&'x str> {
+        graph.family(&self.font)
     }
 
     /// The rotation actually plotted, brought into `]-180, 180]`; 0 for
@@ -219,5 +239,25 @@ mod tests {
         assert_eq!(a.effective_rotation(), 180.0);
         a.rotation = f64::INFINITY;
         assert_eq!(a.effective_rotation(), 0.0);
+    }
+
+    /// #545: a text created now follows the axis-title size times the scale; a
+    /// text with the marker off (loaded from an old file, or set by hand) keeps
+    /// its stored size. Witness: the marker ignored (either side).
+    #[test]
+    fn a_new_text_follows_the_graph_and_a_hand_set_one_keeps_its_size() {
+        let graph = GraphText {
+            family: None,
+            scale: 1.5,
+        };
+        let fresh = AnnotationSpec::new("x", 0.0, 0.0);
+        assert_eq!(fresh.resolved_size(graph), 24.0);
+        let old = AnnotationSpec {
+            follows_graph_size: false,
+            size: 20.0,
+            ..fresh.clone()
+        };
+        assert_eq!(old.resolved_size(graph), 20.0);
+        assert_eq!(fresh.resolved_size(GraphText::NEUTRAL), 16.0);
     }
 }

@@ -24,8 +24,13 @@ without a message, see `docs/persistence.md`).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-17
+
 ### Added
 
+- Graph Properties: every text size is a field, with **Auto (N)** showing the size actually drawn: **Title size** (General), **Layer title size** (Plot Area), **Axis title size** and **Tick label size** (Axes, per axis), next to the Legend tab's size (fr « Taille du titre », « Taille du titre du calque », « Taille du titre de l'axe », « Taille des étiquettes de graduation »). A size typed by hand is kept as typed whatever the **Text scale (%)**. The `.stf` file gains an additive per-axis `tick_label_size` (format version unchanged; an older version that saves such a file again drops it without a message) (#545).
+- Graph Properties › General gets **Font** and **Text scale (%)** (fr « Police », « Échelle du texte (%) »): a graph font and a text scale that every text left on Auto follows (graph and layer titles, axis titles, tick numbers, legend, color bar, free texts added from now on); a text whose font or size was set by hand keeps it. The room reserved for ticks and axis titles grows with the text size, the plot area keeps its size, and a graph with no setting is drawn pixel for pixel as before. The Title fonts theme family carries both, and the format toolbar's « Auto (N) » shows the size actually drawn. The `.stf` file gains additive `text_font`, `text_scale` and a free-text `follows_graph_size` marker (format version unchanged; an older version that saves such a file again drops them without a message). `pyst.set_graph()` accepts `text_font` and `text_scale` (API 0.11). **Reset Parts to Graph Settings** now also puts every font and size set by hand (graph title, layer titles, axis titles, tick label sizes, legend, free texts) back to Auto, in one undo step, and stays enabled when only a size is set; it never touches the graph's own settings or the curves (#545).
+- Graph Properties > General **Text color** and **Axes color** now recolor only the parts still on automatic color (#550): a graph keeps a graph-level text colour and axes colour (additive `text_color` / `axes_color` fields of the `.stf` graph record, format version unchanged; an older version that saves the file again loses them). A part with its own colour keeps it. Text color reaches every text (layer titles, legend text and colour bar labels too), a note under each row counts the parts with their own colour, **Reset Parts to Graph Settings** clears them (curves are never touched), a part's Auto reads « Auto (graph color) », and Light and Dark still clear the local colours. `pyst.set_graph` accepts `text_color` and `axes_color` (pyst API 0.10).
 - Series window: the Symbol section is shown only for the plot types that draw symbols (Scatter, Line + Symbol, Line + Error Bars), and a new **Symbol every** setting (fr « Un symbole sur ») draws one symbol every N points, counted by data row, identically on screen, SVG, PDF and PNG (#547). On a group page the section shows when at least one member draws symbols and edits reach only those members. The `.stf` file gains an additive `every` field in the symbol (format version unchanged; an older version that saves such a file again drops it without a message). `pyst.plot()` accepts `symbol_every` (API 0.8).
 - `pyst.apply_theme(graph, theme, *, families=None, add_missing_layers=False)` applies a named graph theme (built-in, user or project) to a graph, undoable inside the script's group, and `pyst.themes()` lists the themes available; a missing name raises the new `pyst.UnknownThemeError`, and a name shared by several themes takes the project theme, then the user theme, then the built-in, with a warning. Graphs made by a script still take no default theme. A user theme exists on one machine and is unknown to the command line, so a script that names one is less portable (#546). The pyst API moves to 0.9.
 - Graph themes can be saved in the project (#540): the `.stf` file gains an additive `project_themes` field (format version unchanged), changed by one undoable command per add, rename, overwrite or delete; a duplicate name in the project is refused, case ignored. An older version that saves such a file again drops the themes without a message. The picker and the Save as theme form follow in the same package (#514).
@@ -103,6 +108,15 @@ without a message, see `docs/persistence.md`).
 
 ### Changed
 
+- Page Layout Mode: the page grows from the graphs themselves (#512). On a
+  Regular Grid, pulling a graph's outer edge outward (or an internal line with
+  Alt) first uses the empty space on that side, then enlarges the page; in Free,
+  moving, resizing or nudging a graph past the page enlarges it. Past the edge
+  of the drawing area the view zooms out, and coming back while the pointer is
+  still outside shrinks nothing. Only the pointer position is read, so the
+  gesture is the same on every system and in a virtual machine. The page's
+  L-shaped corner handles are gone; a graph moved into a new grid column (row)
+  keeps its own width (height). Undo keeps the gesture's name.
 - Opening a project made with an earlier version writes its automatic axis
   ranges once (#529): every axis left on Auto, in every graph that has data,
   gets its From and To computed with the new framing rule and the margins of

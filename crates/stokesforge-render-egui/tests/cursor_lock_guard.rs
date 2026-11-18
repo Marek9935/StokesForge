@@ -1,6 +1,6 @@
-//! Guard (#512): the two viewport commands that lock the mouse and move the
-//! cursor are sent by `src/corner_lock.rs` only. A lock sent anywhere else
-//! would have no lease, and a lock left on freezes the user's mouse.
+//! Guard (#512): no code under `crates/` sends a viewport command that locks
+//! the mouse or moves the cursor. The page-corner drag once did, and it failed
+//! on Windows; the system cursor stays free, as in the grid (#535).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -31,7 +31,7 @@ fn uses(path: &str, text: &str) -> Vec<String> {
 }
 
 #[test]
-fn the_cursor_lock_commands_stay_in_corner_lock() {
+fn no_code_locks_the_mouse_or_moves_the_cursor() {
     let crates = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let mut files = Vec::new();
     rust_files(&crates, &mut files);
@@ -39,9 +39,8 @@ fn the_cursor_lock_commands_stay_in_corner_lock() {
     let mut offenders = Vec::new();
     for file in files {
         let name = file.to_string_lossy().replace('\\', "/");
-        if name.ends_with("/stokesforge-render-egui/src/corner_lock.rs")
-            || name.ends_with("/tests/cursor_lock_guard.rs")
-            // The benches read the commands the frames asked for.
+        if name.ends_with("/tests/cursor_lock_guard.rs")
+            // The test frames read the commands the frames asked for.
             || name.ends_with("/stokesforge-render-egui/tests/layout_mode.rs")
         {
             continue;
@@ -52,7 +51,7 @@ fn the_cursor_lock_commands_stay_in_corner_lock() {
     }
     assert!(
         offenders.is_empty(),
-        "lock the mouse through `corner_lock` only: {offenders:?}"
+        "the cursor stays free, no lock or move command: {offenders:?}"
     );
 }
 

@@ -439,6 +439,7 @@ pub fn insert_cell_at_with(
     let (new_row, new_column) = open_line(
         spec,
         (row, column),
+        (row, column),
         side,
         &mut widths,
         &mut heights,
@@ -457,7 +458,8 @@ pub fn insert_cell_at_with(
 /// Opens an empty grid column (Right) or row (Below) beside the cell `(row,
 /// column)` and returns the position of the new cell in it (#394, #491): every
 /// layer on the far side of the reference shifts one column (row) further, the
-/// size of the reference's column (row) is inserted in `widths` (`heights`) at
+/// size of the column (row) of `sized_like` (the reference for an insert, the
+/// moved graph's own cell for a move) is inserted in `widths` (`heights`) at
 /// the new place, and the empty space of the grid on that axis pays for it first
 /// ([`eat_slack`]). Shared by [`insert_cell`] and [`move_cell`]. `None`, with the
 /// spec and the sizes unchanged, if a position would overflow or the grid would
@@ -465,6 +467,7 @@ pub fn insert_cell_at_with(
 fn open_line(
     spec: &mut PlotSpec,
     (row, column): (usize, usize),
+    sized_like: (usize, usize),
     side: CellSide,
     widths: &mut Option<Vec<f64>>,
     heights: &mut Option<Vec<f64>>,
@@ -511,23 +514,23 @@ fn open_line(
     match side {
         CellSide::Right | CellSide::Left => {
             if let Some(widths) = widths {
-                let size = widths[column];
+                let size = widths[sized_like.1];
                 widths.insert(new_column, size);
                 eat_slack(
                     spec,
                     true,
-                    size + gutters.columns.get(column).copied().unwrap_or(0.0),
+                    size + gutters.columns.get(sized_like.1).copied().unwrap_or(0.0),
                 );
             }
         }
         CellSide::Below | CellSide::Above => {
             if let Some(heights) = heights {
-                let size = heights[row];
+                let size = heights[sized_like.0];
                 heights.insert(new_row, size);
                 eat_slack(
                     spec,
                     false,
-                    size + gutters.rows.get(row).copied().unwrap_or(0.0),
+                    size + gutters.rows.get(sized_like.0).copied().unwrap_or(0.0),
                 );
             }
         }
@@ -1247,9 +1250,11 @@ pub fn move_cell_with(
             if reference.0 >= candidate.rows() || reference.1 >= candidate.columns() {
                 return false;
             }
+            // The new line takes the moved graph's own column width (row height).
             let Some(new_cell) = open_line(
                 &mut candidate,
                 reference,
+                source,
                 side,
                 &mut widths,
                 &mut heights,
@@ -2447,6 +2452,84 @@ mod tests {
             [50.0],
             "B's row is gone with its height"
         );
+    }
+
+    /// #512: a graph moved into a NEW column takes its own column width there,
+    /// not the reference's. [A B; C D] widths 125 / 69, C (column 0) goes to a
+    /// new column on the far right, then between A and B.
+    /// Witness: `open_line` sized like the reference (the old rule) gives 69 / 125.
+    #[test]
+    fn a_graph_moved_into_a_new_column_brings_its_own_column_width() {
+        let grid4 = [(0, 0), (0, 1), (1, 0), (1, 1)];
+        let mut spec = sized(&grid4, &[125.0, 69.0], &[50.0, 60.0]);
+        let right = MoveTarget::NewLine {
+            row: 0,
+            column: 1,
+            side: CellSide::Right,
+        };
+        assert!(move_cell(&mut spec, 2, right));
+        assert_eq!(
+            grid(&spec),
+            [(0, 0, false), (0, 1, false), (0, 2, false), (1, 1, false)]
+        );
+        assert_eq!(spec.frame_widths, [125.0, 69.0, 125.0]);
+        let mut spec = sized(&grid4, &[125.0, 69.0], &[50.0, 60.0]);
+        let between = MoveTarget::Beside {
+            panel: 0,
+            side: CellSide::Right,
+        };
+        assert!(move_cell(&mut spec, 2, between));
+        assert_eq!(spec.frame_widths, [125.0, 125.0, 69.0]);
+    }
+
+    /// #512: the same for a new row, which takes the moved graph's row height.
+    /// Witness: sized like the reference gives 50.
+    #[test]
+    fn a_graph_moved_into_a_new_row_brings_its_own_row_height() {
+        // [A B; C D] heights 50 / 60, B (row 0) goes under D (row 1).
+        let mut spec = sized(
+            &[(0, 0), (0, 1), (1, 0), (1, 1)],
+            &[100.0, 200.0],
+            &[50.0, 60.0],
+        );
+        let below = MoveTarget::Beside {
+            panel: 3,
+            side: CellSide::Below,
+        };
+        assert!(move_cell(&mut spec, 1, below));
+        assert_eq!(spec.frame_heights, [50.0, 60.0, 50.0]);
+        // And from the other row: C (row 1) under A (row 0).
+        let mut spec = sized(
+            &[(0, 0), (0, 1), (1, 0), (1, 1)],
+            &[100.0, 200.0],
+            &[50.0, 60.0],
+        );
+        let below = MoveTarget::Beside {
+            panel: 0,
+            side: CellSide::Below,
+        };
+        assert!(move_cell(&mut spec, 3, below));
+        assert_eq!(spec.frame_heights, [50.0, 60.0, 60.0]);
+    }
+
+    /// #512: into an empty cell of an existing column the graph keeps that
+    /// column's width: the grid adds no constraint, no size is inserted.
+    /// Witness: always giving the moved width to the column.
+    #[test]
+    fn a_graph_moved_into_a_hole_of_an_existing_column_takes_that_column_width() {
+        let mut spec = sized(&[(0, 0), (0, 1), (1, 0)], &[125.0, 69.0], &[50.0, 60.0]);
+        assert!(move_cell(&mut spec, 2, cell_of(1, 1)));
+        assert_eq!(grid(&spec), [(0, 0, false), (0, 1, false), (1, 1, false)]);
+        assert_eq!(spec.frame_widths, [125.0, 69.0]);
+    }
+
+    /// #512: inserting a NEW graph keeps the reference's size.
+    /// Witness: sizing from another column.
+    #[test]
+    fn insert_cell_still_takes_the_reference_column_width() {
+        let mut spec = sized(&[(0, 0), (0, 1)], &[125.0, 69.0], &[50.0]);
+        assert_eq!(insert_cell(&mut spec, 1, CellSide::Right), Some(2));
+        assert_eq!(spec.frame_widths, [125.0, 69.0, 69.0]);
     }
 
     #[test]

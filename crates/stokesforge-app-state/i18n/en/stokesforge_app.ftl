@@ -827,6 +827,7 @@ plot-target-color-bar = Color Bar
 # Automatic values of the color fields
 
 plot-color-auto-contrast = Auto (contrasts with background)
+plot-color-auto-graph = Auto (graph color)
 plot-color-auto-white = Auto (white)
 plot-color-same-as-line = Same as line
 
@@ -836,10 +837,26 @@ plot-general-title =
     Title
     .hint = Shown above the graph
 plot-title-color = Title color
+plot-title-size = Title size
+    .hint = Size of the title, in points. Auto follows the Text scale
+plot-layer-title-size = Layer title size
+    .hint = Size of the layer title, in points. Auto follows the Text scale
+plot-axes-title-size = Axis title size
+    .hint = Size of the axis title, in points. Auto follows the Text scale
+plot-axes-tick-label-size = Tick label size
+    .hint = Size of the numbers of this axis, in points. Auto follows the Text scale
 plot-general-background = Background
 plot-general-text-color = Text color
 plot-general-axes-color = Axes color
-plot-general-global-note = Text color and Axes color apply to every title, axis, tick and gridline, and replace the colors set in other tabs
+plot-general-reset-parts = Reset Parts to Graph Settings
+    .hint = Clear the own colors, fonts and sizes of the titles, axes, legend and free texts, so they follow the graph again. The graph settings and the curves are not changed
+plot-general-own-colors-note = { $count ->
+    [one] { $count } part has its own color
+   *[other] { $count } parts have their own color
+}
+plot-general-text-scale =
+    Text scale (%)
+    .hint = Multiplies the size of every text left on Auto: titles, tick numbers, legend, color bar and new free texts. A size set by hand keeps its value
 plot-general-dark-note = Auto colors turn white on a dark background
 plot-stale-warning = Warn about out-of-date data
     .hint = Greys out the curves of calculations that are out of date and marks them, on screen and in exports
@@ -2094,6 +2111,7 @@ number-presets = Common values
 ## Reasons for graying out (#226): a grayed-out item says why and what to do
 
 disabled-object-gone = This item no longer exists
+disabled-reset-parts = No part has its own color, font or size
 disabled-move-first = Already first
 disabled-move-last = Already last
 disabled-visibility-empty = Nothing to show or hide
@@ -2324,7 +2342,6 @@ busy-stop = Stop
     .hint = Stops the work in progress
 status-import-stopped = Import stopped. Nothing was imported
 status-recalculating = Recalculating…
-status-page-edge-reached = Page edge reached: drag a corner to enlarge the page
 status-figure-grew = The image grew beyond the room kept by the Fixed figure size. The plot area kept its size
 status-ranges-written =
     { $count ->

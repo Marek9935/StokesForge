@@ -601,3 +601,30 @@ fn an_unchecked_group_keeps_its_entries_and_the_last_has_no_break() {
     assert!(texts(&document).iter().any(|t| t.2 == "SWITCH"));
     assert!(!texts(&document).iter().any(|t| t.2 == "TAIL"));
 }
+
+/// #550 (G1): the labels of the colour bar follow the graph text colour.
+/// Witness: the bar's labels on the automatic ink leave the break label dark.
+#[test]
+fn the_graph_text_color_draws_the_colour_bar_labels() {
+    let break_label_fill = |color: &str| {
+        let mut project = Project::new("Bar").expect("project");
+        let mut spec = two_group_spec(&mut project, false);
+        spec.text_color = color.to_owned();
+        let plot = resolve_spec(project.tree(), &spec);
+        let document = render_to_string(&plot, (900, 360), &TextMeasurer::default())
+            .expect("export")
+            .to_uppercase();
+        let element = document
+            .split("<TEXT")
+            .find(|element| {
+                element
+                    .split_once('>')
+                    .is_some_and(|(_, rest)| rest.trim_start().starts_with("SWITCH"))
+            })
+            .expect("the break label")
+            .to_string();
+        element
+    };
+    assert!(break_label_fill("#123456").contains("FILL=\"#123456\""));
+    assert!(!break_label_fill("").contains("#123456"));
+}

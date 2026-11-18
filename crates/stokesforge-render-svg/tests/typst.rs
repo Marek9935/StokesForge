@@ -374,3 +374,168 @@ fn the_pdf_contains_extractable_text() {
         "PDF text not extractable: {extracted:?}"
     );
 }
+
+// ── #545: the graph font and text scale ──────────────────────────────────
+
+/// The opening tag of the `<text>` element whose content is `content`
+/// (Plotters writes it on its own line, Typst right after the tag).
+fn text_tag<'a>(svg: &'a str, content: &str) -> Option<&'a str> {
+    let end = svg
+        .find(&format!("\n{content}\n</text>"))
+        .or_else(|| svg.find(&format!("{content}</text>")))?;
+    let start = svg[..end].rfind("<text")?;
+    Some(&svg[start..end])
+}
+
+/// One attribute of `tag`.
+fn attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    let from = tag.find(&format!("{name}=\""))? + name.len() + 2;
+    Some(&tag[from..from + tag[from..].find('"')?])
+}
+
+/// The `font-family` of the `<text>` element whose content is `content`.
+fn family_of(svg: &str, content: &str) -> Option<String> {
+    attribute(text_tag(svg, content)?, "font-family").map(str::to_owned)
+}
+
+/// Witnesses: the graph family ignored (title stays Noto), a local family
+/// overridden by the graph's, the ticks' family hard-coded to Noto.
+#[test]
+fn the_graph_font_reaches_every_text_and_a_local_family_wins() {
+    use stokesforge_render_svg::SvgTextMode::Text;
+    let mut spec = rich_spec();
+    spec.text_font = "Libertinus Sans".into();
+    let svg = svg_mode(&spec, Text);
+    for content in ["Spectrumalpha", "Time", "0.3"] {
+        let family = family_of(&svg, content).unwrap_or_else(|| panic!("{content} missing"));
+        assert!(family.contains("Libertinus Sans"), "{content}: {family}");
+    }
+    spec.title_font.family = "Fira Sans".into();
+    let svg = svg_mode(&spec, Text);
+    assert!(family_of(&svg, "Spectrumalpha")
+        .unwrap()
+        .contains("Fira Sans"));
+    assert!(family_of(&svg, "Time").unwrap().contains("Libertinus Sans"));
+    // No graph font: the default family, as before.
+    let svg = svg_mode(&rich_spec(), Text);
+    assert!(family_of(&svg, "0.3").unwrap().contains("Noto Sans"));
+}
+
+/// Scale 150 % grows an Auto text and leaves a hand-set size alone: what is
+/// typed is what is drawn (#545, after the trial); 100 % is the export of a
+/// graph with no setting, byte for byte.
+#[test]
+fn the_text_scale_resizes_auto_texts_only() {
+    use stokesforge_render_svg::SvgTextMode::Text;
+    let size_of = |svg: &str, content: &str| -> f64 {
+        let tag = text_tag(svg, content).expect(content);
+        attribute(tag, "font-size").expect("size").parse().unwrap()
+    };
+    let plain = svg_mode(&rich_spec(), Text);
+    let mut spec = rich_spec();
+    spec.text_scale = Some(1.5);
+    let scaled = svg_mode(&spec, Text);
+    let ratio = size_of(&scaled, "0.3") / size_of(&plain, "0.3");
+    assert!((ratio - 1.5).abs() < 0.02, "tick ratio {ratio}");
+    let ratio = size_of(&scaled, "Spectrumalpha") / size_of(&plain, "Spectrumalpha");
+    assert!(ratio > 1.3, "title ratio {ratio}");
+    spec.title_font.size = Some(10.0);
+    let by_hand = svg_mode(&spec, Text);
+    let hand = size_of(&by_hand, "Spectrumalpha");
+    let alone = {
+        let mut spec = rich_spec();
+        spec.title_font.size = Some(10.0);
+        size_of(&svg_mode(&spec, Text), "Spectrumalpha")
+    };
+    assert!(
+        (hand - alone).abs() < 1e-6,
+        "hand-set size scaled: {hand} vs {alone}"
+    );
+    spec.text_scale = Some(1.0);
+    spec.title_font.size = None;
+    assert_eq!(svg_mode(&spec, Text), plain);
+}
+
+/// A tick label size is per axis (#545): only the left axis numbers change,
+/// at exactly the typed size even under a 150 % scale; the bottom ones keep
+/// the Auto size times the scale. Witness: the size read from the graph
+/// instead of the axis (the bottom numbers change too), or multiplied by the
+/// scale (the left ones read 30).
+#[test]
+fn a_tick_label_size_is_set_per_axis_and_is_absolute() {
+    use stokesforge_render_svg::SvgTextMode::Text;
+    let sizes_of = |svg: &str| -> Vec<(String, f64)> {
+        let mut out = Vec::new();
+        for (start, _) in svg.match_indices("<text") {
+            let end = svg[start..]
+                .find("</text>")
+                .map_or(svg.len(), |i| start + i);
+            let tag = &svg[start..end];
+            let content = tag[tag.find('>').unwrap() + 1..].trim().to_owned();
+            if let Some(size) = attribute(tag, "font-size").and_then(|s| s.parse().ok()) {
+                out.push((content, size));
+            }
+        }
+        out
+    };
+    let build = |left: Option<f64>| {
+        let mut spec = rich_spec();
+        spec.text_scale = Some(1.5);
+        spec.panels = Panels::new(vec![{
+            let mut panel = spec.panels[0].clone();
+            panel.left.auto_range = false;
+            panel.left.range_min = Some(0.0);
+            panel.left.range_max = Some(1000.0);
+            panel.left.tick_label_size = left;
+            panel
+        }]);
+        sizes_of(&svg_mode(&spec, Text))
+    };
+    let (auto, by_hand) = (build(None), build(Some(20.0)));
+    let is_left = |content: &str| content.parse::<f64>().is_ok_and(|v| v >= 100.0);
+    let is_bottom = |content: &str| content.parse::<f64>().is_ok_and(|v| v < 1.0 && v > 0.0);
+    let left_auto: Vec<_> = auto.iter().filter(|(c, _)| is_left(c)).collect();
+    assert!(!left_auto.is_empty(), "{auto:?}");
+    // The export scales points to its own unit: k = drawn / typed.
+    let k = left_auto[0].1 / 21.0;
+    assert!(
+        left_auto.iter().all(|(_, s)| (s / k - 21.0).abs() < 0.5),
+        "{left_auto:?}"
+    );
+    let left_hand: Vec<_> = by_hand.iter().filter(|(c, _)| is_left(c)).collect();
+    assert!(!left_hand.is_empty());
+    assert!(
+        left_hand.iter().all(|(_, s)| (s / k - 20.0).abs() < 0.5),
+        "{left_hand:?}"
+    );
+    let bottom = |all: &[(String, f64)]| -> Vec<f64> {
+        all.iter()
+            .filter(|(c, _)| is_bottom(c))
+            .map(|(_, s)| *s)
+            .collect()
+    };
+    assert!(!bottom(&auto).is_empty());
+    assert_eq!(bottom(&auto), bottom(&by_hand));
+}
+
+/// The tick count is chosen from the room the numbers take, measured at the
+/// resolved tick size: larger text, fewer numbers. At 300 % the plot area keeps
+/// its size and the numbers are three times as wide, so no more than ten texts
+/// are drawn (title and axis title included); measured at the built-in size, 13
+/// would be. Witness: the count measured at `LABEL_SIZE`.
+#[test]
+fn a_larger_text_scale_thins_the_ticks_out() {
+    use stokesforge_render_svg::SvgTextMode::Text;
+    let texts = |scale: Option<f64>| {
+        let mut spec = rich_spec();
+        // Stored frames: the plot area keeps its size whatever the bands do,
+        // so only the measure of the numbers can change the count.
+        spec.frame_widths = vec![300.0];
+        spec.frame_heights = vec![200.0];
+        spec.text_scale = scale;
+        svg_mode(&spec, Text).matches("<text").count()
+    };
+    let (plain, scaled) = (texts(None), texts(Some(3.0)));
+    assert!(scaled < plain, "{scaled} texts at 300 %, {plain} at 100 %");
+    assert!(scaled <= 10, "{scaled} texts at 300 %");
+}

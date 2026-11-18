@@ -1831,3 +1831,123 @@ fn the_two_backends_thin_the_symbols_the_same_way() {
         "{all} circles at 1, {third} at 3"
     );
 }
+
+// -- #545: the graph font and text scale --
+
+/// A scale other than 100 % and a graph font: screen and export draw the same
+/// figure, and each setting really changes it (the witnesses, without which the
+/// agreement would hold on two identical unscaled figures). Free text and
+/// title included, so every role goes through the one resolution.
+#[test]
+fn the_backends_agree_with_a_text_scale_and_a_graph_font() {
+    let fixture = realistic();
+    let tree = fixture.project.tree();
+    let mut base = fixture.spec.clone();
+    base.title = "Graph".to_string();
+    base.panels
+        .get_mut(0)
+        .unwrap()
+        .annotations
+        .push(stokesforge_plot::AnnotationSpec::new("note", 0.5, 0.5));
+    let (plain, plain_drawn) = agree(tree, &base, SIZE, "no graph text setting");
+    for (what, font, scale) in [
+        ("scale 150 %", "", Some(1.5)),
+        ("graph font", "Libertinus Sans", None),
+        ("scale 150 % and graph font", "Libertinus Sans", Some(1.5)),
+        ("scale 60 %", "", Some(0.6)),
+        ("scale 25 %", "", Some(0.25)),
+    ] {
+        let mut spec = base.clone();
+        spec.text_font = font.to_string();
+        spec.text_scale = scale;
+        let (primitives, drawn) = agree(tree, &spec, SIZE, what);
+        // A font changes glyphs, not the primitives compared here: only the
+        // scale must move the figure.
+        if scale.is_some() {
+            assert_ne!(primitives, plain, "{what}: changed nothing");
+        }
+        if scale.is_some_and(|scale| scale > 1.0) {
+            // The page grows around the frame: the text got room.
+            assert_ne!(drawn.panels[0].axis_areas, plain_drawn.panels[0].axis_areas);
+        }
+    }
+    // 100 % and no font are the figure of a graph with no setting.
+    let mut spec = base.clone();
+    spec.text_scale = Some(1.0);
+    let (same, _) = agree(tree, &spec, SIZE, "scale 100 %");
+    assert_eq!(same, plain);
+}
+
+// -- #550: graph-level colours --
+
+/// The (uppercase hex) colour of every plain text of the egui figure.
+fn text_colors_egui(spec: &PlotSpec, tree: &Tree) -> Vec<String> {
+    let plot = resolve_spec(tree, spec);
+    let mut shapes = Vec::new();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(SIZE.0 as f32, SIZE.1 as f32));
+    collect_shapes_with_texts(
+        &mut shapes,
+        rect,
+        &TextMeasurer::default(),
+        &plot,
+        &FigureTexts::default(),
+    )
+    .expect("egui drawing");
+    let mut out: Vec<String> = shapes
+        .iter()
+        .filter_map(|shape| match shape {
+            Shape::Text(text) => text.galley.job.sections.first().map(|section| {
+                let c = section.format.color;
+                format!("#{:02X}{:02X}{:02X}", c.r(), c.g(), c.b())
+            }),
+            _ => None,
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// The (uppercase hex) fill of every plain text of the SVG figure.
+fn text_colors_svg(spec: &PlotSpec, tree: &Tree) -> Vec<String> {
+    let plot = resolve_spec(tree, spec);
+    let (document, _) = stokesforge_render_svg::render_to_string_with_geometry_and_texts(
+        &plot,
+        SIZE,
+        &TextMeasurer::default(),
+        &FigureTexts::default(),
+    )
+    .expect("SVG export");
+    let mut out: Vec<String> = document
+        .split('<')
+        .filter_map(|tag| tag.strip_prefix("text"))
+        .filter_map(|rest| attribute(rest, "fill"))
+        .map(|fill| fill.to_uppercase())
+        .collect();
+    out.sort();
+    out
+}
+
+/// The screen and the export resolve the graph-level text and axes colours the
+/// same way: the tick labels are drawn in the axes colour on both.
+#[test]
+fn the_two_backends_draw_the_graph_level_colors_alike() {
+    let mut fixture = minimal();
+    fixture.spec.axes_color = "#654321".to_owned();
+    fixture.spec.text_color = "#123456".to_owned();
+    // A layer title takes the graph text colour too (#550, G1).
+    let layer = fixture.spec.panels.get_mut(0).unwrap();
+    layer.title = "Layer".to_owned();
+    layer.title_visible = true;
+    agree(fixture.project.tree(), &fixture.spec, SIZE, "graph colours");
+    let screen = text_colors_egui(&fixture.spec, fixture.project.tree());
+    let export = text_colors_svg(&fixture.spec, fixture.project.tree());
+    assert!(
+        screen.iter().any(|color| color == "#654321"),
+        "the screen ignores the graph axes colour: {screen:?}"
+    );
+    assert!(
+        screen.iter().any(|color| color == "#123456"),
+        "the screen ignores the graph text colour: {screen:?}"
+    );
+    assert_eq!(screen, export, "text colours differ between the backends");
+}

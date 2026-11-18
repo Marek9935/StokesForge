@@ -736,6 +736,88 @@ fn b13_a_hostile_grid_slack_is_sanitized_and_the_figure_stays_bounded() {
     }
 }
 
+/// #545: a graph font and a text scale read from a file are data like any
+/// other (invariant 10). NaN, infinity, negative, enormous scales and an
+/// unknown or hostile family cross the disk as written, read back clamped
+/// (`graph_text`), and the figure stays bounded and drawable without panic.
+#[test]
+fn b13_a_hostile_graph_text_setting_is_clamped_and_the_figure_stays_bounded() {
+    use stokesforge_plot::{GraphText, MAX_FIGURE_EXTENT, MAX_FRAME_SIZE};
+    let dir = TempDir::new().expect("temporary directory");
+    let path = dir.path().join("hostile-text.stf");
+    let mut project = Project::new("HostileText").expect("valid project");
+    let root = project.root();
+    let scales = [
+        Some(f64::NAN),
+        Some(f64::INFINITY),
+        Some(f64::NEG_INFINITY),
+        Some(-3.0),
+        Some(0.0),
+        Some(1e300),
+        Some(1e-300),
+        None,
+    ];
+    let families = ["", "No Such Font 9000", "a\"b'c<d>&", "   ", "\u{0}"];
+    let measurer = stokesforge_render::TextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    let bound = (MAX_FIGURE_EXTENT + 2.0 * MAX_FRAME_SIZE + 1000.0) as u32 * 4;
+    let mut graphs = Vec::new();
+    for (index, &scale) in scales.iter().enumerate() {
+        let mut spec = PlotSpec {
+            frame_widths: vec![300.0],
+            frame_heights: vec![200.0],
+            text_scale: scale,
+            text_font: families[index % families.len()].to_string(),
+            ..PlotSpec::empty("T")
+        };
+        // #545: a hostile tick label size on every axis (NaN counts as Auto,
+        // the others are clamped to 4..=200 when read).
+        let mut panel = PanelSpec::at(0, 0);
+        let hostile_size = scales[(index + 3) % scales.len()];
+        for side in [
+            &mut panel.bottom,
+            &mut panel.left,
+            &mut panel.right,
+            &mut panel.top,
+        ] {
+            side.tick_label_size = hostile_size;
+        }
+        spec = spec.with_panels(Panels::new(vec![panel]));
+        let graph = project
+            .add_graph(root, Some(&format!("G{index}")), spec)
+            .expect("graph");
+        graphs.push(graph);
+    }
+    stokesforge_persistence::save(&project, &path).expect("save");
+    let reloaded = stokesforge_persistence::load(&path).expect("reload");
+    for (index, graph) in graphs.into_iter().enumerate() {
+        let stokesforge_core::NodeKind::Graph { spec, .. } =
+            reloaded.tree().node(graph).expect("graph").kind()
+        else {
+            panic!("a graph expected");
+        };
+        let text = spec.graph_text();
+        assert!(text.scale.is_finite());
+        assert!((GraphText::SCALE_RANGE.0..=GraphText::SCALE_RANGE.1).contains(&text.scale));
+        let size = text.size(None, 24.0);
+        assert!((4.0..=200.0).contains(&size), "size {size} at {index}");
+        for axis in [&spec.panels[0].bottom, &spec.panels[0].left] {
+            let size = text.size(axis.tick_label_size, 14.0);
+            assert!((4.0..=200.0).contains(&size), "tick size {size} at {index}");
+        }
+        let layout =
+            stokesforge_render_svg::figure_layout(spec, &measurer, &choice).expect("a layout");
+        assert!(
+            layout.size.0 > 0 && layout.size.0 <= bound && layout.size.1 <= bound,
+            "bounded image, got {:?}",
+            layout.size
+        );
+        // Drawing it (unknown family: the embedded one) must not panic either.
+        let plot = stokesforge_core::resolve::resolve_spec(reloaded.tree(), spec);
+        stokesforge_render_svg::render_to_string(&plot, (480, 360), &measurer).expect("an export");
+    }
+}
+
 /// #538: a theme is data a user can store and share, so a hostile one (NaN and
 /// infinite sizes, free frames out of range, layers without curves) must apply
 /// to a grid graph and a free graph without panicking, and leave sizes the

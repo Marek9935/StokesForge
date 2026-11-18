@@ -80,7 +80,8 @@ pub enum ThemeFamily {
     Texts,
     /// Font, size, colour, alignment and visibility of the titles.
     TitleFonts,
-    /// Scale, ticks, grid, mirror, tick colours, decimal separator.
+    /// Scale, ticks, tick colours and tick number size, grid, mirror, decimal
+    /// separator.
     Axes,
     /// Axis bounds (automatic or not, From and To, inversion).
     AxisRanges,
@@ -420,6 +421,7 @@ fn apply_axis(target: &mut AxisSpec, theme: &AxisSpec, families: ThemeFamilies) 
         target.tick_width = theme.tick_width;
         target.tick_color = theme.tick_color.clone();
         target.tick_mark_color = theme.tick_mark_color.clone();
+        target.tick_label_size = theme.tick_label_size;
         target.grid = theme.grid;
     }
     if families.contains(ThemeFamily::AxisRanges) {
@@ -559,9 +561,13 @@ impl PlotSpec {
         if families.contains(ThemeFamily::TitleFonts) {
             self.title_font = style.title_font.clone();
             self.title_color = style.title_color.clone();
+            self.text_color = style.text_color.clone();
             self.title_visible = style.title_visible;
+            self.text_font = style.text_font.clone();
+            self.text_scale = style.text_scale;
         }
         if families.contains(ThemeFamily::Axes) {
+            self.axes_color = style.axes_color.clone();
             self.decimal_comma = style.decimal_comma;
         }
         if families.contains(ThemeFamily::SizeAndPage) {
@@ -584,9 +590,11 @@ impl PlotSpec {
         }
         if families.contains(ThemeFamily::TitleFonts) {
             self.set_text_color(theme.theme_text_color());
+            self.clear_local_text_colors();
         }
         if families.contains(ThemeFamily::Axes) {
             self.set_axes_color(theme.theme_axes_color());
+            self.clear_local_axes_colors();
         }
     }
 
@@ -664,6 +672,8 @@ fn every_field_has_a_family(
         panels: _,          // per layer, below
         background: _,      // Background
         title_color: _,     // TitleFonts
+        text_color: _,      // TitleFonts (#550: graph-level text colour)
+        axes_color: _,      // Axes (#550: graph-level axes colour)
         title_anchor: _,    // never: dragged position
         title_font: _,      // TitleFonts
         stale_warning: _,   // never: state of the data
@@ -676,6 +686,8 @@ fn every_field_has_a_family(
         layer_placement: _, // SizeAndPage (the application switches it)
         free_page: _,       // SizeAndPage (free)
         grid_slack: _,      // SizeAndPage (grid)
+        text_font: _,       // TitleFonts (#545)
+        text_scale: _,      // TitleFonts (#545)
     } = plot;
     let PanelSpec {
         title: _,         // Texts
@@ -726,6 +738,7 @@ fn every_field_has_a_family(
         minor_tick_length: _, // Axes
         tick_width: _,        // Axes
         tick_mark_color: _,   // Axes
+        tick_label_size: _,   // Axes (#545: a tick property, like its colour)
     } = axis;
     let SeriesSpec {
         y: _,              // never: data
@@ -869,6 +882,73 @@ mod tests {
         let mut expected = before;
         expected.background = "#222222".into();
         assert_eq!(target, expected);
+    }
+
+    /// #545: the graph font and the text scale belong to the Title fonts
+    /// family. Witness: the fields left out of the copy, or copied by another
+    /// family.
+    #[test]
+    fn the_title_fonts_family_carries_the_graph_font_and_scale() {
+        let mut source = styled();
+        source.text_font = "Libertinus Sans".into();
+        source.text_scale = Some(1.5);
+        let theme = theme_of(&source);
+        let mut target = graph(&[&["#aaaaaa"]]);
+        target.apply_theme_families(&theme, ThemeFamilies::only(ThemeFamily::Texts));
+        assert!(target.text_font.is_empty() && target.text_scale.is_none());
+        target.apply_theme_families(&theme, ThemeFamilies::only(ThemeFamily::TitleFonts));
+        assert_eq!(target.text_font, "Libertinus Sans");
+        assert_eq!(target.text_scale, Some(1.5));
+        // A theme without them clears a graph's own (it sets, never merges).
+        let mut other = graph(&[&["#aaaaaa"]]);
+        other.text_scale = Some(2.0);
+        other.apply_theme_families(
+            &theme_of(&styled()),
+            ThemeFamilies::only(ThemeFamily::TitleFonts),
+        );
+        assert_eq!(other.text_scale, None);
+    }
+
+    /// #545: the tick label size of an axis is a tick property: the Axes
+    /// family copies it, no other family does, and a theme on Auto clears the
+    /// target's own. Witness: the field left out of `apply_axis`, or copied by
+    /// the Title fonts family.
+    #[test]
+    fn the_axes_family_carries_the_tick_label_size() {
+        let mut source = styled();
+        source.panels.get_mut(0).unwrap().left.tick_label_size = Some(20.0);
+        let theme = theme_of(&source);
+        let mut target = graph(&[&["#aaaaaa"]]);
+        target.apply_theme_families(&theme, ThemeFamilies::only(ThemeFamily::TitleFonts));
+        assert_eq!(panel(&target, 0).left.tick_label_size, None);
+        target.apply_theme_families(&theme, ThemeFamilies::only(ThemeFamily::Axes));
+        assert_eq!(panel(&target, 0).left.tick_label_size, Some(20.0));
+        assert_eq!(panel(&target, 0).bottom.tick_label_size, None);
+        let plain = theme_of(&styled());
+        target.apply_theme_families(&plain, ThemeFamilies::only(ThemeFamily::Axes));
+        assert_eq!(panel(&target, 0).left.tick_label_size, None);
+    }
+
+    #[test]
+    fn the_graph_level_colors_travel_with_their_family() {
+        let mut source = styled();
+        source.text_color = "#123456".into();
+        source.axes_color = "#654321".into();
+        let theme = theme_of(&source);
+        let mut target = graph(&[&["#aaaaaa"]]);
+        target.text_color = "#aaaaaa".into();
+        target.axes_color = "#bbbbbb".into();
+        // Only the Title fonts family: the text colour moves, the axes one stays.
+        target.apply_theme_families(&theme, ThemeFamilies::only(ThemeFamily::TitleFonts));
+        assert_eq!(target.text_color, "#123456");
+        assert_eq!(target.axes_color, "#bbbbbb");
+        // Only the Axes family: the reverse.
+        let mut target = graph(&[&["#aaaaaa"]]);
+        target.text_color = "#aaaaaa".into();
+        target.axes_color = "#bbbbbb".into();
+        target.apply_theme_families(&theme, ThemeFamilies::only(ThemeFamily::Axes));
+        assert_eq!(target.text_color, "#aaaaaa");
+        assert_eq!(target.axes_color, "#654321");
     }
 
     #[test]

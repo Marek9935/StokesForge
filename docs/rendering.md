@@ -87,7 +87,17 @@ The graph title (`PlotSpec::title_color`), the title of each axis
 ticks, labels, and the grid, taken at 20 % / 10 % opacity)
 have their own color. An empty string means **automatic**:
 `color::auto_ink(fond)`, white on a dark background, dark on a light one
-(the choice with the best WCAG contrast ratio). The same ink is used for the
+(the choice with the best WCAG contrast ratio). Since #550 the graph carries a
+**graph-level text colour** (`PlotSpec::text_color`) and **axes colour**
+(`PlotSpec::axes_color`), and each part resolves its colour in this order: its
+own colour if set, else the graph-level colour if set and readable, else the
+automatic ink. One resolver per role in `pipeline.rs` (`GraphInks::text`,
+`GraphInks::axes`): text for the graph title, the layer titles, the axis titles,
+the free texts, the legend text and the colour bar labels; axes for the line, ticks, labels and grid of each axis. An unreadable
+graph-level value is as good as an empty one. The text role also reaches the layer
+titles, the legend text and the colour bar labels; the strokes (legend frame,
+shape outlines, bar outlines) keep the automatic ink. Without any colour set,
+the automatic ink is used for the
 panel title, the frame and text of the legend, and the outline of bars. A dark
 background therefore turns everything in automatic color to white at once —
 on screen as in the export, since the pipeline is shared
@@ -491,6 +501,38 @@ a **parameter** (`FontChoice`) instead of freezing it. Hence a single entry
 point `fonts::resolve`, and not two functions "for the screen" / "for
 the export" — a caller that changed font on one side only would reproduce
 exactly the defect `text.rs` exists to prevent.
+
+### Graph font and text scale (#545)
+
+`PlotSpec::text_font` and `text_scale` are the **graph default** of every text
+left on Auto; `PlotSpec::graph_text()` (sanitized: a non-finite scale is 100 %,
+others clamped to 25-400 %) gives a `stokesforge_plot::GraphText`, and **that is
+the one place that decides** a text's size and family: `GraphText::size` (own
+size, else the built-in size of the role times the scale, clamped to
+`TextFont::SIZE_RANGE`) and `GraphText::family` (own family, else the graph's,
+else the embedded default). Today a size set by hand is absolute and the scale
+does not multiply it (decided after the trial of #545: what is typed is what is drawn). The role
+constants are `TITLE_SIZE`, `PANEL_TITLE_SIZE`, `AXIS_DESC_SIZE` (axis titles and
+free texts that follow the graph, `AnnotationSpec::follows_graph_size`) and
+`LABEL_SIZE` (ticks, legend, colour bar). Rich texts go through `font_style`;
+**tick numbers** go through `tick_style(graph, axis.tick_label_size, …)`, per
+axis (#545: a size set by hand on the axis is absolute, else the built-in size
+times the scale; the tick count, the edge reserves and `Grow` read the same
+per-axis size): with no graph font they are the
+`epaint` text of before (so an untouched graph keeps its pixels), with one they
+are literal Typst text in that family like the colour-bar numbers.
+
+**Invariant 4 holds**: the size that measures is the size that draws
+(`edge_reserves`, tick count, `text_band`, `Grow`, the drawing all read the same
+`GraphText`). The axis areas grow with the resolved sizes (`CellPlan::grow_*`,
+`grown_room`: today's tick depth and title zone times the ratio above the
+built-in size, never shrunk by a hand-set size), so the frame keeps its size and the figure
+grows around it; at the built-in sizes every band is today's constant, to the
+pixel. Only a **graph scale** under 100 % shrinks the default bands
+(`BandShrink`: tick depth, title zone and area times the scale, the growth rule
+then measured against the scaled built-in size), so small text keeps its axis
+title close to the ticks; at 100 % and above nothing moves. The hit test moves
+the axis-title band by the same growth or loss (`AxisArea::title_grow`, signed).
 
 ## `stokesforge-render-egui` — the screen
 
@@ -1239,8 +1281,7 @@ The mode itself is in `render-egui::layout_mode` (boxes, handles, drags; geometr
   rectangle, they never change the figure's own layout (invariant 5).
 - **The padlock is the application's** (`AppState::size_lock`, `Action::SetSizeLock`,
   published to the graph windows each frame):
-  Graph Properties and the strip share it (the Figure size fields read it; Fit Layout to Page does not, it always scales one factor per axis; the L corners, which
-  only add or remove empty space since K1, do not). A committed scale of the figure adopts the next
+  Graph Properties and the strip share it (the Figure size fields read it; Fit Layout to Page does not, it always scales one factor per axis). A committed scale of the figure adopts the next
   image (`SizeLock::adopt_next`), so a rounding never drifts the ratio.
 - **A window is maximised while the mode lasts, and the keys are read first.**
   `app/layout_window.rs` maximises a floating window on entering and a detached one

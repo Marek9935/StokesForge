@@ -1081,7 +1081,7 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
                 "stokesforge_format_color_button",
                 &mut color,
                 ColorUsage::Text,
-                Some(&tr!("plot-color-auto-contrast")),
+                Some(&tr!("plot-color-auto-graph")),
                 &mut picker,
             )
         });

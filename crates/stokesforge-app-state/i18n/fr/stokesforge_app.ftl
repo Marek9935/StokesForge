@@ -826,6 +826,7 @@ plot-target-color-bar = Barre de couleurs
 # Valeurs automatiques des champs de couleur
 
 plot-color-auto-contrast = Auto (contraste avec le fond)
+plot-color-auto-graph = Auto (couleur du graphe)
 plot-color-auto-white = Auto (blanc)
 plot-color-same-as-line = Comme le trait
 
@@ -835,10 +836,26 @@ plot-general-title =
     Titre
     .hint = Affiché au-dessus du graphique
 plot-title-color = Couleur du titre
+plot-title-size = Taille du titre
+    .hint = Taille du titre, en points. Auto suit l'échelle du texte
+plot-layer-title-size = Taille du titre du calque
+    .hint = Taille du titre du calque, en points. Auto suit l'échelle du texte
+plot-axes-title-size = Taille du titre de l'axe
+    .hint = Taille du titre de l'axe, en points. Auto suit l'échelle du texte
+plot-axes-tick-label-size = Taille des étiquettes de graduation
+    .hint = Taille des nombres de cet axe, en points. Auto suit l'échelle du texte
 plot-general-background = Fond
 plot-general-text-color = Couleur du texte
 plot-general-axes-color = Couleur des axes
-plot-general-global-note = Couleur du texte et Couleur des axes s'appliquent à chaque titre, axe, graduation et quadrillage, et remplacent les couleurs réglées dans les autres onglets
+plot-general-reset-parts = Réinitialiser les parties aux réglages du graphe
+    .hint = Efface les couleurs, polices et tailles propres des titres, axes, légende et textes libres, qui suivent de nouveau le graphe. Les réglages du graphe et les courbes ne changent pas
+plot-general-own-colors-note = { $count ->
+    [one] { $count } partie a sa propre couleur
+   *[other] { $count } parties ont leur propre couleur
+}
+plot-general-text-scale =
+    Échelle du texte (%)
+    .hint = Multiplie la taille de chaque texte laissé en Auto : titres, nombres des graduations, légende, barre de couleurs et nouveaux textes libres. Une taille réglée à la main garde sa valeur
 plot-general-dark-note = Les couleurs auto passent au blanc sur fond sombre
 plot-stale-warning = Avertir si des données ne sont pas à jour
     .hint = Grise les courbes des calculs pas à jour et les marque, à l'écran et dans les exports
@@ -2093,6 +2110,7 @@ number-presets = Valeurs courantes
 ## Raisons de grisage (#226) : un élément grisé dit pourquoi et quoi faire
 
 disabled-object-gone = Cet élément n'existe plus
+disabled-reset-parts = Aucune partie n'a sa propre couleur, police ou taille
 disabled-move-first = Déjà en premier
 disabled-move-last = Déjà en dernier
 disabled-visibility-empty = Rien à afficher ou masquer
@@ -2322,7 +2340,6 @@ help-open-list = Ouvrir la liste des valeurs
 busy-stop = Arrêter
     .hint = Arrête le travail en cours
 status-import-stopped = Import arrêté. Rien n'a été importé
-status-page-edge-reached = Bord de la page atteint : tirez un coin pour agrandir la page
 status-figure-grew = L'image a dépassé la place gardée par la taille de figure Fixe. La zone de tracé a gardé sa taille
 status-ranges-written =
     { $count ->
