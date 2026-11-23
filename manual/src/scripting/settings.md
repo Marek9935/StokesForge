@@ -21,7 +21,7 @@ The Form tab shows one page. Each `[table]` of the file is a fixed bold heading,
 | Text | A text field. |
 | Whole number or real number | A number field. A comma is read as the decimal point. Something that is not a number is refused, in red, and the old value comes back. |
 | Date | A text field that expects a date such as `2026-11-16`. |
-| List | One small field per value, a **×** to remove it and a **+** to add a copy of the last value. An empty list has no value to copy: the **+** is greyed and its tooltip says to add the first value in the Text tab. |
+| List | One small field per value, a red bin to remove it and an **Add Value** button to add a copy of the last value. An empty list has no value to copy: **Add Value** is greyed and its tooltip says to add the first value in the Text tab. |
 
 A field applies when you press <kbd>Enter</kbd> or <kbd>Tab</kbd>, or click elsewhere. <kbd>Esc</kbd> cancels. Each applied change is one entry in the history, and nothing else in the text moves: comments, order and spacing stay as you wrote them.
 

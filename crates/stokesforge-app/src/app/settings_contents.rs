@@ -38,7 +38,7 @@ use stokesforge_app_state::state::{Action, AppState, SettingsChange, SettingsVie
 use stokesforge_app_state::{errors, tr};
 
 use crate::field_state::{self, Bound, FieldIssue, Verdict};
-use crate::icons::{icon_image, Icon, IconRole};
+use crate::icons::{icon_button, Icon, IconRole};
 use crate::theme::{self, FieldWidth};
 
 use super::form::{form, Form};
@@ -204,7 +204,7 @@ fn form_page(ui: &mut egui::Ui, state: &mut AppState, settings: NodeId, view: &S
 }
 
 /// The fields of the document. At most one change per frame: a validated
-/// field, a toggled box, a `+` or a `×`.
+/// field, a toggled box, Add Value or a bin.
 fn form_fields(ui: &mut egui::Ui, settings: NodeId, doc: &SettingsDoc) -> Option<SettingsChange> {
     if doc
         .sections
@@ -298,7 +298,7 @@ fn help_text(entry: &Entry) -> String {
     lines.join("\n")
 }
 
-/// A list: one small field and a `×` per element, then a `+`.
+/// A list: one small field and a bin per element, then an Add Value button.
 fn array_field(
     ui: &mut egui::Ui,
     salt: &str,
@@ -315,10 +315,15 @@ fn array_field(
                     value,
                 });
             }
-            let remove = ui
-                .add(egui::Button::image(icon_image(Icon::Close, IconRole::Neutral)).frame(false))
-                .on_hover_text(tr!("settings-array-remove", "hint"));
-            if remove.clicked() {
+            // The analysis lists' twin: a red bin, never a `×` that reads like the `+`.
+            if icon_button(
+                ui,
+                Icon::Delete,
+                IconRole::Danger,
+                tr!("settings-array-remove", "hint"),
+            )
+            .clicked()
+            {
                 change = Some(SettingsChange::Remove {
                     path: entry.path.clone(),
                     index,
@@ -328,10 +333,7 @@ fn array_field(
         // An empty list has no element to copy the type from.
         let can_add = !items.is_empty();
         let add = ui
-            .add_enabled(
-                can_add,
-                egui::Button::image(icon_image(Icon::Add, IconRole::Neutral)).frame(false),
-            )
+            .add_enabled(can_add, egui::Button::new(tr!("settings-array-add")))
             .on_hover_text(tr!("settings-array-add", "hint"))
             .on_disabled_hover_text(tr!("settings-array-add", "disabled"));
         if add.clicked() {

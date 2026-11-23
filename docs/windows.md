@@ -175,8 +175,8 @@ raw text. Form fields apply on Enter, Tab or leaving the field and Esc cancels
 (S-N3); a typed number out of its bounds is brought back to the bound, orange for 2 s
 (S-N7), an unreadable one is refused, red, with the old value back (S-N6); a
 stored value outside its hint is orange with a bubble and never rewritten
-(S-R8); a list has a `×` per element and a `+` (a copy of the last one, greyed
-with a reason when the list is empty). The Text tab applies when the editor
+(S-R8); a list has a red bin per element (the analysis lists' twin) and an Add
+Value button (a copy of the last one, greyed with a reason when the list is empty). The Text tab applies when the editor
 loses focus (`SettingsEdit`, committed by a save like a note) and Esc abandons;
 a text that is not exact TOML is kept and saved, its line shows in red under the
 editor, and the Form tab freezes on the last readable form (greyed, a red banner
