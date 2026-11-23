@@ -265,6 +265,16 @@ pub enum Command {
         /// Initial text.
         text: String,
     },
+    /// Adds a Script Settings object carrying the raw TOML `text` (#548).
+    /// `name: None` → first free "SettingsN".
+    AddScriptSettings {
+        /// Host folder.
+        parent: NodeId,
+        /// Requested name, or automatic name.
+        name: Option<String>,
+        /// Initial text.
+        text: String,
+    },
     /// Removes any node and all its descendants — folder, workbook,
     /// worksheet, column, graph, matrix or note. `Project::remove` is already
     /// generic on `NodeId`: this command therefore does not need one variant
@@ -295,6 +305,13 @@ pub enum Command {
     /// Replaces the text of a note.
     SetNoteText {
         /// Target note.
+        id: NodeId,
+        /// New text.
+        text: String,
+    },
+    /// Replaces the raw TOML text of a Script Settings object (#548).
+    SetScriptSettingsText {
+        /// Target Script Settings.
         id: NodeId,
         /// New text.
         text: String,
@@ -464,12 +481,16 @@ impl Command {
             Command::AddGraph { .. } => HistoryLabel::AddGraph,
             Command::AddMatrix { .. } => HistoryLabel::AddMatrix,
             Command::AddNote { .. } => HistoryLabel::AddNote,
+            Command::AddScriptSettings { .. } => HistoryLabel::AddScriptSettings,
             Command::RemoveNode { id } => HistoryLabel::RemoveNode { name: name(*id) },
             Command::SetWindowMeta { id, .. } => HistoryLabel::SetWindowMeta { name: name(*id) },
             Command::SetSheetRawMark { sheet, .. } => {
                 HistoryLabel::SetSheetRawMark { name: name(*sheet) }
             }
             Command::SetNoteText { id, .. } => HistoryLabel::SetNoteText { name: name(*id) },
+            Command::SetScriptSettingsText { id, .. } => {
+                HistoryLabel::SetScriptSettingsText { name: name(*id) }
+            }
             Command::SetColumnMeta { column, .. } => HistoryLabel::SetColumnMeta {
                 column: column_ref(tree, *column),
             },
@@ -549,6 +570,7 @@ impl Command {
                 | Command::AddGraph { .. }
                 | Command::AddMatrix { .. }
                 | Command::AddNote { .. }
+                | Command::AddScriptSettings { .. }
                 | Command::RemoveNode { .. }
                 | Command::ReplaceAnalysisData { .. }
                 | Command::AddCalculation { .. }

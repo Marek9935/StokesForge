@@ -65,6 +65,7 @@ pub mod number_format;
 pub mod path;
 pub mod project;
 pub mod resolve;
+pub mod script_settings;
 pub mod sheet_refs;
 pub mod transpose;
 pub mod tree;

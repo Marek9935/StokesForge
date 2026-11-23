@@ -52,6 +52,13 @@ pub enum PickRequest {
     AddImportFiles,
     /// Preferences › Folders: the default folder of a kind.
     ChooseDefaultFolder { kind: FolderKind },
+    /// File › Import › Script Settings…: a `.toml` file to read (#548).
+    ImportScriptSettings,
+    /// Export… of a Script Settings object: the `.toml` file to write (#548).
+    ExportScriptSettings {
+        settings: stokesforge_core::NodeId,
+        file_name: String,
+    },
 }
 
 impl PickRequest {
@@ -60,10 +67,11 @@ impl PickRequest {
     pub fn folder_kind(&self) -> FolderKind {
         match self {
             Self::OpenProject | Self::SaveProjectAs { .. } => FolderKind::Projects,
-            Self::ExportGraph { .. } => FolderKind::Export,
-            Self::ExportImportRecipe { .. } | Self::ImportImportRecipe | Self::AddImportFiles => {
-                FolderKind::Import
-            }
+            Self::ExportGraph { .. } | Self::ExportScriptSettings { .. } => FolderKind::Export,
+            Self::ExportImportRecipe { .. }
+            | Self::ImportImportRecipe
+            | Self::AddImportFiles
+            | Self::ImportScriptSettings => FolderKind::Import,
             Self::ChooseDefaultFolder { kind } => *kind,
         }
     }
@@ -77,7 +85,9 @@ impl PickRequest {
             | Self::ExportGraph { .. }
             | Self::ExportImportRecipe { .. }
             | Self::ImportImportRecipe
-            | Self::AddImportFiles => true,
+            | Self::AddImportFiles
+            | Self::ImportScriptSettings
+            | Self::ExportScriptSettings { .. } => true,
             Self::ChooseDefaultFolder { .. } => false,
         }
     }
@@ -106,6 +116,13 @@ impl PickRequest {
                 .set_title(tr!("import-files-import-title"))
                 .add_filter(tr!("import-files-template-filter"), &["json"]),
             Self::AddImportFiles => dialog.set_title(tr!("import-files-add-title")),
+            Self::ImportScriptSettings => dialog
+                .set_title(tr!("settings-import-title"))
+                .add_filter(tr!("settings-file-filter"), &["toml"]),
+            Self::ExportScriptSettings { file_name, .. } => dialog
+                .set_title(tr!("settings-export-title"))
+                .add_filter(tr!("settings-file-filter"), &["toml"])
+                .set_file_name(file_name),
             Self::ChooseDefaultFolder { .. } => {
                 dialog.set_title(tr!("preferences-folders-pick-title"))
             }
@@ -128,8 +145,9 @@ impl PickRequest {
         match self {
             Self::SaveProjectAs { .. }
             | Self::ExportGraph { .. }
-            | Self::ExportImportRecipe { .. } => dialog.save_file().map(|path| vec![path]),
-            Self::OpenProject | Self::ImportImportRecipe => {
+            | Self::ExportImportRecipe { .. }
+            | Self::ExportScriptSettings { .. } => dialog.save_file().map(|path| vec![path]),
+            Self::OpenProject | Self::ImportImportRecipe | Self::ImportScriptSettings => {
                 dialog.pick_file().map(|path| vec![path])
             }
             Self::AddImportFiles => dialog.pick_files(),

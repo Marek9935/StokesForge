@@ -200,6 +200,8 @@ pub enum HistoryLabel {
     AddMatrix,
     /// Adding a note.
     AddNote,
+    /// Adding a Script Settings object (#548).
+    AddScriptSettings,
     /// Deleting a node and its descendants.
     RemoveNode {
         /// Name of the deleted node.
@@ -218,6 +220,11 @@ pub enum HistoryLabel {
     /// Changing the text of a note.
     SetNoteText {
         /// Name of the note.
+        name: Option<String>,
+    },
+    /// Changing the text of a Script Settings object (#548).
+    SetScriptSettingsText {
+        /// Name of the Script Settings object.
         name: Option<String>,
     },
     /// Changing the properties of a column.
@@ -482,6 +489,7 @@ impl fmt::Display for HistoryLabel {
             HistoryLabel::AddGraph => f.write_str("Add Graph"),
             HistoryLabel::AddMatrix => f.write_str("Add Matrix"),
             HistoryLabel::AddNote => f.write_str("Add Note"),
+            HistoryLabel::AddScriptSettings => f.write_str("Add Script Settings"),
             HistoryLabel::RemoveNode { name: Some(name) } => write!(f, "Delete “{name}”"),
             HistoryLabel::RemoveNode { name: None } => f.write_str("Delete"),
             HistoryLabel::SetWindowMeta { name: Some(name) } => {
@@ -494,6 +502,12 @@ impl fmt::Display for HistoryLabel {
             HistoryLabel::SetSheetRawMark { name: None } => f.write_str("Mark Sheet as Raw Data"),
             HistoryLabel::SetNoteText { name: Some(name) } => write!(f, "Edit Note “{name}”"),
             HistoryLabel::SetNoteText { name: None } => f.write_str("Edit Note"),
+            HistoryLabel::SetScriptSettingsText { name: Some(name) } => {
+                write!(f, "Edit Script Settings “{name}”")
+            }
+            HistoryLabel::SetScriptSettingsText { name: None } => {
+                f.write_str("Edit Script Settings")
+            }
             HistoryLabel::SetColumnMeta { column: Some(c) } => {
                 write!(f, "Edit Properties of Column {}", c.letter())
             }

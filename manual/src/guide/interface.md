@@ -24,7 +24,7 @@ The title bar of the application window shows the name of the project. A dot aft
 
 | Menu | Content |
 |---|---|
-| **File** | **New** (**New Project**, **Add Workbook**, **Add Graph**, **Add Folder**), **Import**, **Open…**, **Save**, **Save As…**, **Language**, **Preferences…**, **Quit** |
+| **File** | **New** (**New Project**, **Add Workbook**, **Add Graph**, **Add Folder**, **Add Script Settings**), **Import**, **Open…**, **Save**, **Save As…**, **Language**, **Preferences…**, **Quit** |
 | **Edit** | **Undo**, **Redo**, **Select All**, **Selection** |
 | **Workbook** | Commands for the active workbook: sheets, columns, plot, header rows. Shown only when a workbook is in the foreground |
 | **Graph** | Commands for the active graph. Shown only when a graph is in the foreground |

@@ -23,6 +23,7 @@ Project
                   ├── Graph      { spec, … }    a PlotSpec
                   ├── Matrix     { … }
                   ├── Note       { … }
+                  ├── ScriptSettings { …, text }  raw TOML text, opaque (#548)
                   └── Unknown(RawVariant)       read from a newer file
 ```
 
@@ -485,6 +486,41 @@ the interface (`AppState::plot_columns`, in `stokesforge-app-state`, `add_series
 Nothing in it mutates: the caller sends the result through an undoable command
 (`AddGraph`, `SetPlotSpec`). Removing a series from the panel goes through
 `PanelSpec::remove_series`, like `remove_group` for a group.
+
+## `script_settings` — reading the TOML of a Script Settings (#548)
+
+The model keeps a Script Settings as raw text and never parses it.
+`stokesforge_core::script_settings` is the one place that reads that text, for
+the form of the window and for `pyst`. It rests on `toml_edit`, so an edit
+changes only the edited value: comments, key order, spacing and end-of-line
+comments stay byte for byte (a text without a final newline keeps none). It has no UI,
+no session and no state: every edit returns the **new full text**, which the
+caller sends through `SetScriptSettingsText`.
+
+- `parse(text)` gives a `SettingsDoc` (ordered sections: the root keys, each
+  table, dotted and inline tables as nested sections, each `[[x]]` block as its
+  own section) or a `ParseError` with the 1-based line and column and the
+  parser's message. Malformed TOML is refused, never repaired. Input is bounded
+  (4 MiB, and the parser's own nesting limit), invariant 10.
+- Values keep their kind: integers exactly (`i64`), a date-only value stays
+  date-only. A key accepts only its own type; an integer is accepted for a float
+  key and written as a float (`3.0`). `set_scalar`, `set_element`,
+  `append_element` (copies the last element, so the type; an empty array is
+  an error) and `remove_element` implement the form's edits.
+- Help is the comment block directly above a key (no blank line). Hints, read
+  from whole lines, case-insensitive, English only: `choices: a | b | c` (two
+  items at least), `between A and B`, `at least A`, `at most B` (inclusive). A
+  line that does not parse fully (`between x and 3`) stays plain help. Hint
+  lines are removed from the help. `Entry::out_of_hint` only reports.
+- `to_values` gives an ordered neutral tree for the Python bridge;
+  `apply_values(text, values)` writes a script's dict: existing keys take the new
+  value (same type rule), missing keys are **created** (a new table when
+  needed), absent keys are untouched, a wrong type is an error naming the key
+  and nothing is returned. Hints never refuse a script write. Blocks of an array of
+  tables can be changed but not added or removed from a script.
+- The number rules of the form (comma accepted, unreadable refused, clamped to
+  the bounds) are the `Verdict` of the application's number field, not
+  duplicated here: core gives the typed value and `Hint::min` / `Hint::max`.
 
 ## What to know before modifying
 

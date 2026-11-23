@@ -24,6 +24,10 @@ without a message, see `docs/persistence.md`).
 
 ## [Unreleased]
 
+### Added
+
+- Script Settings (#548): a new project object that holds a raw TOML text for scripts, created and edited only through two undoable commands and saved in the `.stf` file as an additive node kind (format version unchanged; an older version keeps the node as an unrecognised kind and writes it back unchanged). The window (a Form tab with one field per kind of value and hints read from comments, and a Text tab), File ▸ New ▸ Script Settings, File ▸ Import ▸ Script Settings…, dropping a `.toml` file, and Export… in the Project Manager are added in the third lot; scripts read and write the values by name with `pyst.settings(target)` and `pyst.set_settings(target, values)` (pyst API 0.12).
+
 ## [1.2.0] - 2026-11-17
 
 ### Added

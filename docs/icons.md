@@ -9,7 +9,7 @@ that displays them is `crates/stokesforge-app/src/icons.rs`; its `//!` says
 
 - **Yes**: a repeated action whose shape is recognized at a glance
   (close, detach, maximize, collapse, scroll the tabs), and the **object
-  type** of the project (folder, workbook, graph, matrix, note) everywhere it
+  type** of the project (folder, workbook, graph, matrix, note, Script Settings) everywhere it
   appears.
 - **No**: where a word is clearer ("#" of the gutter, a column name, a
   metadata summary); where the icon would only decorate. No icon in every
@@ -100,6 +100,9 @@ separately: **each variant (icon, role) is baked into the SVG** by
 - In an interface test, a painted icon is a `Shape::Rect` with a texture;
   install `egui_extras::install_image_loaders` and paint **two images**
   (the texture is ready in the second) — see `find_icon_centers`.
+
+Script Settings (#548) uses the Phosphor `gear-six` in the `Neutral` role (no new
+colour role: it would need the user's agreement), `Icon::ScriptSettings`.
 
 ## Performance
 

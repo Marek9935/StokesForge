@@ -96,6 +96,14 @@ pub enum NodeKind {
         /// Text of the note.
         text: String,
     },
+    /// Script Settings: a raw TOML text that scripts read (#548). Opaque
+    /// string at this level; the model never parses it.
+    ScriptSettings {
+        /// Window metadata.
+        meta: WindowMeta,
+        /// Raw TOML text.
+        text: String,
+    },
     /// Node kind from a more recent version of StokesForge, unknown to this
     /// reader (C5, level 2, `guide-de-correction-robustesse.md` §F3): this
     /// node is not shown as a folder, a workbook or one of the
@@ -123,6 +131,7 @@ impl NodeKind {
                 | NodeKind::Graph { .. }
                 | NodeKind::Matrix { .. }
                 | NodeKind::Note { .. }
+                | NodeKind::ScriptSettings { .. }
                 | NodeKind::Unknown(_)
         )
     }
@@ -153,6 +162,7 @@ impl NodeKind {
             | NodeKind::Graph { .. }
             | NodeKind::Matrix { .. }
             | NodeKind::Note { .. }
+            | NodeKind::ScriptSettings { .. }
             | NodeKind::Unknown(_) => &[],
         }
     }
@@ -167,6 +177,7 @@ impl NodeKind {
             NodeKind::Graph { .. } => "graph",
             NodeKind::Matrix { .. } => "matrix",
             NodeKind::Note { .. } => "note",
+            NodeKind::ScriptSettings { .. } => "script settings",
             // Degraded display rather than a panic or a missing rendering
             // (C5, level 2): the user sees "unrecognized kind"
             // instead of a type text invented for content this
@@ -207,6 +218,7 @@ impl NodeKind {
             | NodeKind::Graph { .. }
             | NodeKind::Matrix { .. }
             | NodeKind::Note { .. }
+            | NodeKind::ScriptSettings { .. }
             | NodeKind::Unknown(_) => false,
         }
     }
@@ -228,6 +240,7 @@ impl NodeKind {
             NodeKind::Graph { .. } => "a graph",
             NodeKind::Matrix { .. } => "a matrix",
             NodeKind::Note { .. } => "a note",
+            NodeKind::ScriptSettings { .. } => "a script settings object",
             NodeKind::Unknown(_) => "an unrecognized kind",
         }
     }
@@ -236,13 +249,16 @@ impl NodeKind {
     /// it accepts no child.
     pub(crate) fn allowed_children(&self) -> Option<&'static str> {
         match self {
-            NodeKind::Folder { .. } => Some("folders, workbooks, graphs, matrices and notes"),
+            NodeKind::Folder { .. } => {
+                Some("folders, workbooks, graphs, matrices, notes and script settings")
+            }
             NodeKind::Workbook { .. } => Some("worksheets"),
             NodeKind::Worksheet { .. } => Some("columns"),
             NodeKind::Column(_)
             | NodeKind::Graph { .. }
             | NodeKind::Matrix { .. }
             | NodeKind::Note { .. }
+            | NodeKind::ScriptSettings { .. }
             | NodeKind::Unknown(_) => None,
         }
     }
@@ -257,6 +273,7 @@ impl NodeKind {
             | NodeKind::Graph { .. }
             | NodeKind::Matrix { .. }
             | NodeKind::Note { .. }
+            | NodeKind::ScriptSettings { .. }
             | NodeKind::Unknown(_) => None,
         }
     }
@@ -272,7 +289,8 @@ impl NodeKind {
             NodeKind::Workbook { meta, .. }
             | NodeKind::Graph { meta, .. }
             | NodeKind::Matrix { meta }
-            | NodeKind::Note { meta, .. } => Some(meta),
+            | NodeKind::Note { meta, .. }
+            | NodeKind::ScriptSettings { meta, .. } => Some(meta),
             NodeKind::Folder { .. }
             | NodeKind::Worksheet { .. }
             | NodeKind::Column(_)
@@ -291,6 +309,7 @@ impl NodeKind {
             | NodeKind::Column(_)
             | NodeKind::Matrix { .. }
             | NodeKind::Note { .. }
+            | NodeKind::ScriptSettings { .. }
             | NodeKind::Unknown(_) => None,
         }
     }
@@ -424,6 +443,14 @@ impl Node {
     pub(crate) fn note_text_mut(&mut self) -> Option<&mut String> {
         match &mut self.kind {
             NodeKind::Note { text, .. } => Some(text),
+            _ => None,
+        }
+    }
+
+    /// Mutable script settings text, or `None` if the node is not a Script Settings.
+    pub(crate) fn script_settings_text_mut(&mut self) -> Option<&mut String> {
+        match &mut self.kind {
+            NodeKind::ScriptSettings { text, .. } => Some(text),
             _ => None,
         }
     }

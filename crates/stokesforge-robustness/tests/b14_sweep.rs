@@ -71,6 +71,15 @@ enum Step {
     AddNote {
         name: usize,
     },
+    /// Script Settings (#548): created and edited through commands, so the
+    /// sweep covers its undo, redo and disk round trip.
+    AddScriptSettings {
+        name: usize,
+    },
+    SetScriptSettingsText {
+        which: usize,
+        text: usize,
+    },
     MoveToRoot {
         child: usize,
         index: usize,
@@ -105,6 +114,9 @@ fn step() -> impl Strategy<Value = Step> {
         (0usize..6, 0usize..4).prop_map(|(column, name)| Step::RenameColumn { column, name }),
         (0usize..4).prop_map(|name| Step::AddFolder { name }),
         (0usize..4).prop_map(|name| Step::AddNote { name }),
+        (0usize..4).prop_map(|name| Step::AddScriptSettings { name }),
+        (0usize..4, 0usize..3)
+            .prop_map(|(which, text)| Step::SetScriptSettingsText { which, text }),
         (0usize..5, 0usize..5).prop_map(|(child, index)| Step::MoveToRoot { child, index }),
         (0usize..6, 0usize..3)
             .prop_map(|(column, type_index)| Step::ChangeType { column, type_index }),
@@ -255,6 +267,34 @@ impl World {
                 let root = self.project.root();
                 let _ = self.project.add_note(root, Some(NAMES[*name]), "");
                 None
+            }
+            Step::AddScriptSettings { name } => Some(Command::AddScriptSettings {
+                parent: self.project.root(),
+                name: Some(format!("S{}", NAMES[*name])),
+                text: "a = 1\r\n".to_string(),
+            }),
+            Step::SetScriptSettingsText { which, text } => {
+                let root = self.project.root();
+                let settings: Vec<NodeId> = self
+                    .project
+                    .tree()
+                    .children(root)
+                    .map(<[NodeId]>::to_vec)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|id| {
+                        matches!(
+                            self.project.tree().node(*id).map(|n| n.kind()),
+                            Some(stokesforge_core::NodeKind::ScriptSettings { .. })
+                        )
+                    })
+                    .collect();
+                settings.get(*which % settings.len().max(1)).map(|id| {
+                    Command::SetScriptSettingsText {
+                        id: *id,
+                        text: ["", "é\r\n# c", "[t]\nk = \"v\""][*text].to_string(),
+                    }
+                })
             }
             Step::MoveToRoot { child, index } => {
                 let root = self.project.root();

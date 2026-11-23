@@ -63,6 +63,11 @@ enum KindRecord {
         comment: String,
         text: String,
     },
+    ScriptSettings {
+        label: String,
+        comment: String,
+        text: String,
+    },
 }
 #[derive(Serialize)]
 enum TypeRecord {
@@ -1106,4 +1111,41 @@ fn wrong_style() -> std::collections::BTreeMap<&'static str, rmpv::Value> {
     ]
     .into_iter()
     .collect()
+}
+
+/// #548: the text of a Script Settings object is opaque to the model, so a
+/// hostile one (huge, control characters, NUL, CRLF and lone CR, Unicode,
+/// unpaired-looking marks) reads back byte for byte, not parsed or cut.
+#[test]
+fn b3_hostile_script_settings_text_is_kept_as_written() {
+    let mut text = String::new();
+    text.push_str("\u{0}\u{1}\u{7}\u{1b}[31m\r\n\r\r\n\n");
+    text.push_str("é\u{301}😀\u{202e}\u{feff}\u{2028}[[a]]\n= = =\n");
+    text.push_str(&"x = \"y\" # c\r\n".repeat(60_000));
+    let nodes = vec![
+        folder(1, "R", None, vec![2]),
+        NodeRecord {
+            id: 2,
+            name: "Settings1".into(),
+            parent: Some(1),
+            kind: KindRecord::ScriptSettings {
+                label: String::new(),
+                comment: String::new(),
+                text: text.clone(),
+            },
+        },
+    ];
+    let body = FileBody {
+        root: 1,
+        next_id_hint: 3,
+        nodes,
+    };
+    let dir = TempDir::new().unwrap();
+    let path = write_file(&dir, "settings.stf", &body);
+    let project = stokesforge_persistence::load(&path).expect("hostile text does not fail");
+    let id = project.resolve_path("[Settings1]").expect("settings");
+    match project.tree().node(id).unwrap().kind() {
+        stokesforge_core::NodeKind::ScriptSettings { text: read, .. } => assert!(*read == text),
+        other => panic!("expected script settings, got {other:?}"),
+    }
 }

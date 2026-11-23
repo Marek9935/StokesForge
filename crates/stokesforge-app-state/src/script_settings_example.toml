@@ -1,0 +1,35 @@
+# Settings of the peak-fit script
+title = "Raman, sample A"
+# Folder where the script writes its figures
+output = "results/"
+# Draw the residuals under each fit
+show_residuals = true
+measured = 2026-11-16
+
+[fit]
+# Peak shape used for every peak
+# choices: gauss | lorentz | voigt
+model = "gauss"
+# Maximum number of iterations
+# between 1 and 1000
+iterations = 200
+# Convergence tolerance
+# at least 0
+tolerance = 1e-6
+# Peak centres to start from (cm-1)
+centres = [520.0, 610.0, 735.0]
+# Ranges to leave out of the fit
+exclude = []
+
+[fit.baseline]
+# Polynomial degree of the baseline
+# between 0 and 5
+degree = 2
+
+[[peak]]
+name = "Si"
+centre = 520.0
+
+[[peak]]
+name = "D band"
+centre = 1350.0

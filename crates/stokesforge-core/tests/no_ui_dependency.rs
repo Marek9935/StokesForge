@@ -5,7 +5,9 @@
 //! which forces a conscious decision rather than an import that slips in.
 
 const ALLOWED_DEPENDENCIES: &[&str] = &[
-    "thiserror",      // typed errors, no UI surface
+    "thiserror", // typed errors, no UI surface
+    // lossless TOML reading and editing of a Script Settings text (#548): pure text, no UI
+    "toml_edit",
     "stokesforge-id", // node identity only (NodeId), zero transitive dependencies
     // the PlotSpec that NodeKind::Graph carries (phase R3) — no drawing
     // dependency: cargo tree -p stokesforge-plot still shows only stokesforge-id

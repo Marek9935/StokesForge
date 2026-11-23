@@ -10,6 +10,8 @@ workspace = true
 
 [dependencies]
 thiserror = "2"
+# Lossless TOML editing for Script Settings (#548); already in the lockfile (typst, toml 0.8).
+toml_edit = "0.22"
 stokesforge-id = { path = "../stokesforge-id" }
 stokesforge-analysis = { path = "../stokesforge-analysis" }
 stokesforge-plot = { path = "../stokesforge-plot" }
