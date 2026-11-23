@@ -304,6 +304,8 @@ fn number_field_core<T: Number>(
         let button = ui
             .interact(arrow, list_id.with("arrow"), egui::Sense::click())
             .on_hover_text(tr!("number-presets"));
+        // The arrow is a button, not text (#553).
+        crate::app::cursors::button_in_field(&button);
         list_frame::paint_arrow(ui, arrow, &button);
         if button.clicked() {
             presets.open = !presets.open;
@@ -486,31 +488,35 @@ fn preset_popup_contents(
         .max_height(180.0)
         .show(ui, |ui| {
             ui.set_min_width(FIELD_WIDTH);
-            if offset == 1
-                && ui
-                    .selectable_label(highlighted == 0, tr!("common-auto"))
-                    .clicked()
-            {
-                picked = Some(None);
-            }
-            for (index, preset) in quantity.presets.iter().enumerate() {
-                let index = index + offset;
-                let entry = ui.selectable_label(
-                    index == highlighted,
-                    format_value(*preset, quantity.decimals),
-                );
-                if entry.clicked() {
-                    picked = Some(Some(*preset));
-                }
-                if index == highlighted
-                    && ui.input(|input| {
-                        input.key_pressed(egui::Key::ArrowDown)
-                            || input.key_pressed(egui::Key::ArrowUp)
-                    })
+            // Each row spans the whole list, like egui's `ComboBox` (the font
+            // list), not only its number (#553).
+            ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
+                if offset == 1
+                    && ui
+                        .selectable_label(highlighted == 0, tr!("common-auto"))
+                        .clicked()
                 {
-                    entry.scroll_to_me(None);
+                    picked = Some(None);
                 }
-            }
+                for (index, preset) in quantity.presets.iter().enumerate() {
+                    let index = index + offset;
+                    let entry = ui.selectable_label(
+                        index == highlighted,
+                        format_value(*preset, quantity.decimals),
+                    );
+                    if entry.clicked() {
+                        picked = Some(Some(*preset));
+                    }
+                    if index == highlighted
+                        && ui.input(|input| {
+                            input.key_pressed(egui::Key::ArrowDown)
+                                || input.key_pressed(egui::Key::ArrowUp)
+                        })
+                    {
+                        entry.scroll_to_me(None);
+                    }
+                }
+            });
         });
     picked
 }
@@ -1073,6 +1079,40 @@ mod tests {
     }
 
     #[test]
+    fn a_click_right_of_the_number_in_the_list_picks_it() {
+        let mut bench = Bench::new(1.4, quantities::LINE_WIDTH);
+        bench.focus_field();
+        bench.image(
+            vec![key_event_with(egui::Key::ArrowDown, egui::Modifiers::ALT)],
+            false,
+        );
+        let (output, _) = bench.image(Vec::new(), false);
+        let row = output
+            .shapes
+            .iter()
+            .find_map(|painted| match &painted.shape {
+                egui::Shape::Text(text) if text.galley.job.text == "3" => {
+                    Some(text.visual_bounding_rect())
+                }
+                _ => None,
+            })
+            .expect("preset 3 in the open list");
+        // Well past the number, still inside the list (#553).
+        let pos = egui::pos2(row.left() + 0.6 * FIELD_WIDTH, row.center().y);
+        let press = |pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        bench.image(vec![egui::Event::PointerMoved(pos)], false);
+        bench.image(vec![press(true)], false);
+        let (_, changed) = bench.image(vec![press(false)], false);
+        assert!(changed);
+        assert_eq!(bench.value, 3.0);
+    }
+
+    #[test]
     fn a_quantity_without_presets_opens_no_list() {
         let mut bench = Bench::new(2.0, quantities::FREE);
         bench.focus_field();
@@ -1174,6 +1214,23 @@ mod tests {
             });
         let arrow = arrow.expect("filled triangle");
         assert!(field.contains_rect(arrow), "{arrow:?} outside {field:?}");
+    }
+
+    #[test]
+    fn the_arrow_shows_the_default_pointer_and_the_typing_area_the_text_cursor() {
+        let mut bench = Bench::new(2.0, quantities::LINE_WIDTH);
+        bench.image(Vec::new(), false);
+        let field = bench.field.expect("rect of the field");
+        let arrow = list_frame::arrow_rect(field);
+        // Two frames per position: egui resolves the hover from the previous one.
+        let mut cursor_at = |pos: egui::Pos2| {
+            bench.image(vec![egui::Event::PointerMoved(pos)], false);
+            let (output, _) = bench.image(Vec::new(), false);
+            output.platform_output.cursor_icon
+        };
+        assert_eq!(cursor_at(arrow.center()), egui::CursorIcon::Default);
+        let typing = egui::pos2(field.left() + 4.0, field.center().y);
+        assert_eq!(cursor_at(typing), egui::CursorIcon::Text);
     }
 
     #[test]

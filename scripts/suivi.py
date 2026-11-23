@@ -2965,14 +2965,16 @@ def job_verdict(name, jobs):
 
 
 def github_jobs(tag, sha):
-    """(found, jobs) of the CI run of the tag's own commit; a run of another sha is ignored."""
+    """(found, jobs, open) of the CI run of the tag's own commit; a run of another sha is ignored.
+    `open` is True while that run is not completed (GitHub lists a `needs:` job only once queued)."""
     base = os.environ.get("SF_SUIVI_TAGJOBS_API", TAGJOBS_API)
     runs = http_json("%s/runs?event=push&branch=%s&per_page=30" % (base, tag)).get("workflow_runs") or []
     runs = [r for r in runs if r.get("head_sha") == sha and r.get("name", "CI") == "CI"]
     if not runs:
-        return False, []
+        return False, [], False
     run = max(runs, key=lambda r: (str(r.get("created_at", "")), r.get("id", 0)))
-    return True, http_json("%s/runs/%s/jobs?per_page=100&filter=latest" % (base, run["id"])).get("jobs") or []
+    jobs = http_json("%s/runs/%s/jobs?per_page=100&filter=latest" % (base, run["id"])).get("jobs") or []
+    return True, jobs, run.get("status") != "completed"
 
 
 def pages_verdict(tag, sha):
@@ -3201,19 +3203,23 @@ def tag_report(tag, sha, d, now, dry, lines, force=False):
     cap = float(os.environ.get("SF_SUIVI_TAG_CAP", str(6 * 3600)))
     expired = force or now - first > cap
     try:
-        ran, jobs = github_jobs(tag, sha)
+        ran, jobs, run_open = github_jobs(tag, sha)
         unreadable = None
     except LabelFail as e:
-        ran, jobs, unreadable = False, [], str(e)
+        ran, jobs, run_open, unreadable = False, [], False, str(e)
     wanted = {n: wanted_jobs(n, declared, kind) for n in todo}
     need_pages = any("pages" in w for w in wanted.values())
     pages = pages_verdict(tag, sha) if need_pages and not unreadable else "missing"
     res = {}
     for n in todo:
         res[n] = [(j, pages if j == "pages" else (job_verdict(j, jobs) if ran else "missing")) for j in wanted[n]]
-    undecided = unreadable or not ran or any(v == "pending" for r in res.values() for _, v in r)
+    pending = any(v == "pending" for r in res.values() for _, v in r)
+    # A job GitHub does not list yet (a `needs:` job is listed once queued) is not proof while the run is open.
+    not_started = run_open and any(v == "missing" for r in res.values() for j, v in r if j != "pages")
+    undecided = unreadable or not ran or pending or not_started
     if undecided and not expired:
-        lines.append("%s: not decided yet (%s); retry later" % (tag, unreadable or ("no run for this commit" if not ran else "job running")))
+        why = unreadable or ("no run for this commit" if not ran else "job running" if pending else "job not started yet")
+        lines.append("%s: not decided yet (%s); retry later" % (tag, why))
         return False
     # The registry is read BEFORE any comment: once `comment` is set the issue leaves `todo`, so a later
     # failure would lose the card. An unreadable registry retries at the next poll, like GitHub, until

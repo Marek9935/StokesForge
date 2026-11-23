@@ -32,6 +32,14 @@ pub(super) fn grab_handle(response: egui::Response) -> egui::Response {
     response
 }
 
+/// The arrow on a button drawn inside a text field (#553): the field set the
+/// text cursor over its whole frame; called after it, the last setting wins.
+pub(crate) fn button_in_field(response: &egui::Response) {
+    if response.hovered() {
+        response.ctx.set_cursor_icon(egui::CursorIcon::Default);
+    }
+}
+
 /// The finger on a clickable element that is not a button.
 pub(super) fn clickable(response: egui::Response) -> egui::Response {
     response.on_hover_cursor(egui::CursorIcon::PointingHand)

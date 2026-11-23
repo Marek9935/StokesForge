@@ -126,6 +126,10 @@ Each line is observed by a command or a page; none is declared
    with the results of the jobs it names (read from GitHub, `pages` from the GitLab
    pipeline) and, if none failed, a card in « En attente » of the tracking page;
    OK on the card closes the issue and drops the label, Retour keeps it open. A
+   job not listed yet while the CI run is still going delays the report (6 h at
+   most); once the run is finished a missing job is final. `tag-check --card N`
+   only shows a sample card with the jobs green and does not read them
+   (`--dry-run` does). A
    failed job gives the comment only and the label stays. **Still by hand**: the
    tag itself (the user's order), reading `scripts/ci-status.sh` for the release
    jobs, the check of what a card says to look at, and any issue whose label was
