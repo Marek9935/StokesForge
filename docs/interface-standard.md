@@ -81,7 +81,7 @@ mechanics.
 | S-F5 | `confirmation-clavier` | Enter and Esc = Cancel, default button framed on Cancel; exception: Enter = Save in the trio. |
 | S-F6 | `ordre-des-boutons` | Dialog: secondary buttons, Cancel, primary on the right; wizard: Cancel on the left, Back · Next · Finish on the right. |
 | S-F7 | `niveaux-d-echap` | Esc first closes an open list, then gives the field its value back, then does the dialog Cancel. |
-| S-F8 | `geometrie-memorisee` | Size and position of a dialog are remembered per kind of dialog, in the preferences. |
+| S-F8 | `geometrie-memorisee` | Size and position of a big dialog are remembered per kind of dialog, in the preferences. A small question or alert dialog (confirmation, save, choice, alert, small read-only window) keeps the size but always opens centred on the whole window, whatever its remembered position (#562); dragged while open, it stays where dropped. |
 | S-F9 | `focus-initial` | The first input field has the focus on opening. |
 | S-F10 | `bouton-principal-grise` | A disabled primary button states its reason in the footer and in a tooltip. |
 | S-F11 | `nature-de-fenetre` | A modal window has a nature (`DialogNature`) that sets its footer, its default size (Small 480 x 170, Medium 480 x 420, Large 640 x 500), its initial focus and its default button; a free size is allowed only with a justification, for an interactive window (settings, live settings with Close only like Preferences, draft, wizard). |
@@ -528,7 +528,8 @@ History: #225, #230 (status bar), #228 (S-M7), #229 (S-M8).
   the first Esc gives the field its value back, the next does the dialog
   Cancel.
 - **Size and position** (S-F8) remembered per kind of dialog, in the
-  preferences (outside `.stf`).
+  preferences (outside `.stf`); a small question or alert dialog keeps only
+  its size and opens centred on the whole window (#562).
 - **Focus** (S-F9): the first input field has it on opening.
 - **Disabled primary button** (S-F10 → S-R14): reason in the footer and in a tooltip;
   a displayed error comes first, the reason comes back when it disappears.
@@ -591,7 +592,9 @@ How it is held (`app/dialogs.rs`, all through the same `modal_frame` body):
 - **Size and position** (S-F8): on closing, `sync_dialogs` returns
   `Action::RememberDialogGeometry` (kind = dialog identifier),
   `preferences.json` › `dialogs`, 32 kinds at most; restored on opening,
-  brought back into the screen.
+  brought back into the screen; a small question or alert dialog
+  (`DialogNature::opens_centred`) restores only its size and opens centred on
+  the whole window (`content_rect`), x and y being saved but ignored (#562).
 - **Focus** (S-F9): an invisible anchor at the head of the content takes the focus on
   opening, then the focus advances by one widget per pass up to the first
   text field, all the passes in the same frame (`request_discard`, nothing

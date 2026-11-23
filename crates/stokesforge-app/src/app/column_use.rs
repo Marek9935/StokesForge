@@ -10,6 +10,7 @@ use eframe::egui;
 
 use super::dialogs::{
     modal_dialog_with, modal_read_only_with, DialogFooter, DialogNature, DialogOutcome, PlainSize,
+    SizeClass,
 };
 use stokesforge_app_state::state::{Action, AppState, FullColumnsCopy};
 use stokesforge_app_state::tr;
@@ -24,7 +25,7 @@ pub(super) fn column_use_window(ctx: &egui::Context, state: &AppState, actions: 
         ctx,
         egui::Id::new("stokesforge_column_use"),
         &tr!("column-use-title"),
-        PlainSize::Content(egui::vec2(480.0, 170.0)),
+        PlainSize::Class(SizeClass::Small),
         |ui| {
             if ui
                 .button(tr!("dialog-undo"))

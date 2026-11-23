@@ -6,7 +6,7 @@
 
 use eframe::egui;
 
-use super::dialogs::{modal_read_only, DialogOutcome, PlainSize};
+use super::dialogs::{modal_read_only, DialogOutcome, PlainSize, SizeClass};
 use super::empty_state::empty_state;
 use super::menus::status_line_text;
 use stokesforge_app_state::state::{Action, AppState, StatusMessage};
@@ -93,7 +93,7 @@ pub(super) fn low_r2_list_window(ctx: &egui::Context, state: &AppState, actions:
         ctx,
         egui::Id::new("stokesforge_low_r2_list"),
         &tr!("alert-low-r2-title"),
-        PlainSize::Content(egui::vec2(480.0, 170.0)),
+        PlainSize::Class(SizeClass::Small),
         |ui| {
             // Normal text: the counters are the content, not a detail (#290).
             ui.label(state.low_r2_list_text());

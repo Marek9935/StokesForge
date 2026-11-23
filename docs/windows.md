@@ -20,7 +20,8 @@ Maintenance rules:
 
 The code is authoritative: the sizes below are the **default** sizes
 passed to the building block; the size and position used afterwards are those
-the user left (S-F8, see below). Two guards hold this
+the user left (S-F8, see below); a small question or alert dialog always opens
+centred on the whole window and keeps only its size (#562). Two guards hold this
 page (S-F11): `the_window_catalog_and_the_code_agree` (every
 `stokesforge_…` identifier passed to a `modal_*` appears here, and every row has its
 call; **it does not read the sizes**) and `no_free_size_without_justification`.
@@ -115,11 +116,11 @@ They are always painted by the root, whatever window the gesture came from
 | Formula Functions | `ReadOnly` | content 900 x 560 (wide: each description on one to three lines) | the functions of an `F(x)=` formula, one family at a time (#402): families as fixed vertical tabs at the left (`TabStripSide::Left`, S-L9), at the right a scrolling table Function · Example · What it does; the intro line on top; state (open, chosen family) in `AppState` | the "?" of the `F(x)=` cell while it is edited (`Action::OpenFormulaFunctions`) | `stokesforge_formula_functions`, `formula_functions_window.rs` |
 | About | `ReadOnly` | content 360 x 140, 360 x 252 with the logo | the logo (96 pt, centred, only in an official build, #388), version, license, project page link, Copy button (version, system and architecture line for bug reports) | Help > About StokesForge (`Action::OpenAbout`) | `stokesforge_about`, `about_window.rs` |
 | Status bar history | `ReadOnly` | content 520 x 360 | the last 50 messages, empty state if none | click on the status line (`Action::OpenStatusHistory`) | `stokesforge_status_history`, `status_history.rs` |
-| List of low R² | `ReadOnly` | content 480 x 170 | counters by type, normal text | status bar badge (`Action::OpenLowR2List`) | `stokesforge_low_r2_list`, `status_history.rs` |
+| List of low R² | `ReadOnly` | Small (480 x 170) | counters by type, normal text | status bar badge (`Action::OpenLowR2List`) | `stokesforge_low_r2_list`, `status_history.rs` |
 | Column metadata | `ReadOnly` | Medium | scrolling key / value grid, "Use as x'" button per numeric row | click on the metadata cell of a column header, when it is not empty (`Action::ViewColumnMetadata`) | `stokesforge_column_metadata`, `plot_settings.rs` |
 | Deleting a calculation | `Choice` | Small | Delete, Delete with Columns, Cancel | deleting a calculation (`Action::RequestDeleteCalculation`, results panel or analysis menu) | `stokesforge_delete_calculation`, `analysis_dialog.rs` |
 | Export of stale series | `Choice` | content 560 x 170 | Export Anyway, Export Without Warning, Recalculate and Export, Cancel (four long labels: wider than Small) | export or copy of a graph that shows an out-of-date calculation | `stokesforge_stale_export`, `stale_export.rs` |
-| Column used by a calculation | `ReadOnly` | content 480 x 170 | Undo, Close; the list of formula columns and calculations that read what was just deleted | deleting columns, a sheet or a workbook read by a calculation (#306), after the gesture | `stokesforge_column_use`, `column_use.rs` |
+| Column used by a calculation | `ReadOnly` | Small (480 x 170) | Undo, Close; the list of formula columns and calculations that read what was just deleted | deleting columns, a sheet or a workbook read by a calculation (#306), after the gesture | `stokesforge_column_use`, `column_use.rs` |
 | Copy with header of formula columns | `Choice` | Small | Values, Formulas (default), Cancel | Ctrl+Shift+C or Copy with Header when a copied column carries a formula (#306) | `stokesforge_full_copy`, `column_use.rs` |
 | Project recovery | `ReadOnly` | content 560 x 230 | one row per backup copy (name or Untitled, UTC date) with Open, Ignore, Delete; introduction message; scrolling list | at startup, if copies from vanished processes remain that are newer than their `.stf` (`AppState::scan_recovery`, #317); closes by itself when the list is empty | `stokesforge_recovery`, `recovery.rs` |
 | Replacing a shared analysis | `Confirm` | Small | a message | applying an analysis whose source feeds other curves | `stokesforge_replace_analysis`, `analysis_dialog.rs` |
@@ -309,7 +310,10 @@ None of this is rewritten in a new window (S-F7 to S-F9, details in the
 standard):
 
 - the size and position are remembered **per identifier** of dialog
-  (dialog key = `egui::Id`), in the preferences, 32 kinds at most;
+  (dialog key = `egui::Id`), in the preferences, 32 kinds at most; a small
+  question or alert dialog (`DialogNature::opens_centred`: confirmation, save,
+  choice, alert, read-only of class Small) ignores the remembered position and
+  opens centred on the whole window;
   give a new window a stable and unique identifier `stokesforge_<nom>`;
 - Esc: a text field then the dialog; the cross is the same as Cancel. While a
   modal is shown, no workspace keyboard (grid, Project Manager) acts: they test

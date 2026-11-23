@@ -30,7 +30,9 @@
 //! - **Escape** (S-F7): the one that leaves a text field does not close the
 //!   dialog, the next one does Cancel;
 //! - **size and position** remembered per kind of dialog (S-F8), in the
-//!   preferences: restored on opening, handed back on closing by
+//!   preferences: restored on opening (a small question or alert dialog,
+//!   [`DialogNature::opens_centred`], restores only its size and always opens
+//!   centred on the whole window, #562), handed back on closing by
 //!   [`sync_dialogs`] (`Action::RememberDialogGeometry`). The kind is drawn
 //!   from the dialog's identifier;
 //! - **confirmations** (#229, S-F4, S-F5 → S-R4, S-R5): [`modal_confirm`] — Cancel
@@ -106,7 +108,8 @@ struct DialogGeometry {
 
 /// The three **size classes** of a dialog (S-F11): the default size is not
 /// invented, it fits into one of them. The size the user left (S-F8) then
-/// takes precedence.
+/// takes precedence. A `Small` dialog also always opens centred on the whole
+/// window (#562, [`DialogNature::opens_centred`]): only its size is remembered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SizeClass {
     /// 480 x 170: a question, a message, a few buttons.
@@ -269,6 +272,18 @@ impl DialogNature {
             | Self::Confirm(size)
             | Self::SaveChanges(size)
             | Self::Alert(size) => size.resolve(default),
+        }
+    }
+
+    /// Does the dialog open centred on the whole window (#562)? True for the
+    /// small question and alert dialogs: whatever position was remembered, they
+    /// open in the middle of `content_rect`; the remembered size still applies
+    /// (S-F8). Big dialogs keep their remembered position and size.
+    pub(super) fn opens_centred(self) -> bool {
+        match self {
+            Self::Choice(_) | Self::Confirm(_) | Self::SaveChanges(_) | Self::Alert(_) => true,
+            Self::ReadOnly(size) => size == PlainSize::Class(SizeClass::Small),
+            Self::Settings(_) | Self::Draft(_) | Self::LiveSettings(_) | Self::Wizard(_) => false,
         }
     }
 
@@ -922,6 +937,11 @@ fn modal_frame(
     let wanted = geometry.size.max(MIN_CONTENT_WINDOW_SIZE);
     geometry.clamped |= wanted.x > screen.width() || wanted.y > screen.height();
     geometry.size = wanted.min(screen.size());
+    if just_opened && nature.opens_centred() {
+        // #562: a small dialog always opens in the middle of the whole window;
+        // only its size is remembered. Dragged while open, it stays where dropped.
+        geometry.pos = screen.center() - geometry.size / 2.0;
+    }
     let size_before = geometry.size;
     geometry.pos = geometry
         .pos
@@ -1619,6 +1639,215 @@ mod tests {
             .expect("open");
         assert_eq!(opened.pos, egui::pos2(40.0, 50.0));
         assert_eq!(opened.size, egui::vec2(420.0, 260.0));
+    }
+
+    /// One frame of a bare `modal_frame` of `nature` in a window of `window`.
+    fn natured_frame(
+        context: &egui::Context,
+        id: egui::Id,
+        nature: DialogNature,
+        window: egui::Vec2,
+        events: Vec<egui::Event>,
+    ) -> FrameOutcome {
+        let mut outcome = FrameOutcome::Open;
+        frame_of(context, window, events, |ui| {
+            outcome = modal_frame(
+                ui.ctx(),
+                id,
+                "Title",
+                nature,
+                DialogFooter::always("OK", ""),
+                |_| {},
+                |ui| {
+                    ui.label("content");
+                },
+            );
+        });
+        outcome
+    }
+
+    fn remember(context: &egui::Context, id: egui::Id, saved: SavedGeometry) {
+        context.data_mut(|data| {
+            data.insert_temp(
+                remembered_id(),
+                RememberedGeometries(BTreeMap::from([(dialog_kind(id), saved)])),
+            );
+        });
+    }
+
+    fn open_geometry(context: &egui::Context, id: egui::Id) -> DialogGeometry {
+        context
+            .data(|data| data.get_temp::<DialogGeometry>(id.with("geometry")))
+            .expect("open dialog")
+    }
+
+    fn centre_of(geometry: DialogGeometry) -> egui::Pos2 {
+        geometry.pos + geometry.size / 2.0
+    }
+
+    fn small_save() -> DialogNature {
+        DialogNature::SaveChanges(PlainSize::Class(SizeClass::Small))
+    }
+
+    /// #562: a small dialog opens centred on the whole window whatever its
+    /// remembered position, and keeps its remembered size.
+    #[test]
+    fn a_small_dialog_opens_centred_with_its_remembered_size() {
+        let context = egui::Context::default();
+        let id = egui::Id::new("stokesforge_unsaved_test");
+        remember(
+            &context,
+            id,
+            SavedGeometry {
+                x: 40.0,
+                y: 50.0,
+                width: 420.0,
+                height: 200.0,
+            },
+        );
+        natured_frame(
+            &context,
+            id,
+            small_save(),
+            egui::vec2(1600.0, 1000.0),
+            Vec::new(),
+        );
+        let geometry = open_geometry(&context, id);
+        assert_eq!(centre_of(geometry), egui::pos2(800.0, 500.0));
+        assert_eq!(geometry.size, egui::vec2(420.0, 200.0));
+    }
+
+    /// #562, the issue's case: open small, close, reopen in a bigger window.
+    #[test]
+    fn a_small_dialog_reopened_in_a_bigger_window_is_centred_there() {
+        let context = egui::Context::default();
+        let id = egui::Id::new("stokesforge_unsaved_test");
+        natured_frame(
+            &context,
+            id,
+            small_save(),
+            egui::vec2(800.0, 600.0),
+            Vec::new(),
+        );
+        assert_eq!(
+            centre_of(open_geometry(&context, id)),
+            egui::pos2(400.0, 300.0)
+        );
+        let outcome = natured_frame(
+            &context,
+            id,
+            small_save(),
+            egui::vec2(800.0, 600.0),
+            vec![key(egui::Key::Escape)],
+        );
+        assert_eq!(outcome, FrameOutcome::Cancel);
+        natured_frame(
+            &context,
+            id,
+            small_save(),
+            egui::vec2(1600.0, 1000.0),
+            Vec::new(),
+        );
+        assert_eq!(
+            centre_of(open_geometry(&context, id)),
+            egui::pos2(800.0, 500.0)
+        );
+    }
+
+    /// #562: dragged while open, the dialog stays where it was dropped.
+    #[test]
+    fn a_small_dialog_dragged_while_open_stays_where_dropped() {
+        let context = egui::Context::default();
+        let id = egui::Id::new("stokesforge_unsaved_test");
+        let window = egui::vec2(1600.0, 1000.0);
+        natured_frame(&context, id, small_save(), window, Vec::new());
+        let mut moved = open_geometry(&context, id);
+        moved.pos = egui::pos2(100.0, 120.0);
+        context.data_mut(|data| data.insert_temp(id.with("geometry"), moved));
+        natured_frame(&context, id, small_save(), window, Vec::new());
+        assert_eq!(open_geometry(&context, id).pos, egui::pos2(100.0, 120.0));
+    }
+
+    /// #562: which natures open centred and which keep their remembered position.
+    #[test]
+    fn only_small_question_and_alert_dialogs_open_centred() {
+        let small = PlainSize::Class(SizeClass::Small);
+        let free = InteractiveSize::Free(egui::vec2(420.0, 200.0));
+        let cases = [
+            ("confirm", DialogNature::Confirm(small), true),
+            ("choice", DialogNature::Choice(small), true),
+            ("alert", DialogNature::Alert(small), true),
+            ("save", DialogNature::SaveChanges(small), true),
+            ("read_small", DialogNature::ReadOnly(small), true),
+            ("settings", DialogNature::Settings(free), false),
+            ("draft", DialogNature::Draft(free), false),
+            ("live", DialogNature::LiveSettings(free), false),
+            ("wizard", DialogNature::Wizard(free), false),
+            (
+                "read_big",
+                DialogNature::ReadOnly(PlainSize::Content(egui::vec2(520.0, 360.0))),
+                false,
+            ),
+        ];
+        for (name, nature, centred) in cases {
+            let context = egui::Context::default();
+            let id = egui::Id::new(("nature_case", name));
+            remember(
+                &context,
+                id,
+                SavedGeometry {
+                    x: 40.0,
+                    y: 50.0,
+                    width: 420.0,
+                    height: 200.0,
+                },
+            );
+            natured_frame(&context, id, nature, egui::vec2(1600.0, 1000.0), Vec::new());
+            let geometry = open_geometry(&context, id);
+            if centred {
+                assert_eq!(centre_of(geometry), egui::pos2(800.0, 500.0), "{name}");
+            } else {
+                assert_eq!(geometry.pos, egui::pos2(40.0, 50.0), "{name}");
+            }
+            assert_eq!(nature.opens_centred(), centred, "{name}");
+        }
+    }
+
+    /// #562: a small dialog still hands back its size when it closes.
+    #[test]
+    fn a_closed_small_dialog_still_hands_back_its_size() {
+        let context = egui::Context::default();
+        let id = egui::Id::new("stokesforge_unsaved_test");
+        remember(
+            &context,
+            id,
+            SavedGeometry {
+                x: 40.0,
+                y: 50.0,
+                width: 420.0,
+                height: 200.0,
+            },
+        );
+        natured_frame(
+            &context,
+            id,
+            small_save(),
+            egui::vec2(1600.0, 1000.0),
+            Vec::new(),
+        );
+        natured_frame(
+            &context,
+            id,
+            small_save(),
+            egui::vec2(1600.0, 1000.0),
+            vec![key(egui::Key::Escape)],
+        );
+        let closed = context
+            .data(|data| data.get_temp::<ClosedGeometries>(closed_id()))
+            .unwrap_or_default()
+            .0;
+        assert_eq!(closed.len(), 1);
+        assert_eq!((closed[0].1.width, closed[0].1.height), (420.0, 200.0));
     }
 
     /// A confirmation (#229): one frame with `events`; returns the outcome and
