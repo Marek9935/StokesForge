@@ -3167,12 +3167,17 @@ fn grid_keyboard(
     // dialogs, took the Esc that closes them. `dialogs::modal_shown` (a modal
     // painted this frame or the previous one) closes this hole for all of them;
     // the one-frame lag after a close is intended.
+    //
+    // #548: same theft for a text field of a content window painted after this
+    // grid (Script Settings): the Esc that gives the field back must reach it,
+    // so a field that had the keyboard a frame ago (S-F7) blocks the grid too.
     if state.editing().is_none()
         && state.header_editing().is_none()
         && state.import_state().is_none()
         && focus_free
         && !super::dialogs::modal_shown(ui.ctx())
         && !super::project_manager::has_focus(ui.ctx())
+        && !super::page_layout::field_had_focus(ui.ctx())
     {
         // #143: F2 belongs only to the focused grid. The other shortcuts keep their
         // fallback without focus, but F2 must stay available for the managers. Reuse
@@ -5891,6 +5896,20 @@ mod tests {
         bench.image(Vec::new());
         bench.press_key(egui::Key::Escape, egui::Modifiers::NONE);
         assert!(bench.state.selection(bench.sheet).is_none());
+    }
+
+    /// #548: the Esc that gives a text field of a content window back (Script
+    /// Settings, painted after the grid) is not the Esc that lifts the selection.
+    /// Witness: remove `field_had_focus` from the grid guard.
+    #[test]
+    fn escape_that_gives_a_field_back_keeps_the_selection() {
+        let mut bench = Bench::new();
+        bench.click_on("101");
+        bench.image(Vec::new());
+        let id = super::super::page_layout::field_focus_id(&bench.context);
+        bench.context.data_mut(|data| data.insert_temp(id, true));
+        bench.press_key(egui::Key::Escape, egui::Modifiers::NONE);
+        assert!(bench.state.selection(bench.sheet).is_some());
     }
 
     #[test]

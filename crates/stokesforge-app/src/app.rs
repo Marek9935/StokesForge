@@ -207,6 +207,7 @@ mod save_theme_window;
 mod script_console;
 mod server;
 mod server_stats;
+mod settings_contents;
 pub(crate) mod shortcuts;
 mod stale_export;
 mod state_toggle;
@@ -655,7 +656,7 @@ impl StokesForgeApp {
         match tab {
             Tab::Graph(graph) => self.detached_graphs.contains_key(&graph),
             Tab::Book(book) => self.detached_books.contains_key(&book),
-            Tab::Matrix(_) | Tab::Note(_) => false,
+            Tab::Matrix(_) | Tab::Note(_) | Tab::ScriptSettings(_) => false,
         }
     }
 
@@ -690,7 +691,7 @@ impl StokesForgeApp {
         let removed = match tab {
             Tab::Graph(graph) => self.release_graph_window(graph).is_some(),
             Tab::Book(book) => self.release_book_window(book).is_some(),
-            Tab::Matrix(_) | Tab::Note(_) => false,
+            Tab::Matrix(_) | Tab::Note(_) | Tab::ScriptSettings(_) => false,
         };
         if removed {
             ctx.send_viewport_cmd_to(
@@ -937,6 +938,16 @@ impl StokesForgeApp {
                 }
             }
             PickRequest::AddImportFiles => self.state.add_import_paths(paths),
+            PickRequest::ImportScriptSettings => {
+                if let Some(path) = first {
+                    actions.push(Action::ImportScriptSettings { path });
+                }
+            }
+            PickRequest::ExportScriptSettings { settings, .. } => {
+                if let Some(path) = first {
+                    actions.push(Action::ExportScriptSettings { settings, path });
+                }
+            }
             PickRequest::ChooseDefaultFolder { kind } => {
                 if let Some(path) = first {
                     self.state.apply_default_folder_pick(kind, &path);
@@ -1352,6 +1363,9 @@ impl StokesForgeApp {
         }
         for book in self.state.take_books_to_open() {
             self.open_tab(Tab::Book(book));
+        }
+        for settings in self.state.take_settings_to_open() {
+            self.open_tab(Tab::ScriptSettings(settings));
         }
         if !self.server_running() && self.state.import_progress().is_some() {
             // Ids left by an earlier gesture were opened by it already.

@@ -16,6 +16,7 @@ use stokesforge_app_state::state::{Action, AppState};
 use stokesforge_app_state::tr;
 
 use super::graph_window::graph_drop_target;
+use super::settings_contents::settings_contents;
 use super::tab::Tab;
 use super::workbook::book_contents;
 
@@ -38,6 +39,7 @@ pub(super) fn tab_contents(
         Tab::Graph(id) => graph_drop_target(ui, state, actions, graph_views, id),
         Tab::Matrix(id) => matrix_contents(ui, state.tree(), id),
         Tab::Note(id) => note_contents(ui, state, actions, id),
+        Tab::ScriptSettings(id) => settings_contents(ui, state, id),
     }
 }
 

@@ -1968,6 +1968,106 @@ pub mod io {
     }
 }
 
+/// Errors of the Script Settings text (`stokesforge_core::script_settings`,
+/// #548). The parser's reason is a `detail`, taken as is in English.
+pub mod settings {
+    use stokesforge_core::script_settings::{EditError, ParseError};
+
+    use crate::tr;
+
+    /// "Line 12: ..." for a text that is not exact TOML.
+    pub fn parse_error_message(error: &ParseError) -> String {
+        tr!(
+            "error-settings-syntax",
+            line = error.line,
+            // The parser may answer on several lines: one line for the status bar.
+            detail = error
+                .message
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
+    }
+
+    /// The sentence of an [`EditError`].
+    pub fn error_message(error: &EditError) -> String {
+        match error {
+            EditError::Parse(parse) => parse_error_message(parse),
+            EditError::TooLarge(_) => tr!("error-settings-too-large"),
+            EditError::NotFound(key) => tr!("error-settings-not-found", key = key.as_str()),
+            EditError::TypeMismatch {
+                key,
+                expected,
+                found,
+            } => tr!(
+                "error-settings-type-mismatch",
+                key = key.as_str(),
+                expected = expected.to_string(),
+                found = found.to_string()
+            ),
+            EditError::NotAnArray(key) => tr!("error-settings-not-a-list", key = key.as_str()),
+            EditError::NoSuchElement(key) => tr!("error-settings-no-element", key = key.as_str()),
+            EditError::EmptyArray(key) => tr!("error-settings-empty-list", key = key.as_str()),
+            EditError::BadDate(key) => tr!("error-settings-bad-date", key = key.as_str()),
+            EditError::Unsupported(key) => tr!("error-settings-unsupported", key = key.as_str()),
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::errors::tests_support::check;
+
+        #[test]
+        fn every_variant_has_its_sentence() {
+            let parse = ParseError {
+                line: 3,
+                column: 5,
+                message: "invalid string".to_string(),
+            };
+            let errors = [
+                EditError::Parse(parse),
+                EditError::TooLarge(5_000_000),
+                EditError::NotFound("fit.model".into()),
+                EditError::TypeMismatch {
+                    key: "fit.model".into(),
+                    expected: "string",
+                    found: "integer",
+                },
+                EditError::NotAnArray("fit.model".into()),
+                EditError::NoSuchElement("fit.centres".into()),
+                EditError::EmptyArray("fit.exclude".into()),
+                EditError::BadDate("measured".into()),
+                EditError::Unsupported("fit.mixed".into()),
+            ];
+            for error in &errors {
+                // A new variant must be listed here: no `_` arm.
+                match error {
+                    EditError::Parse(_)
+                    | EditError::TooLarge(_)
+                    | EditError::NotFound(_)
+                    | EditError::TypeMismatch { .. }
+                    | EditError::NotAnArray(_)
+                    | EditError::NoSuchElement(_)
+                    | EditError::EmptyArray(_)
+                    | EditError::BadDate(_)
+                    | EditError::Unsupported(_) => {}
+                }
+                let sentence = error_message(error);
+                check(error, &sentence);
+                assert!(!sentence.contains("error-settings"), "{sentence}");
+            }
+            let line = error_message(&errors[0]);
+            assert!(
+                line.contains('3') && line.contains("invalid string"),
+                "{line}"
+            );
+        }
+    }
+}
+
 /// Why the library of themes refused a change (#541).
 pub mod theme {
     use crate::tr;

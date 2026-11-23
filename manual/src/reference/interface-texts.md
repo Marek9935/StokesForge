@@ -20,6 +20,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Above | Au-dessus |
 | Add Folder | Ajouter un dossier |
 | Add Graph | Ajouter un graphique |
+| Add Script Settings | Ajouter des réglages de script |
 | Add Text | Ajouter un texte |
 | Add Workbook | Ajouter un classeur |
 | Advanced | Avancé |
@@ -69,7 +70,9 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Export | Exporter |
 | Export Graph | Exporter le graphique |
 | Export Graph… | Exporter le graphique… |
+| Export Script Settings | Exporter des réglages de script |
 | Export Template | Exporter le modèle |
+| Export… | Exporter… |
 | File | Fichier |
 | File Metadata | Métadonnées du fichier |
 | Fit Layout to Page | Ajuster la disposition à la page |
@@ -89,6 +92,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | How I recognised it | Comment je l'ai reconnu |
 | Import | Importer |
 | Import from Origin | Importer depuis Origin |
+| Import Script Settings | Importer des réglages de script |
 | Import Template | Importer un modèle |
 | Import Templates | Modèles d'import |
 | Import… | Importer… |
@@ -179,6 +183,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Save Project | Enregistrer le projet |
 | Save Theme As | Enregistrer le thème sous |
 | Save Theme As… | Enregistrer le thème sous… |
+| Script Settings… | Réglages de script… |
 | Select All | Tout sélectionner |
 | Select Members | Sélectionner les membres |
 | Selection | Sélection |

@@ -271,6 +271,10 @@ Names follow the rules of the interface: at most 255 characters, no reserved cha
 
 `pyst.set_note(note, text)` replaces the whole text of a note. `note` is the handle of a note.
 
+### Script Settings
+
+`pyst.settings(target)` reads a Script Settings object as a dictionary, and `pyst.set_settings(target, values)` writes values into it. `target` is the handle of the object (for example `pyst.resolve("[Settings1]")`). The chapter [Script Settings](settings.md#in-a-script) gives the rules and an example.
+
 ## Import files
 
 `pyst.import_file(path, recipe=None)` imports an instrument file into a **new workbook** and returns the list of handles of the sheets it created.

@@ -187,6 +187,8 @@ describes its effects.
 | `move(handle, parent, index=None)` | moves under `parent` at `index` among the other children (default: last; same parent = reorder); the handle stays valid; unsuitable parent, cycle, name taken or index out of range: `InvalidValueError` |
 | `duplicate(handle, name=None)` | copies the object and its descendants into the same parent; handle of the copy; a sheet right after the original (`DuplicateWorksheet`), any other object at the end of the parent (`InsertCopy`); without `name`, "`<nom> copy N`" (first free N, English: the script is not translated); the root is refused; a lone formula column copied in its own sheet reads the same columns (`A+B` stays `A+B`, #433), a copy into another sheet reads `#REF` for its local references |
 | `set_note(note, text)` | replaces the whole text of a note |
+| `settings(target)` | reads a Script Settings object (#548) as a dict in file order: `str`, `int` (exact, beyond 2^53), `float`, `bool`, `datetime.date` / `datetime.datetime` / `datetime.time` by the kind written in the file, lists, nested dicts for tables, a list of dicts for `[[x]]`. `target` is a handle (no path string is accepted, like every call of the surface; use `resolve()`). A handle that is not a Script Settings object, or a stored text that is not exact TOML (the object is kept as typed, decision U2), raises `InvalidValueError` naming the object, the line and the parser's reason; never writes |
+| `set_settings(target, values)` | writes a dict (nested dicts for tables) into a Script Settings object (#548): a missing key is **created**, a wrong type for an existing key raises `InvalidValueError` naming the key and **nothing is written**, keys not named stay, comments and order stay, hints (choices, bounds) never refuse a script (the form shows the value in orange). One `SetScriptSettingsText` in the script's single group (one Ctrl+Z undoes the run); a write that changes nothing writes nothing. A `[[x]]` list must have as many blocks as stored. There is no `create_settings` yet: the object is created in the interface (File ▸ New ▸ Add Script Settings) |
 
 **Saving (#331).** `save` and `save_as` go through `SessionHandle::save`, like
 the application: saving is not a command, touches neither the revision nor the
@@ -663,7 +665,7 @@ returned handle keeps the epoch of that snapshot.
 | Key | Value |
 |---|---|
 | `name` | short name of the node, or project name for its root |
-| `kind` | `folder`, `workbook`, `worksheet`, `column`, `graph`, `matrix`, `note` or `unknown` |
+| `kind` | `folder`, `workbook`, `worksheet`, `column`, `graph`, `matrix`, `note`, `script_settings` or `unknown` |
 | `parent` | handle of the parent; `None` at the root |
 | `row_count` | length of a column; maximum of the lengths for a sheet (zero if empty); `None` elsewhere |
 | `column` | dictionary below for a column; `None` elsewhere |
@@ -777,7 +779,7 @@ difference with the module actually built, saying which one.
 ### API version (#356)
 
 `pyst.__api_version__` is a string `"MAJOR.MINOR"`, the constant
-`PYST_API_VERSION` of `stokesforge-script/src/surface.rs` (currently `"0.11"`).
+`PYST_API_VERSION` of `stokesforge-script/src/surface.rs` (currently `"0.12"`).
 It is independent of the software version.
 
 - **Alpha, `0.x`**: any change of the list (addition or break) raises the minor
@@ -865,6 +867,8 @@ function set_graph(graph, *, panel=(0, 0), axis='left', unit='cm', **options)
 function set_group_style(graph, group, *, panel=(0, 0), line_style=None, line_width=None, symbol=None, symbol_size=None)
 function set_note(note, text)
 function set_series_group(graph, index, group, *, panel=(0, 0))
+function set_settings(target, values)
+function settings(target)
 function set_values(handle, values, *, expected_version=None)
 function themes()
 function undo()
@@ -1099,6 +1103,7 @@ column
 graph
 matrix
 note
+script_settings
 unknown
 ```
 

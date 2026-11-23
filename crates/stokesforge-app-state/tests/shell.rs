@@ -21424,3 +21424,351 @@ mod classic_folder {
             .any(|m| m.text.contains("keep an X of their own")));
     }
 }
+
+// -- Script Settings (#548, lot L3) --
+
+/// Id of the Script Settings object named `name` at the root.
+fn settings_named(state: &AppState, name: &str) -> NodeId {
+    let tree = state.tree();
+    tree.child_by_name(tree.root(), name)
+        .expect("root readable")
+        .unwrap_or_else(|| panic!("no Script Settings named {name}"))
+}
+
+/// New Script Settings starts with the commented example, named Settings1, and
+/// queues its window; a project with it saved and reopened gives the same text.
+#[test]
+fn a_new_script_settings_holds_the_example_and_opens_its_window() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    state.dispatch(Action::AddScriptSettings);
+    let settings = settings_named(&state, "Settings1");
+    assert_eq!(
+        state.script_settings_text(settings).as_deref(),
+        Some(stokesforge_app_state::state::SCRIPT_SETTINGS_EXAMPLE)
+    );
+    assert_eq!(state.take_settings_to_open(), vec![settings]);
+    assert!(state.take_settings_to_open().is_empty(), "taken once");
+    // The example reads: a bounded number, a choice list, a list, an empty list.
+    let doc = stokesforge_core::script_settings::parse(
+        stokesforge_app_state::state::SCRIPT_SETTINGS_EXAMPLE,
+    )
+    .expect("the example is exact TOML");
+    assert!(doc
+        .sections
+        .iter()
+        .flat_map(|s| &s.entries)
+        .any(|e| e.hint.choices.is_some()));
+    assert!(doc
+        .sections
+        .iter()
+        .flat_map(|s| &s.entries)
+        .any(|e| e.hint.min.is_some()));
+    state.dispatch(Action::AddScriptSettings);
+    assert_eq!(state.take_settings_to_open().len(), 1);
+    settings_named(&state, "Settings2");
+}
+
+/// The Project Manager lists the object, with its own window kind.
+/// Witness: put back the `None` arm of `project_tree_children`.
+#[test]
+fn the_project_manager_lists_a_script_settings_object() {
+    use stokesforge_app_state::state::{ProjectTreeNode, WindowKind};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    state.dispatch(Action::AddScriptSettings);
+    let settings = settings_named(&state, "Settings1");
+    let listed = state.project_tree().iter().any(|node| {
+        matches!(
+            node,
+            ProjectTreeNode::Window { id, name, kind: WindowKind::ScriptSettings }
+                if *id == settings && name == "Settings1"
+        )
+    });
+    assert!(listed, "{:?}", state.project_tree());
+}
+
+/// One form edit is one history entry, and Ctrl+Z gives the text back byte
+/// for byte; the other bytes (comments) never move.
+/// Witness: commit on every keystroke (a second command per typed character).
+#[test]
+fn one_form_edit_is_one_history_entry_and_undo_restores_the_text() {
+    use stokesforge_app_state::state::SettingsChange;
+    use stokesforge_core::script_settings::{Scalar, Seg};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    state.dispatch(Action::AddScriptSettings);
+    let settings = settings_named(&state, "Settings1");
+    let before = state.script_settings_text(settings).expect("text");
+    let revision = state.snapshot().revision;
+
+    state.dispatch(Action::ChangeScriptSettings {
+        settings,
+        change: SettingsChange::Scalar {
+            path: vec![Seg::Key("fit".into()), Seg::Key("iterations".into())],
+            value: Scalar::Integer(500),
+        },
+    });
+    let after = state.script_settings_text(settings).expect("text");
+    assert_eq!(
+        after,
+        before.replace("iterations = 200", "iterations = 500")
+    );
+    assert!(state.snapshot().revision > revision, "a command ran");
+
+    // One Undo brings the text back and leaves the object (a second entry
+    // would have needed a second Undo).
+    state.dispatch(Action::Undo);
+    assert_eq!(state.script_settings_text(settings), Some(before));
+}
+
+/// A list gets and loses elements through the same single entry.
+#[test]
+fn a_list_element_is_added_and_removed_in_one_entry_each() {
+    use stokesforge_app_state::state::SettingsChange;
+    use stokesforge_core::script_settings::Seg;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    state.dispatch(Action::AddScriptSettings);
+    let settings = settings_named(&state, "Settings1");
+    let path = vec![Seg::Key("fit".into()), Seg::Key("centres".into())];
+    state.dispatch(Action::ChangeScriptSettings {
+        settings,
+        change: SettingsChange::Append { path: path.clone() },
+    });
+    assert!(state
+        .script_settings_text(settings)
+        .expect("text")
+        .contains("centres = [520.0, 610.0, 735.0, 735.0]"));
+    state.dispatch(Action::ChangeScriptSettings {
+        settings,
+        change: SettingsChange::Remove { path, index: 0 },
+    });
+    assert!(state
+        .script_settings_text(settings)
+        .expect("text")
+        .contains("centres = [610.0, 735.0, 735.0]"));
+    // An empty list refuses to grow: nothing written, the reason is said.
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::ChangeScriptSettings {
+        settings,
+        change: SettingsChange::Append {
+            path: vec![Seg::Key("fit".into()), Seg::Key("exclude".into())],
+        },
+    });
+    assert_eq!(state.snapshot().revision, revision);
+    assert!(state.status().expect("a message").is_error());
+}
+
+/// An integer beyond 2^53 survives a form edit of the key next to it and a
+/// round trip through the text. Witness: carry the value through `f64`.
+#[test]
+fn an_integer_beyond_two_to_the_53_round_trips_unchanged() {
+    use stokesforge_app_state::state::SettingsChange;
+    use stokesforge_core::script_settings::{Scalar, Seg};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    state.dispatch(Action::AddScriptSettings);
+    let settings = settings_named(&state, "Settings1");
+    let beyond = 9_007_199_254_740_993_i64;
+    state.dispatch(Action::SetScriptSettingsText {
+        settings,
+        text: "big = 1\nother = 2\n".to_string(),
+    });
+    state.dispatch(Action::ChangeScriptSettings {
+        settings,
+        change: SettingsChange::Scalar {
+            path: vec![Seg::Key("big".into())],
+            value: Scalar::Integer(beyond),
+        },
+    });
+    let text = state.script_settings_text(settings).expect("text");
+    assert_eq!(text, "big = 9007199254740993\nother = 2\n");
+    let view = state.settings_view(settings).expect("view");
+    let entry = view
+        .doc
+        .expect("readable")
+        .entry(&[Seg::Key("big".into())])
+        .expect("entry")
+        .value
+        .clone();
+    assert_eq!(
+        entry,
+        stokesforge_core::script_settings::EntryValue::Scalar(Scalar::Integer(beyond))
+    );
+}
+
+/// A text that is not valid TOML is kept and saved; the view freezes on the
+/// last readable form and says the line; fixing it unfreezes.
+#[test]
+fn a_malformed_text_is_kept_and_freezes_the_form_on_the_last_readable_one() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    state.dispatch(Action::AddScriptSettings);
+    let settings = settings_named(&state, "Settings1");
+    let good = state.settings_view(settings).expect("view");
+    assert!(good.error.is_none() && good.doc.is_some());
+
+    let broken = "title = \"open\nfit = 1\n".to_string();
+    state.dispatch(Action::SetScriptSettingsText {
+        settings,
+        text: broken.clone(),
+    });
+    assert_eq!(state.script_settings_text(settings), Some(broken), "kept");
+    let frozen = state.settings_view(settings).expect("view");
+    assert!(frozen.error.as_ref().is_some_and(|e| e.line >= 1));
+    assert!(frozen.doc.is_some(), "the last readable form stays");
+    // A form edit on a frozen form changes nothing.
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::ChangeScriptSettings {
+        settings,
+        change: stokesforge_app_state::state::SettingsChange::Append {
+            path: vec![stokesforge_core::script_settings::Seg::Key("x".into())],
+        },
+    });
+    assert_eq!(state.snapshot().revision, revision);
+
+    state.dispatch(Action::Undo);
+    assert!(state.settings_view(settings).expect("view").error.is_none());
+}
+
+/// Importing a malformed `.toml` creates no object and says the line.
+/// Witness: create the object before parsing.
+#[test]
+fn a_malformed_toml_import_creates_nothing_and_names_the_line() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let file = dir.path().join("bad.toml");
+    std::fs::write(&file, "a = 1\nb = = 2\n").expect("wrote");
+    let before = state.tree().len();
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::ImportScriptSettings { path: file });
+    assert_eq!(state.tree().len(), before, "no object");
+    assert_eq!(state.snapshot().revision, revision, "no history entry");
+    assert!(state.take_settings_to_open().is_empty());
+    let status = state.status().expect("a message");
+    assert!(status.is_error());
+    assert!(
+        status.text.contains('2'),
+        "the line is named: {}",
+        status.text
+    );
+    assert!(status.text.contains("bad.toml"), "{}", status.text);
+}
+
+/// A good `.toml` becomes an object named after the file, text unchanged; a
+/// second one with the same name gets a free name; a dropped `.toml` does the
+/// same as the menu.
+#[test]
+fn importing_a_toml_keeps_its_bytes_and_a_drop_does_the_same() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let file = dir.path().join("fit.toml");
+    let text = "# my fit\r\nn = 3   # three\r\n";
+    std::fs::write(&file, text).expect("wrote");
+    state.dispatch(Action::ImportScriptSettings { path: file.clone() });
+    let imported = settings_named(&state, "fit");
+    assert_eq!(state.script_settings_text(imported).as_deref(), Some(text));
+    assert_eq!(state.take_settings_to_open(), vec![imported]);
+    state.dispatch(Action::DropFiles {
+        paths: vec![file],
+        target_book: None,
+    });
+    assert_eq!(state.take_settings_to_open().len(), 1, "the drop imports");
+    let objects = state
+        .project_tree()
+        .iter()
+        .filter(|node| {
+            matches!(
+                node,
+                stokesforge_app_state::state::ProjectTreeNode::Window {
+                    kind: stokesforge_app_state::state::WindowKind::ScriptSettings,
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(objects, 2, "the second one took a free name");
+    let plan = file_drop_plan(&[PathBuf::from("a.TOML"), PathBuf::from("b.csv")], None);
+    assert_eq!(plan.settings, vec![PathBuf::from("a.TOML")]);
+    assert_eq!(plan.data, vec![PathBuf::from("b.csv")]);
+}
+
+/// Export writes the stored text byte for byte, comments and odd spacing
+/// included. Witness: export the parsed and re-serialised text.
+#[test]
+fn exporting_writes_the_stored_bytes() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    state.dispatch(Action::AddScriptSettings);
+    let settings = settings_named(&state, "Settings1");
+    let odd = "# keep   me\n\n\nz   =   1 # end\n[t]\n  k = 'x'\n".to_string();
+    state.dispatch(Action::SetScriptSettingsText {
+        settings,
+        text: odd.clone(),
+    });
+    let out = dir.path().join("out.toml");
+    state.dispatch(Action::ExportScriptSettings {
+        settings,
+        path: out.clone(),
+    });
+    assert_eq!(std::fs::read(&out).expect("written"), odd.as_bytes());
+}
+
+/// A save with a Text-tab entry still open commits it first.
+/// Witness: remove the settings entry from `commit_open_entries`.
+#[test]
+fn saving_commits_an_open_script_settings_entry() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    state.dispatch(Action::AddScriptSettings);
+    let settings = settings_named(&state, "Settings1");
+    state.begin_settings_edit(settings);
+    state.settings_editing_mut().expect("open").buffer = "typed = 1\n".to_string();
+    assert!(state.commit_open_entries());
+    assert_eq!(
+        state.script_settings_text(settings).as_deref(),
+        Some("typed = 1\n")
+    );
+    assert!(state.settings_editing().is_none());
+
+    // And through the real save: an entry open again is on the saved file.
+    state.begin_settings_edit(settings);
+    state.settings_editing_mut().expect("open").buffer = "typed = 2\n".to_string();
+    state.dispatch(Action::Save);
+    let reopened = stokesforge_persistence::load(&dir.path().join("projet.stf")).expect("loaded");
+    let node = reopened
+        .tree()
+        .child_by_name(reopened.root(), "Settings1")
+        .expect("readable")
+        .expect("object saved");
+    assert_eq!(
+        stokesforge_app_state::state::script_settings_text_in(reopened.tree(), node).as_deref(),
+        Some("typed = 2\n")
+    );
+}
+
+/// Passing through the Text tab without typing writes nothing; the entry of
+/// an object that is deleted is dropped with it.
+#[test]
+fn an_untouched_text_entry_writes_nothing_and_a_deleted_object_drops_it() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    state.dispatch(Action::AddScriptSettings);
+    let settings = settings_named(&state, "Settings1");
+    let revision = state.snapshot().revision;
+    state.begin_settings_edit(settings);
+    state.commit_settings_edit();
+    assert_eq!(state.snapshot().revision, revision);
+    state.begin_settings_edit(settings);
+    state.dispatch(Action::DeleteObjects(vec![settings]));
+    assert!(state.settings_editing().is_none());
+    assert!(state.settings_view(settings).is_none());
+}
+
+/// The active-tab mirror knows the new kind.
+#[test]
+fn the_active_tab_mirror_has_a_script_settings_kind() {
+    let id = NodeId::from_raw(3);
+    assert_ne!(ActiveTabKind::ScriptSettings(id), ActiveTabKind::Note(id));
+}

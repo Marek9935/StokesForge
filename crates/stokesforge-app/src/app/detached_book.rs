@@ -201,7 +201,7 @@ impl StokesForgeApp {
                 .detached_graphs
                 .get_mut(&graph)
                 .map(|window| &mut window.identity),
-            WindowKey::Tab(Tab::Matrix(_) | Tab::Note(_)) => None,
+            WindowKey::Tab(Tab::Matrix(_) | Tab::Note(_) | Tab::ScriptSettings(_)) => None,
         }
     }
 
@@ -214,7 +214,10 @@ impl StokesForgeApp {
             .map(|edit| edit.column)
             .or_else(|| state.header_editing().map(|edit| edit.column));
         let Some(column) = column else {
-            return state.note_editing().map(|_| Holder::Docked);
+            return state
+                .note_editing()
+                .map(|_| Holder::Docked)
+                .or_else(|| state.settings_editing().map(|_| Holder::Docked));
         };
         let tree = state.tree();
         let book = tree

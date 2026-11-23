@@ -160,6 +160,11 @@ Clicking a window opens or focuses it, for the four kinds:
   (`Command::SetNoteText`). The editor follows the same deferred input
   principle as a grid cell (`AppState::NoteEdit`, symmetric to
   `CellEdit`: the buffer reaches the model only when focus is lost).
+- **`Tab::ScriptSettings`** (#548) is the twin of the note for the TOML a script
+  reads: `AppState::SettingsEdit` holds the Text tab's buffer (committed on focus
+  loss and by a save), `AppState::settings_view` parses the stored text once per
+  revision for the Form tab, and a form edit is `Action::ChangeScriptSettings`
+  (core rewrites one value, every other byte stays). See `docs/windows.md`.
 - **`Tab::Matrix`** is a **documented placeholder**: the window opens and
   is focused like the other three, but shows only an explicit message
   — `stokesforge-core::NodeKind::Matrix` has no content to edit today, and

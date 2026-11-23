@@ -3257,3 +3257,58 @@ fn set_project_themes_refuses_bad_lists() {
         assert_eq!(history.undo_label(), None);
     }
 }
+
+#[test]
+fn script_settings_add_and_set_text_round_trip() {
+    let mut f = fixture();
+    let mut history = History::new();
+    let root = f.project.root();
+    let empty = snapshot(&f.project);
+
+    history
+        .execute(
+            &mut f.project,
+            Command::AddScriptSettings {
+                parent: root,
+                name: None,
+                text: "a = 1\r\n".to_string(),
+            },
+        )
+        .expect("addition");
+    assert_eq!(history.undo_label(), Some(&HistoryLabel::AddScriptSettings));
+    let settings = f.project.resolve_path("[Settings1]").expect("settings");
+    let before = snapshot(&f.project);
+
+    history
+        .execute(
+            &mut f.project,
+            Command::SetScriptSettingsText {
+                id: settings,
+                text: "b = 2".to_string(),
+            },
+        )
+        .expect("text");
+    let after = snapshot(&f.project);
+    assert_eq!(
+        history.undo_label(),
+        Some(&HistoryLabel::SetScriptSettingsText {
+            name: Some("Settings1".to_string())
+        })
+    );
+    let text_of = |f: &Fixture| match f.project.tree().get(settings).expect("node").kind() {
+        NodeKind::ScriptSettings { text, .. } => text.clone(),
+        other => panic!("expected script settings, found {other:?}"),
+    };
+    assert_eq!(text_of(&f), "b = 2");
+
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    assert_eq!(text_of(&f), "a = 1\r\n");
+    assert_eq!(**f.project.tree(), *before);
+    assert_eq!(history.redo(&mut f.project), Ok(true));
+    assert_eq!(text_of(&f), "b = 2");
+    assert_eq!(**f.project.tree(), *after);
+
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *empty);
+}

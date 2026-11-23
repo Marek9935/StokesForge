@@ -517,3 +517,31 @@ fn an_external_graph_paste_skips_a_sibling_folder_for_its_hidden_workbook() {
     assert_eq!(hidden.len(), 1);
     assert_eq!(hidden[0].name(), "Book2");
 }
+
+/// #548: a Script Settings text (CRLF, Unicode, comments) is the same after a
+/// disk round trip and after the object clipboard transport.
+#[test]
+fn script_settings_text_survives_the_disk_and_the_clipboard_transport() {
+    const TEXT: &str = "# Réglages ✓\r\n[fit]\r\nname = \"Lorentz\" # λ\r\n\r\n";
+    let mut project = Project::new("Test").unwrap();
+    let root = project.root();
+    let settings = project
+        .add_script_settings(root, Some("Settings1"), TEXT)
+        .unwrap();
+    let text_of = |project: &Project, id| match project.tree().node(id).unwrap().kind() {
+        NodeKind::ScriptSettings { text, .. } => text.clone(),
+        other => panic!("expected script settings, got {other:?}"),
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.stf");
+    stokesforge_persistence::save(&project, &path).unwrap();
+    let loaded = stokesforge_persistence::load(&path).unwrap();
+    let loaded_id = loaded.resolve_path("[Settings1]").unwrap();
+    assert_eq!(text_of(&loaded, loaded_id), TEXT);
+
+    let copy = NodeCopy::capture(project.tree(), settings).unwrap();
+    let (_, copies) = decode_objects(&encode_objects("source", &[copy]).unwrap()).unwrap();
+    let pasted = project.insert_copy(root, &copies[0], "Settings2").unwrap();
+    assert_eq!(text_of(&project, pasted), TEXT);
+}

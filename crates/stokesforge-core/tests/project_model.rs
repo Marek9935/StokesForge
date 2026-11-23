@@ -2068,3 +2068,42 @@ mod raw_sheet_mark {
         assert_eq!(demo.project.raw_mark(sheets[1]), None);
     }
 }
+
+#[test]
+fn script_settings_gets_a_name_a_path_and_refuses_a_duplicate() {
+    let mut project = Project::new("Demo").expect("valid name");
+    let root = project.root();
+    let first = project
+        .add_script_settings(root, None, "")
+        .expect("script settings");
+    assert_eq!(name_of(&project, first), "Settings1");
+    assert_eq!(project.resolve_path("[Settings1]"), Ok(first));
+    let second = project
+        .add_script_settings(root, None, "")
+        .expect("second script settings");
+    assert_eq!(name_of(&project, second), "Settings2");
+    assert!(matches!(
+        project.add_script_settings(root, Some("Settings1"), ""),
+        Err(CoreError::DuplicateName(_))
+    ));
+}
+
+#[test]
+fn set_script_settings_text_refuses_a_note() {
+    let mut project = Project::new("Demo").expect("valid name");
+    let root = project.root();
+    let note = project.add_note(root, None, "n").expect("note");
+    assert!(matches!(
+        project.set_script_settings_text(note, "x = 1"),
+        Err(CoreError::Structure(_))
+    ));
+    let settings = project
+        .add_script_settings(root, None, "a = 1")
+        .expect("settings");
+    assert_eq!(
+        project
+            .set_script_settings_text(settings, "b = 2")
+            .expect("text"),
+        "a = 1"
+    );
+}

@@ -32,6 +32,7 @@ use stokesforge_core::NodeId;
 use stokesforge_render_egui::DEFAULT_FIGURE_SIZE;
 use stokesforge_render_svg::SvgTextMode;
 
+use stokesforge_app_state::file_picker::PickRequest;
 use stokesforge_app_state::i18n;
 use stokesforge_app_state::state::{active_graph, Action};
 use stokesforge_app_state::tr;
@@ -164,6 +165,14 @@ impl StokesForgeApp {
                         });
                         ui.close();
                     }
+                    if ui
+                        .button(tr!("action-add-script-settings"))
+                        .on_hover_text(tr!("action-add-script-settings", "hint"))
+                        .clicked()
+                    {
+                        actions.push(Action::AddScriptSettings);
+                        ui.close();
+                    }
                 });
                 ui.menu_button(tr!("menu-import"), |ui| {
                     if ui
@@ -205,6 +214,14 @@ impl StokesForgeApp {
                         .clicked()
                     {
                         actions.push(Action::ReopenLastImport);
+                        ui.close();
+                    }
+                    if ui
+                        .button(tr!("action-import-script-settings"))
+                        .on_hover_text(tr!("action-import-script-settings", "hint"))
+                        .clicked()
+                    {
+                        actions.push(Action::PickFile(PickRequest::ImportScriptSettings));
                         ui.close();
                     }
                 });

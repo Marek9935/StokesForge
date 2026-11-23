@@ -17,7 +17,7 @@ over the full width), Project Manager (`Panel::left`,
 `fixed_panels_are_placed_in_the_order_of_ui` (`app.rs`) holds this order
 through the panel rectangles. The four other
 kinds of content window — `Tab::Book` (workbook), `Tab::Graph`,
-`Tab::Matrix`, `Tab::Note`, each carrying a `NodeId` — open by default
+`Tab::Matrix`, `Tab::Note`, `Tab::ScriptSettings` (#548), each carrying a `NodeId` — open by default
 as floating windows inside the `CentralPanel`, one per
 `StokesForgeApp::floating_tabs` (stack order: `app/window_stack.rs`). Each is a bare `egui::Area`
 (`show_floating_window`), not an `egui::Window`: the application alone owns
