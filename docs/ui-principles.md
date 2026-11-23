@@ -35,7 +35,8 @@ Every window is modal (except the content ones: workbook, graph, matrix,
 note) and built by `app/dialogs.rs`, never by a raw `egui::Window`.
 The type fixes the footer, the button order, Escape and the focus: live
 settings, creation on a draft, choice, wizard, read-only,
-confirmation. Size and position are remembered per dialog.
+confirmation. Size and position are remembered per dialog; a small question or alert dialog
+keeps only its size and always opens centred on the whole window (#562).
 
 - What exists, with size, pages and opening point:
   [`windows.md`](windows.md) (to be kept up to date with each window).
