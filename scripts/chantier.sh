@@ -551,7 +551,10 @@ tidy_trial() {
         printf 'tidy: kept:\n%s\n' "$problems" >&2
         return 1
     fi
-    sf_remove_wt "$wt" || { echo "tidy: could not remove $wt; kept" >&2; return 1; }
+    if ! sf_remove_wt "$wt"; then
+        [ ! -d "$wt" ] || { echo "tidy: could not remove $wt; kept" >&2; return 1; }
+        echo "tidy: $wt was removed by another tidy run meanwhile"   # the service and try.sh may both run it
+    fi
     suivi trial-kept "$n" --clear || true
     echo "tidy: removed the trial folder $wt (branch kept)"
 }

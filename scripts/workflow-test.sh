@@ -1019,6 +1019,11 @@ CG
     sbsuivi pause 7 --full > /dev/null
     if ( cd "$sb/StokesForge" && "$here/chantier.sh" --tidy-trial 7 ) > "$sb/out" 2>&1; then fail "tidy of an unmarked paused folder accepted"; fi
     [ -d "$wt" ] && grep -q 'not a pause-trial folder' "$sb/out" || fail "unmarked: $(cat "$sb/out")"
+    # a paused record with no head for the folder (an older or hand-made record): the tidy cannot prove the head, so it keeps the folder
+    paused_trial; answer 7-1 ok
+    python3 -I -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["paused"]["worktrees"]=[]; json.dump(d,open(p,"w"))' "$SF_SUIVI_DIR/issues/7.json"
+    if ( cd "$sb/StokesForge" && "$here/chantier.sh" --tidy-trial 7 ) > "$sb/out" 2>&1; then fail "tidy with no recorded head removed the folder: $(cat "$sb/out")"; fi
+    [ -d "$wt" ] && [ -f "$(marker)" ] && grep -q 'no head recorded' "$sb/out" || fail "tidy with no recorded head: $(cat "$sb/out")"
     # `lance #7` on a marked folder is a resume: marker gone, main merged once, claimed, pause cleared
     paused_trial; export TRY_WT="$wt"
     ( cd "$sb/StokesForge" && echo four > m3 && git add m3 && git commit -q -m "main: m3" && git push -q origin main )

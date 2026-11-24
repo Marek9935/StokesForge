@@ -181,19 +181,20 @@ sf_ignored_ok() {
 
 # Processes whose cwd or executable is inside folder $1: "<pid> <name>" lines.
 sf_wt_busy() {
-    local wt d pid k t
+    local wt pid path t
+    local -A seen=()
     wt="$(realpath -m "$1")"
-    for d in /proc/[0-9]*; do
-        pid="${d#/proc/}"
-        [ "$pid" != "$$" ] || continue
-        for k in cwd exe; do
-            t="$(readlink "$d/$k" 2> /dev/null)" || continue
-            t="${t% (deleted)}"
-            case "$t" in
-            "$wt" | "$wt"/*) printf '%s %s\n' "$pid" "$(cat "$d/comm" 2> /dev/null)"; break ;;
-            esac
-        done
-    done
+    # One `find` for every process (a fork per /proc entry took 30 s on a loaded PC); -printf %l is the link target.
+    while read -r pid path; do
+        [ -n "$pid" ] && [ "$pid" != "$$" ] || continue
+        t="${path% (deleted)}"
+        case "$t" in
+        "$wt" | "$wt"/*)
+            [ -z "${seen[$pid]:-}" ] || continue
+            seen[$pid]=1
+            printf '%s %s\n' "$pid" "$(cat "/proc/$pid/comm" 2> /dev/null)" ;;
+        esac
+    done < <(find /proc -maxdepth 2 -regextype posix-extended -regex '/proc/[0-9]+/(cwd|exe)' -printf '%h %l\n' 2> /dev/null | sed 's|^/proc/||')
 }
 
 # Reasons why worktree $1 cannot be removed now (empty output: it can). Reads git and /proc only.
