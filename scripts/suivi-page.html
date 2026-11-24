@@ -37,6 +37,7 @@ h2{font-size:1.15rem;margin:0;display:flex;align-items:center;gap:10px}
 section{display:flex;flex-direction:column;gap:12px}
 .sq{flex:none;width:30px;height:30px;border-radius:7px;background:var(--muted)}
 .sq.blue{background:var(--c-blue)} .sq.green{background:var(--c-green)} .sq.orange{background:var(--c-orange)}
+.sq.grey{background:var(--muted)} .pausebadge{display:inline-block;margin:4px 0 0;padding:2px 8px;border-radius:99px;background:var(--accent-soft);color:var(--fg);font-size:.9rem;font-weight:700}
 .sq.purple{background:var(--c-purple)} .sq.red{background:var(--c-red)} .sq.yellow{background:var(--c-yellow)}
 .num{font-weight:700;font-variant-numeric:tabular-nums}
 .box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0}
@@ -196,7 +197,7 @@ a.btnlink{display:inline-block;text-decoration:none;border-radius:10px;padding:8
   <p class="note">Cette page est locale : elle vit sur ce PC et se met à jour toute seule quand elle est devant toi. Les agents l’alimentent par script ; toi, tu coches « OK » (ou « OK + idée »), tu écris un retour (il deviendra une issue) ou tu réponds aux questionnaires.</p>
 </div>
 <script>
-const COL={'🟦':'blue','🟩':'green','🟧':'orange','🟪':'purple','🟥':'red','🟨':'yellow'};
+const COL={'⬜':'grey','🟦':'blue','🟩':'green','🟧':'orange','🟪':'purple','🟥':'red','🟨':'yellow'};
 const ORDER=['🟦','🟩','🟧','🟪','🟥','🟨'];
 const STATES=[['questions','Questions'],['code','Code'],['essai','Essai'],['fusion','Fusion']];
 const $=id=>document.getElementById(id);
@@ -357,8 +358,9 @@ function cardLine(c,tests,qcms){
   /* The button needs a message the agent stored (#531); a run in progress or ended (failed: until a new store) hides it. */
   const prepared=c.merge_prepared===true;
   const run=c.merge_run&&typeof c.merge_run==='object'?c.merge_run:null;
-  const canClick=readyToMerge&&prepared&&!run&&!requested;
-  const preparing=readyToMerge&&!prepared&&!run;
+  const paused=c.paused===true;                 // #563: a paused issue is not merged; resume it first
+  const canClick=readyToMerge&&prepared&&!run&&!requested&&!paused;
+  const preparing=readyToMerge&&!prepared&&!run&&!paused;
   if(canClick)parts.push('lancer la fusion');
   /* A `you` note only completes a card the user has on the page (#483): once the form is finished,
      the entries ticked and the merge launched, it is stale and dropped, not shown as the user's turn (#530). */
@@ -390,7 +392,7 @@ function cardLine(c,tests,qcms){
   else if(held.length)text=null;      // held with no agent known (legacy): the badge says it
   else if(Number(c.unread)>0)return {user:true,text:'Réponse reçue : lance #'+c.issue,also:'',note:youKind?'':note,step:shownStep(c,qcmOpen),mergeReady:readyToMerge,mergeRequested:requested,mergeButton:canClick,mergeNote:mergeNoteOf(run,preparing,requested,false)};
   else text='En pause';
-  const mergeNote=mergeNoteOf(run,preparing,requested,c.listening===true);
+  const mergeNote=paused&&readyToMerge?'En pause : lance #'+c.issue+' pour fusionner':mergeNoteOf(run,preparing,requested,c.listening===true);
   return {user:you,text:text,also:also,note:youKind?'':note,step:shownStep(c,qcmOpen),mergeReady:readyToMerge,mergeRequested:requested,
           mergeButton:canClick,mergeNote:mergeNote};
 }
@@ -582,9 +584,11 @@ function renderSuivi(){
   if(!S.paused.length)pb.appendChild(el('div','empty','Rien en pause.'));
   S.paused.forEach(p=>{
     const b=el('div','box');
-    b.appendChild(head({colour:p.last_colour,n:p.issue,name:(p.kind==='package'?'Paquet · ':'')+p.name},p.what||'Rien noté sur ce qui reste.'));
+    b.appendChild(head({colour:p.pause?'⬜':p.last_colour,n:p.issue,name:(p.kind==='package'?'Paquet · ':'')+p.name},p.what||'Rien noté sur ce qui reste.'));
+    if(p.pause)b.appendChild(el('div','pausebadge','⏸ en pause'));
     const pl=lineEl(p);if(pl.node)b.appendChild(pl.node);
-    b.appendChild(el('div','meta',(p.worktrees&&p.worktrees.length?'Dossier de travail : oui ('+p.worktrees.join(', ')+')':'Dossier de travail : non')));
+    b.appendChild(el('div','meta',(p.worktrees&&p.worktrees.length?'Dossier de travail : oui ('+p.worktrees.join(', ')+')':p.pause&&p.pause.branch?'Branche gardée : '+p.pause.branch:'Dossier de travail : non')));
+    if(p.pause&&p.pause.kept)b.appendChild(el('div','meta',keptText(p.pause.kept)));
     const sn=sinceEl(p.since,p.days,'en pause depuis le ');if(sn)b.appendChild(sn);
     pb.appendChild(b);
   });
@@ -601,7 +605,8 @@ function renderSuivi(){
 
 /* ---- En attente tab ---- */
 function qcmBox(q){
-  const b=el('div','box');b.appendChild(head({n:q.issue,name:q.title||('Questionnaire '+q.id),colour:colourOf(q.issue)},null));
+  const b=el('div','box');b.appendChild(head({n:q.issue,name:q.title||('Questionnaire '+q.id),colour:q.paused?'⬜':colourOf(q.issue)},null));
+  if(q.paused)b.appendChild(el('div','pausebadge','⏸ en pause'));
   if(q.progress)b.appendChild(el('div','meta','Avancement : '+(typeof q.progress==='object'?(q.progress.answered||0)+' / '+(q.progress.total||'?'):q.progress)));
   const a=el('a','btnlink','Ouvrir le questionnaire');a.href='/qcm/'+encodeURIComponent(q.id);b.appendChild(a);
   const u=withdrawUi(q,askWithdraw===q.id);
@@ -616,10 +621,12 @@ function qcmBox(q){
   }
   return b;
 }
+/* Why the folder recreated for a trial during a pause was left in place (#563). */
+function keptText(code){return code==='changed'?'Dossier d’essai gardé : un fichier y a changé, rien n’a été supprimé.':code==='head'?'Dossier d’essai gardé : la branche a bougé, rien n’a été supprimé.':'';}
 function colourSq(n){const c=colourOf(n);return c?Object.keys(COL).find(k=>COL[k]===COL[c])+' ':'';}
 function colourOf(n){
   const c=S.colours.find(x=>!x.free&&(x.issues||[]).includes(n));if(c)return c.colour;
-  const p=S.paused.find(x=>x.issue===n);return p?p.last_colour:'';
+  const p=S.paused.find(x=>x.issue===n);return p?(p.pause?'⬜':p.last_colour):'';
 }
 function imgDraft(x){
   if(!imgDrafts[x.id])imgDrafts[x.id]={names:imgListed(x),busy:0,lines:[],waiters:[]};
@@ -728,6 +735,7 @@ function appendLinked(parent,text){
 function testBox(x){
   const b=el('div','box'+(x.status==='ok'?' isok':x.status==='retour'&&!isSettled(x)?' isback':''));
   b.appendChild(head(x,x.title||''));
+  if(x.paused)b.appendChild(el('div','pausebadge','⏸ en pause'));
   const fr=trialFrame(x);
   if(fr.goal)b.appendChild(el('div','goal',fr.goal));
   if(x.intro)b.appendChild(el('div','intro',x.intro));
