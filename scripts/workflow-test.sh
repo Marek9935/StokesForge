@@ -230,9 +230,9 @@ assert c[2]["held_by"] == ["agent"] and c[2]["name"] == "Thirty things", c[2]
 PY
 "$here/chantier.sh" --status > "$tmp/st.txt"
 grep -q '^🟧 #30 ' "$tmp/st.txt" && grep -q '^🟥 free' "$tmp/st.txt" || fail "--status text: $(cat "$tmp/st.txt")"
-# --pause works on any issue: colour freed, worktree kept, previous colour back on resume.
+# --pause --keep (the older pause, #563) works on any issue: colour freed, worktree kept, previous colour back on resume.
 # lang: fr begin
-eq "$("$here/chantier.sh" --pause 31)" "Dossier #31 en pause : couleur 🟪 libérée." "--pause of a plain issue"
+eq "$("$here/chantier.sh" --pause 31 --keep)" "Dossier #31 en pause : couleur 🟪 libérée." "--pause of a plain issue"
 # lang: fr end
 [ -d "$S/feature31" ] || fail "--pause removed the worktree"
 "$here/chantier.sh" --status --json | python3 -I -c '
@@ -257,17 +257,17 @@ e = json.load(sys.stdin)["colours"][4]
 assert e["package"]["parent"] == 217 and e["since"] == "2026-10-25" and e["days"] == 9, e
 assert [s["n"] for s in e["package"]["subs"]][:2] == [231, 220], e
 assert e["worktrees"] == ["feature219"], e' || fail "--status package"
-if "$here/chantier.sh" --pause 217 2> "$tmp/errp"; then fail "--pause accepted with a worktree left"; fi
+if "$here/chantier.sh" --pause 217 --keep 2> "$tmp/errp"; then fail "--pause accepted with a worktree left"; fi
 grep -q 'still has worktrees' "$tmp/errp" || fail "--pause message"
 eq "$(rec 217 colour)" 🟥 "colour kept after a refused --pause"
 # lang: fr begin
 out="$("$here/chantier.sh" --no-trial --release 219)"
 eq "$out" "Couleur 🟥 reste prise : paquet #217, prochaine sous-issue ; après la dernière : scripts/chantier.sh --done 217" "release of a sub-issue"
 # lang: fr end
-"$here/chantier.sh" --dry-run --pause 217 > /dev/null
+"$here/chantier.sh" --dry-run --pause 217 --keep > /dev/null
 eq "$(rec 217 colour)" 🟥 "--dry-run --pause changes nothing"
 # lang: fr begin
-eq "$("$here/chantier.sh" --pause 217)" "Paquet #217 en pause : couleur 🟥 libérée." "--pause of a package"
+eq "$("$here/chantier.sh" --pause 217 --keep)" "Paquet #217 en pause : couleur 🟥 libérée." "--pause of a package"
 # lang: fr end
 eq "$(rec 217 colour)" "" "paused: no colour"
 eq "$(rec 217 last_colour)" 🟥 "paused: previous colour remembered"
@@ -287,7 +287,7 @@ case "$out" in "Couleur 🟨 reste prise : paquet #217"*) ;; *) fail "release 22
 out="$("$here/chantier.sh" --done 217)"
 eq "$out" "Couleur 🟨 libérée." "--done line"
 "$here/chantier.sh" 217 > /dev/null
-"$here/chantier.sh" --pause 217 > /dev/null
+"$here/chantier.sh" --pause 217 --keep > /dev/null
 eq "$("$here/chantier.sh" --done 217)" "Paquet #217 terminé (il n'avait plus de couleur)." "--done on a paused package"
 # lang: fr end
 rmwt 88
@@ -747,6 +747,285 @@ JSON
     grep -q '#31 .*<- paused, --start resumes' "$sb/out" || fail "paused sub not listed: $(cat "$sb/out")"
     ( cd "$sb/StokesForge" && SF_ISSUES_JSON="$sb/pkg.json" SF_ISSUE_TITLE_30="Pkg" SF_ISSUE_TITLE_31="New name" nofetch "$here/chantier.sh" 30 --start 31 > "$sb/out" 2>&1 ) || fail "package --start resume: $(cat "$sb/out")"
     eq "$(git -C "$sb/_stokesforge/feature31" symbolic-ref --short HEAD)" feature/31-old-name "package --start resume"
+
+    # ---- Full pause, resume and the trial during a pause (#563). A fake glab logs its calls; one file makes it fail.
+    (
+    pb="$tmp/pausebin"; mkdir -p "$pb"
+    cat > "$pb/glab" <<'GL'
+#!/usr/bin/env bash
+echo "$*" >> "$PAUSE_GLAB_LOG"
+[ ! -e "$PAUSE_GLAB_FAIL" ] || exit 1
+exit 0
+GL
+    chmod +x "$pb/glab"
+    export PATH="$pb:$PATH" PAUSE_GLAB_LOG="$tmp/pause-glab.log" PAUSE_GLAB_FAIL="$tmp/pause-glab.fail"
+    pchant() { ( cd "$sb/StokesForge" && SF_ISSUE_TITLE="Retitled thing" "$here/chantier.sh" "$@" ); }
+    psetup() {   # dsb, issue 7 claimed (record, colour), an open form, the ignore patterns of the allow-list; glab log empty
+        dsb; : > "$PAUSE_GLAB_LOG"; rm -f "$PAUSE_GLAB_FAIL"
+        printf 'target/\n.target-copying/\n__pycache__/\nvendor/python/extracted/\nvendor/smithay-clipboard/Cargo.lock\ndist/\nmanual/book/\nprivate_file\n*.stokesforge\n.venv\n*.h5\nsandbox\ntest/private_file\n' > "$sb/StokesForge/.git/info/exclude"
+        pchant 7 > /dev/null 2>&1 || fail "psetup: claim of 7"
+        mkdir -p "$SF_SUIVI_DIR/qcm/f7"; printf '{"issue":7,"title":"form","finished":false}' > "$SF_SUIVI_DIR/qcm/f7/meta.json"
+    }
+    drec() { python3 -I -c 'import json,sys; v=json.load(open(sys.argv[1]))[sys.argv[2]]; print("" if v is None else v)' "$SF_SUIVI_DIR/issues/$1.json" "$2"; }
+    downer() { python3 -I -c 'import json,sys; o=json.load(open(sys.argv[1]))["owner"]; print(o["session"] if o else "none")' "$SF_SUIVI_DIR/issues/$1.json"; }
+    remote_branch() { git -C "$sb/remote.git" rev-parse -q --verify refs/heads/feature/7-x 2> /dev/null || true; }
+    is_paused() { python3 -I -c 'import json,sys; print("yes" if json.load(open(sys.argv[1])).get("paused") else "no")' "$SF_SUIVI_DIR/issues/$1.json"; }
+    tests_sum() { ( cd "$SF_SUIVI_DIR/tests" && cat ./*.json | md5sum ); }
+    intact() {   # $1 label: after a refused pause, nothing was done
+        [ -d "$wt" ] || fail "$1: the worktree was removed"
+        eq "$(remote_branch)" "" "$1: something was pushed"
+        eq "$(downer 7)" sid-1 "$1: the owner changed"
+        eq "$(drec 7 colour)" 🟦 "$1: the colour changed"
+        eq "$(is_paused 7)" no "$1: recorded as paused"
+        [ ! -s "$PAUSE_GLAB_LOG" ] || fail "$1: a comment was posted: $(cat "$PAUSE_GLAB_LOG")"
+    }
+    refuses() {   # $1 label, $2 regex of the reason line
+        if pchant --pause 7 > "$sb/out" 2>&1; then fail "$1: accepted: $(cat "$sb/out")"; fi
+        grep -qE "$2" "$sb/out" || fail "$1: reason missing ($2): $(cat "$sb/out")"
+        intact "$1"
+    }
+
+    # Clean pause: pushed (remote head = local head, no tag with push.followTags), comment, folder gone, colour free
+    # although an entry and a form are open, entries and forms untouched, the local branch kept.
+    psetup
+    git -C "$wt" tag -a v9 -m "local tag" HEAD
+    sum_before="$(tests_sum)"; head_before="$(git -C "$wt" rev-parse HEAD)"
+    mkdir -p "$wt/target/debug" "$wt/__pycache__" "$wt/vendor/python/extracted" "$wt/dist" "$wt/manual/book" "$wt/vendor/smithay-clipboard"
+    for f in target/debug/x __pycache__/a.pyc vendor/python/extracted/e dist/d manual/book/b vendor/smithay-clipboard/Cargo.lock; do : > "$wt/$f"; done
+    pchant --pause 7 --note "lot 1 done, lot 2 left" > "$sb/out" 2>&1 || fail "clean pause: $(cat "$sb/out")"
+    eq "$(remote_branch)" "$head_before" "pause: origin shows the local head"
+    eq "$(git -C "$sb/remote.git" tag | wc -l)" 0 "pause: a tag reached the remote"
+    [ ! -e "$wt" ] || fail "pause: the folder stays"
+    git -C "$sb/StokesForge" rev-parse -q --verify feature/7-x > /dev/null || fail "pause: the local branch is gone"
+    [ -z "$(ls -A "$sb/_stokesforge" | grep '^.deleting' || true)" ] || fail "pause: a renamed target is left"
+    grep -q '^Dossier #7 en pause : couleur 🟦 libérée\.$' "$sb/out" || fail "pause line: $(cat "$sb/out")"   # lang: fr
+    eq "$(drec 7 colour)" "" "pause: colour freed with an entry and a form open"
+    eq "$(downer 7)" none "pause: owner dropped"
+    eq "$(is_paused 7)" yes "pause: recorded"
+    eq "$(tests_sum)" "$sum_before" "pause: a trial entry file changed"
+    eq "$(entry_field 7-1 status)" todo "pause: the entry left « En attente »"
+    [ -f "$SF_SUIVI_DIR/qcm/f7/meta.json" ] || fail "pause: the form is gone"
+    grep -q "^issue note 7 -m Paused #7: branch .feature/7-x. at .$head_before." "$PAUSE_GLAB_LOG" || fail "comment: $(cat "$PAUSE_GLAB_LOG")"
+    grep -q 'lance #7' "$PAUSE_GLAB_LOG" && grep -q '7-1' "$PAUSE_GLAB_LOG" && grep -q 'lot 1 done, lot 2 left' "$PAUSE_GLAB_LOG" && grep -q 'f7' "$PAUSE_GLAB_LOG" || fail "comment content: $(cat "$PAUSE_GLAB_LOG")"
+    sbsuivi status --json | python3 -I -c '
+import json, sys
+d = json.load(sys.stdin)
+assert all(c["free"] for c in d["colours"]), d["colours"]
+p = d["paused"][0]
+assert p["issue"] == 7 and p["pause"]["branch"] == "feature/7-x" and p["worktrees"] == [], p' || fail "status after the pause"
+    sbsuivi check > "$sb/check.out" 2>&1 || true
+    ! grep -q '#7 has a record but no worktree' "$sb/check.out" || fail "check flags a paused issue: $(cat "$sb/check.out")"
+    sbsuivi claim 9 --name Nine > /dev/null; sbsuivi check > "$sb/check.out" 2>&1 || true
+    grep -q 'issue #9 has a record but no worktree' "$sb/check.out" || fail "check no longer flags a plain missing worktree: $(cat "$sb/check.out")"
+    # a rerun on an already paused issue without a folder is refused (nothing to pause)
+    if pchant --pause 7 > "$sb/out" 2>&1; then fail "pause of a folderless issue accepted"; fi
+    # --dry-run: checks and prints, does nothing
+    psetup; pchant --dry-run --pause 7 > "$sb/out" 2>&1 || fail "dry-run pause: $(cat "$sb/out")"
+    grep -q 'would push feature/7-x' "$sb/out" && intact "dry-run pause" || fail "dry-run pause did something: $(cat "$sb/out")"
+
+    # Every refusal of the checks: one line, nothing done.
+    psetup; echo more >> "$wt/f";                   refuses "dirty tree" 'uncommitted change'
+    psetup; echo x > "$wt/new.txt";                 refuses "untracked file" 'untracked file: new.txt'
+    for f in private_file a.stokesforge .venv data.h5 sandbox test/private_file; do
+        psetup; mkdir -p "$wt/$(dirname "$f")"; echo x > "$wt/$f"; refuses "ignored $f" "ignored file outside the allow-list: $f"
+    done
+    psetup; git -C "$wt" checkout -q --detach;      refuses "detached HEAD" 'detached HEAD'
+    psetup; git -C "$wt" rev-parse HEAD > "$(git -C "$wt" rev-parse --absolute-git-dir)/MERGE_HEAD"; refuses "merge in progress" 'in progress'
+    psetup
+    tail -f /dev/null & other=$!
+    python3 -I - "$SF_SUIVI_DIR/issues/7.json" "$other" <<'PY'
+import json, sys
+p, pid = sys.argv[1], int(sys.argv[2])
+d = json.load(open(p))
+st = int(open("/proc/%d/stat" % pid).read().rsplit(")", 1)[1].split()[19])
+d["owner"] = {"session": "other-sid", "pid": pid, "pid_start": st, "at": 0}
+json.dump(d, open(p, "w"))
+PY
+    if pchant --pause 7 > "$sb/out" 2>&1; then fail "another live owner accepted"; fi
+    kill "$other"; wait "$other" 2> /dev/null || true
+    grep -q 'owned by another live session' "$sb/out" && [ -d "$wt" ] && eq "$(remote_branch)" "" "owner: pushed" || fail "another owner: $(cat "$sb/out")"
+    psetup
+    ( cd "$wt" && exec tail -f /dev/null ) & busy=$!
+    refuses "process in the folder" "in use by process $busy tail"
+    kill "$busy"; wait "$busy" 2> /dev/null || true
+    psetup; mkdir -p "$wt/target/debug"; : > "$wt/target/debug/.cargo-build-lock"; mkfifo "$sb/g1"; rm -f "$sb/held"
+    flock -x "$wt/target/debug/.cargo-build-lock" bash -c "echo held > '$sb/held'; cat '$sb/g1' > /dev/null" & hold=$!
+    "$here/wait-for.sh" "$sb/held" held 30 > /dev/null || fail "cargo lock holder never started"
+    refuses "running cargo" 'running cargo build'
+    echo go > "$sb/g1"; wait "$hold"
+    psetup
+    tail -f /dev/null & live=$!
+    python3 -I - "$SF_SUIVI_DIR" "$live" <<'PY'
+import json, os, sys
+d, pid = sys.argv[1], int(sys.argv[2])
+st = int(open("/proc/%d/stat" % pid).read().rsplit(")", 1)[1].split()[19])
+os.makedirs(d + "/deliver", exist_ok=True)
+json.dump({"issue": 7, "msg": "m", "run": {"state": "running", "pid": pid, "pid_start": st}}, open(d + "/deliver/7.json", "w"))
+PY
+    refuses "live deliver run" 'deliver run of #7 is live'
+    kill "$live"; wait "$live" 2> /dev/null || true
+    psetup; if ( cd "$wt" && "$here/chantier.sh" --pause 7 ) > "$sb/out" 2>&1; then fail "pause from inside the folder accepted"; fi
+    grep -q 'called from inside' "$sb/out" && intact "inside the folder" || fail "inside: $(cat "$sb/out")"
+    psetup; git -C "$wt" push -q origin feature/7-x
+    git -C "$wt" commit -q --amend --allow-empty -m local-only
+    git clone -q "$sb/remote.git" "$sb/other"; git -C "$sb/other" checkout -q feature/7-x
+    git -C "$sb/other" -c user.name=o -c user.email=o@o commit -q --allow-empty -m "remote-only"; git -C "$sb/other" push -q origin feature/7-x
+    if SF_NO_FETCH= pchant --pause 7 > "$sb/out" 2>&1; then fail "diverged branch accepted"; fi
+    grep -q 'have diverged' "$sb/out" && [ -d "$wt" ] || fail "diverged: $(cat "$sb/out")"; rm -rf "$sb/other"
+    psetup; git -C "$sb/StokesForge" worktree add -q "$sb/_stokesforge/feature7b" -b feature/7b-x main
+    refuses "sibling worktree" 'sibling worktree .*feature7b'
+    psetup; mkdir -p "$sb/_stokesforge/tmp/7-probe"; refuses "tmp folder" 'sibling folder .*tmp/7-probe'
+    psetup; git -C "$sb/StokesForge" remote rename origin gone; refuses "no origin" 'no remote named origin'
+
+    # The allow-list: every allowed ignored path is accepted (seen above); a push refused by the remote leaves everything.
+    psetup; printf '#!/bin/sh\necho "no thanks" >&2\nexit 1\n' > "$sb/remote.git/hooks/pre-receive"; chmod +x "$sb/remote.git/hooks/pre-receive"
+    if pchant --pause 7 > "$sb/out" 2>&1; then fail "a refused push was accepted"; fi
+    grep -q 'push of feature/7-x was refused' "$sb/out" && intact "push refused"; rm -f "$sb/remote.git/hooks/pre-receive"
+    # glab failing: the text is printed and kept in a file, the pause goes on.
+    psetup; : > "$PAUSE_GLAB_FAIL"
+    pchant --pause 7 > "$sb/out" 2>&1 || fail "pause with glab failing: $(cat "$sb/out")"
+    [ ! -e "$wt" ] && grep -q 'lance #7' "$SF_SUIVI_DIR/pause-comments/7.md" && grep -q 'glab could not post' "$sb/out" && grep -q 'Paused #7' "$sb/out" || fail "glab failing: $(cat "$sb/out")"
+    rm -f "$PAUSE_GLAB_FAIL"
+    # Killed after the push, or after the record: a rerun finishes without a second comment.
+    psetup; git -C "$wt" push -q origin feature/7-x
+    pchant --pause 7 > "$sb/out" 2>&1 || fail "rerun after a kill (after the push): $(cat "$sb/out")"; [ ! -e "$wt" ] || fail "rerun after the push left the folder"
+    psetup; hb="$(git -C "$wt" rev-parse HEAD)"; git -C "$wt" push -q origin feature/7-x
+    sbsuivi pause 7 --full --removed "feature7:feature/7-x:$hb" > /dev/null
+    : > "$PAUSE_GLAB_LOG"
+    pchant --pause 7 > "$sb/out" 2>&1 || fail "rerun after a kill (after the record): $(cat "$sb/out")"
+    [ ! -e "$wt" ] && [ ! -s "$PAUSE_GLAB_LOG" ] || fail "rerun after the record: folder or a second comment: $(cat "$PAUSE_GLAB_LOG")"
+    # --keep is today's pause: owner dropped, folder kept, colour held by the open entry, nothing pushed.
+    psetup; pchant --pause 7 --keep > "$sb/out" 2>&1 || fail "--keep: $(cat "$sb/out")"
+    grep -q '^Couleur 🟦 reste prise : ' "$sb/out" && [ -d "$wt" ] && eq "$(remote_branch)" "" "--keep pushed" && eq "$(is_paused 7)" no "--keep recorded a pause" || fail "--keep: $(cat "$sb/out")"   # lang: fr
+    eq "$(downer 7)" none "--keep: owner dropped"
+    [ ! -s "$PAUSE_GLAB_LOG" ] || fail "--keep posted a comment"
+
+    # Resume: the folder is back on the branch, the main merged once, the previous colour back when free, else the
+    # first free; `paused` is cleared last; a branch head that moved is said; the entries to re-read are listed.
+    psetup; pchant --pause 7 > /dev/null 2>&1 || fail "pause before resume"
+    ( cd "$sb/StokesForge" && echo two > m1 && git add m1 && git commit -q -m "main: m1" && git push -q origin main )
+    git -C "$sb/StokesForge" branch -q -f feature/7-x "$(git -C "$sb/StokesForge" commit-tree -p feature/7-x -m moved "feature/7-x^{tree}")"
+    pchant 7 > "$sb/out" 2>&1 || fail "resume: $(cat "$sb/out")"
+    eq "$(is_paused 7)" no "resume: still paused"; eq "$(drec 7 colour)" 🟦 "resume: previous colour"
+    eq "$(downer 7)" sid-1 "resume: owner"
+    git -C "$wt" merge-base --is-ancestor origin/main HEAD || fail "resume: main not merged"
+    grep -q '^Resume #7: the branch head .* is not the one recorded' "$sb/out" && grep -q '^Resume #7: re-read these trial entries .*7-1' "$sb/out" || fail "resume briefing: $(cat "$sb/out")"
+    pchant --pause 7 > /dev/null 2>&1 || fail "second pause"
+    ( cd "$sb/StokesForge" && SF_ISSUE_TITLE="Eight" "$here/chantier.sh" 8 > /dev/null 2>&1 ); eq "$(drec 8 colour)" 🟦 "another issue takes the freed colour"
+    pchant 7 > "$sb/out" 2>&1 || fail "resume with the colour taken: $(cat "$sb/out")"; eq "$(drec 7 colour)" 🟩 "resume: first free colour"
+    # all colours held: refused before anything is created
+    pchant --pause 7 > /dev/null 2>&1 || fail "third pause"
+    for i in 101 102 103 104 105; do sbsuivi claim $i --name "n$i" > /dev/null; done
+    if pchant 7 > "$sb/out" 2>&1; then fail "resume with six colours held accepted"; fi
+    [ ! -e "$wt" ] && eq "$(is_paused 7)" yes "all colours held: something was created or cleared" || fail "all held: $(cat "$sb/out")"
+    # a resume killed before the end keeps `paused`; the rerun merges again, then clears it
+    psetup; pchant --pause 7 > /dev/null 2>&1 || fail "pause before the killed resume"
+    fs="$sb/fakescripts"; mkdir -p "$fs"; cp "$here/chantier.sh" "$here/workflow-lib.sh" "$here/suivi.py" "$fs/"
+    printf '#!/usr/bin/env bash\necho started > "%s/copy-started"\ncat "%s/g2" > /dev/null\n' "$sb" "$sb" > "$fs/template-target.sh"; chmod +x "$fs/template-target.sh"
+    mkfifo "$sb/g2"; rm -f "$sb/copy-started"
+    ( cd "$sb/StokesForge" && exec env SF_ISSUE_TITLE=T "$fs/chantier.sh" 7 > /dev/null 2>&1 ) & rb=$!
+    "$here/wait-for.sh" "$sb/copy-started" started 60 > /dev/null 2>&1 || fail "the resume never reached the copy"
+    kill -9 "$rb" 2> /dev/null || true; echo go > "$sb/g2" 2> /dev/null || true; wait "$rb" 2> /dev/null || true
+    eq "$(is_paused 7)" yes "a killed resume cleared paused"
+    ( cd "$sb/StokesForge" && echo three > m2 && git add m2 && git commit -q -m "main: m2" && git push -q origin main )
+    pchant 7 > "$sb/out" 2>&1 || fail "rerun of the killed resume: $(cat "$sb/out")"
+    eq "$(is_paused 7)" no "rerun: paused not cleared"; git -C "$wt" merge-base --is-ancestor origin/main HEAD || fail "rerun: main not merged again"
+    # deliver refuses a paused issue before taking the lock
+    sbsuivi pause 7 --full > /dev/null
+    if deliver; then fail "deliver of a paused issue accepted"; fi
+    grep -q 'is paused' "$sb/out" && lock_free "paused deliver" || fail "paused deliver: $(cat "$sb/out")"
+
+    # Package: both sub-issue folders go, then the record; one sub alone leaves the package its colour.
+    cat > "$tmp/pause-pkg.json" <<'JSON'
+[{"iid": 31, "title": "Sub one", "state": "opened", "description": "Parent: #30"}, {"iid": 32, "title": "Sub two", "state": "opened", "description": "Parent: #30"}]
+JSON
+    pk() { ( cd "$sb/StokesForge" && SF_ISSUES_JSON="$tmp/pause-pkg.json" SF_ISSUE_TITLE_30="Pkg" SF_ISSUE_TITLE_31="Sub one" SF_ISSUE_TITLE_32="Sub two" "$here/chantier.sh" "$@" ); }
+    psetup; pk 30 --start 31 --start 32 > "$sb/out" 2>&1 || fail "package start: $(cat "$sb/out")"
+    pk --pause 30 > "$sb/out" 2>&1 || fail "package pause: $(cat "$sb/out")"
+    [ ! -e "$sb/_stokesforge/feature31" ] && [ ! -e "$sb/_stokesforge/feature32" ] || fail "package pause left a folder"
+    eq "$(git -C "$sb/remote.git" for-each-ref refs/heads/feature/31-* refs/heads/feature/32-* | wc -l)" 2 "package pause: branches pushed"
+    eq "$(is_paused 30)$(is_paused 31)$(is_paused 32)" yesyesyes "package pause: records"
+    eq "$(drec 30 colour)$(drec 31 colour)$(drec 32 colour)" "" "package pause: colours freed"
+    grep -q '^Paquet #30 en pause : couleur .* libérée\.$' "$sb/out" || fail "package pause line: $(cat "$sb/out")"   # lang: fr
+    psetup; pk 30 --start 31 --start 32 > "$sb/out" 2>&1 || fail "package start 2: $(cat "$sb/out")"
+    pk --pause 31 > "$sb/out" 2>&1 || fail "one sub pause: $(cat "$sb/out")"
+    [ ! -e "$sb/_stokesforge/feature31" ] && [ -d "$sb/_stokesforge/feature32" ] || fail "one sub: wrong folders"
+    grep -q '^Sous-issue #31 en pause : le paquet #30 garde la couleur ' "$sb/out" || fail "one sub line: $(cat "$sb/out")"   # lang: fr
+    [ -n "$(drec 30 colour)" ] && eq "$(is_paused 30)" no "one sub: the package must keep its colour" || fail "one sub paused the package"
+    # a dirty sub refuses the whole package, nothing pushed
+    echo x > "$sb/_stokesforge/feature32/new.txt"
+    if pk --pause 30 > "$sb/out" 2>&1; then fail "package pause with a dirty sub accepted"; fi
+    eq "$(git -C "$sb/remote.git" for-each-ref refs/heads/feature/32-* | wc -l)" 0 "dirty sub: pushed"
+
+    # ---- try.sh and the tidy of a pause-trial folder (#563): a fake cargo builds a fake app that runs $FAKE_APP_ACT.
+    tb="$tmp/trybin"; mkdir -p "$tb"
+    cat > "$tb/cargo" <<'CG'
+#!/usr/bin/env bash
+mkdir -p "$CARGO_TARGET_DIR/debug"
+printf '#!/usr/bin/env bash\n[ -z "${FAKE_APP_ACT:-}" ] || eval "$FAKE_APP_ACT"\nexit 0\n' > "$CARGO_TARGET_DIR/debug/stokesforge-app"
+chmod +x "$CARGO_TARGET_DIR/debug/stokesforge-app"
+CG
+    chmod +x "$tb/cargo"; export PATH="$tb:$PATH"
+    trying() { ( cd "$sb/StokesForge" && "$here/try.sh" "$@" ); }
+    answer() { python3 -I -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["status"]=sys.argv[2]; json.dump(d,open(p,"w"))' "$SF_SUIVI_DIR/tests/$1.json" "$2"; }
+    marker() { printf '%s/sf-pause-trial\n' "$(git -C "$wt" rev-parse --absolute-git-dir)"; }
+    kept_code() { sbsuivi paused-info 7 | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("kept",""))'; }
+    paused_trial() {   # a paused issue 7 and its folder recreated by try.sh (app exits at once, an entry is todo: it stays)
+        psetup; pchant --pause 7 > /dev/null 2>&1 || fail "paused_trial: pause"
+        trying 7 > "$sb/out" 2>&1 || fail "paused_trial: try: $(cat "$sb/out")"
+        [ -d "$wt" ] && [ -f "$(marker)" ] || fail "paused_trial: no marked folder: $(cat "$sb/out")"
+    }
+    export TRY_WT=""
+    psetup; pchant --pause 7 > /dev/null 2>&1 || fail "pause before try"
+    hp="$(sbsuivi paused-info 7 | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["worktrees"][0]["head"])')"
+    n_wts="$(git -C "$sb/StokesForge" worktree list | wc -l)"
+    trying --dry-run 7 > "$sb/out" 2>&1 || fail "try dry-run on a paused issue: $(cat "$sb/out")"
+    grep -q 'would recreate' "$sb/out" && [ ! -e "$wt" ] && eq "$(git -C "$sb/StokesForge" worktree list | wc -l)" "$n_wts" "try dry-run created a worktree" || fail "try dry-run: $(cat "$sb/out")"
+    # offline (origin unreachable), main moved: the folder comes back from the local branch, main is not merged, no claim
+    git -C "$sb/StokesForge" remote set-url origin /nonexistent/remote.git
+    ( cd "$sb/StokesForge" && echo late > late && git add late && git commit -q -m "main: late" )
+    export TRY_WT="$wt"
+    trying 7 > "$sb/out" 2>&1 || fail "try on a paused issue: $(cat "$sb/out")"
+    [ -d "$wt" ] && [ -f "$(marker)" ] || fail "try: no folder or marker: $(cat "$sb/out")"
+    eq "$(git -C "$wt" rev-parse HEAD)" "$hp" "try: not the paused head"
+    git -C "$wt" merge-base --is-ancestor main HEAD && fail "try merged main" || true
+    eq "$(is_paused 7)" yes "try: the pause was cleared"; eq "$(downer 7)" none "try: claimed"; eq "$(drec 7 colour)" "" "try: took a colour"
+    grep -q 'stays for now' "$sb/out" || fail "an entry todo: the folder should stay: $(cat "$sb/out")"
+    # every entry answered: the app exits, the folder goes, the branch stays
+    answer 7-1 ok
+    trying 7 > "$sb/out" 2>&1 || fail "try with every entry answered: $(cat "$sb/out")"
+    [ ! -e "$wt" ] && git -C "$sb/StokesForge" rev-parse -q --verify feature/7-x > /dev/null && grep -q 'removed the trial folder' "$sb/out" || fail "tidy at exit: $(cat "$sb/out")"
+    eq "$(is_paused 7)" yes "tidy: the issue left its pause"
+    # an unpaused issue without a folder keeps today's message
+    dsb; git -C "$sb/StokesForge" worktree remove --force "$wt"
+    if trying 7 > "$sb/out" 2>&1; then fail "try of an unpaused issue without folder accepted"; fi
+    grep -q 'No worktree for issue #7' "$sb/out" && [ ! -e "$wt" ] || fail "unpaused try: $(cat "$sb/out")"
+    # changed file, head moved, a process in the folder: the folder stays (the page is told for the first two)
+    paused_trial; answer 7-1 ok; export TRY_WT="$wt"
+    FAKE_APP_ACT='echo x > "$TRY_WT/new.txt"' trying 7 > "$sb/out" 2>&1 || true
+    [ -d "$wt" ] && eq "$(kept_code)" changed "changed file: not told to the page" && sbsuivi status --json | grep -q '"kept": "changed"' || fail "changed file: $(cat "$sb/out")"
+    rm "$wt/new.txt"
+    FAKE_APP_ACT='git -C "$TRY_WT" commit -q --allow-empty -m moved' trying 7 > "$sb/out" 2>&1 || true
+    [ -d "$wt" ] && eq "$(kept_code)" head "moved head: not told to the page" || fail "moved head: $(cat "$sb/out")"
+    paused_trial; answer 7-1 ok; export TRY_WT="$wt"; export TRY_PIDFILE="$sb/pidfile"
+    FAKE_APP_ACT='( cd "$TRY_WT" && exec tail -f /dev/null ) > /dev/null 2>&1 & echo $! > "$TRY_PIDFILE"' trying 7 > "$sb/out" 2>&1 || true
+    [ -d "$wt" ] || fail "a process in the folder: it was removed"
+    kill "$(cat "$sb/pidfile")"; wait "$(cat "$sb/pidfile")" 2> /dev/null || true
+    ( cd "$sb/StokesForge" && "$here/chantier.sh" --tidy-trial 7 ) > "$sb/out" 2>&1 || fail "tidy after the process left: $(cat "$sb/out")"
+    [ ! -e "$wt" ] || fail "tidy by hand left the folder"
+    # never an unmarked folder: an active issue's, nor a paused one kept by --keep or recorded by hand
+    psetup; answer 7-1 ok
+    if ( cd "$sb/StokesForge" && "$here/chantier.sh" --tidy-trial 7 ) > "$sb/out" 2>&1; then fail "tidy of an active issue's folder accepted"; fi
+    sbsuivi pause 7 --full > /dev/null
+    if ( cd "$sb/StokesForge" && "$here/chantier.sh" --tidy-trial 7 ) > "$sb/out" 2>&1; then fail "tidy of an unmarked paused folder accepted"; fi
+    [ -d "$wt" ] && grep -q 'not a pause-trial folder' "$sb/out" || fail "unmarked: $(cat "$sb/out")"
+    # `lance #7` on a marked folder is a resume: marker gone, main merged once, claimed, pause cleared
+    paused_trial; export TRY_WT="$wt"
+    ( cd "$sb/StokesForge" && echo four > m3 && git add m3 && git commit -q -m "main: m3" && git push -q origin main )
+    pchant 7 > "$sb/out" 2>&1 || fail "lance on a marked folder: $(cat "$sb/out")"
+    [ ! -f "$(marker)" ] && eq "$(is_paused 7)" no "resume of a marked folder: paused" && eq "$(downer 7)" sid-1 "resume of a marked folder: owner" || fail "marked folder resume: $(cat "$sb/out")"
+    git -C "$wt" merge-base --is-ancestor origin/main HEAD || fail "marked folder resume: main not merged"
+    )
 
     # Delivery to the line: M on the line, pushed; main, origin/main and the main checkout untouched,
     # even dirty and on another branch; the message path is relative.

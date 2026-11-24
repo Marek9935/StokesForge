@@ -51,10 +51,30 @@
 #   scripts/chantier.sh --done <parent>
 # marks the package finished after the last merge (refused while a worktree of the
 # package exists).
-#   scripts/chantier.sh --pause <n>
-# drops the owner of any issue or package: its colour is freed unless a QCM or a
-# trial holds it; worktrees are kept (a package: refused while one of its
-# worktrees exists). A later claim takes the previous colour back if free.
+#   scripts/chantier.sh [--dry-run] --pause <n> [--note "<text>"]
+# FULL PAUSE (#563), the default: the work is saved on origin and the machine is freed. In this order, each step
+# rerunnable after a kill: (1) every check, one line per reason, nothing done when one fails: a dirty tree, an
+# untracked file, an ignored file outside the allow-list (target, .target-copying, __pycache__, vendor/python/
+# extracted, vendor/smithay-clipboard/Cargo.lock, dist, manual/book), a detached HEAD, a merge or rebase in
+# progress, another live owner, a running cargo or any process in the folder, a live deliver run, a call from
+# inside the folder, a branch diverged from (or behind) origin, sibling folders (feature<n>b, tmp/<n>-*), no
+# origin; (2) the branch is pushed to origin (explicit refspec, --no-follow-tags, never forced, no upstream) and
+# must read back at the local head; (3) one comment on the issue (branch, head, commits ahead of the base, the
+# open entries and forms, entries citing feature<n>/ paths, "resume with lance #<n>", plus --note); glab failing
+# prints it and keeps it in <suivi dir>/pause-comments/<n>.md; (4) `suivi.py pause --full`: owner dropped, colour
+# freed even with an entry or a form open (they stay in « En attente »), `paused` recorded, a stored merge message
+# dropped; (5) the worktree is removed last (target/ renamed aside, `git worktree remove` without --force, then
+# the renamed folder deleted). The local branch stays. A package pauses every sub-issue folder the same way
+# (all checked first), then its record; one sub alone leaves the package its colour.
+#   scripts/chantier.sh --pause <n> --keep
+# the older pause: drops the owner of any issue or package; its colour is freed unless a QCM or a trial holds it;
+# worktrees are kept (a package: refused while one of its worktrees exists). A later claim takes the previous colour
+# back if free.
+# Resume is `chantier.sh <n>` (lance #<n>): the folder is recreated from the branch, the base merged once, the
+# colour taken back if free, `paused` cleared LAST. During a pause scripts/try.sh <n> recreates the folder for a trial
+# (marker in its git dir); `chantier.sh --tidy-trial <n>` removes such a folder once every entry is answered, and
+# refuses (the folder stays) unless: marker, issue paused, no entry todo, HEAD at the paused head, clean tree, no
+# process in it. The service starts it when the last entry is answered; try.sh calls it when the app exits.
 #
 # Colours (#441):
 #   scripts/chantier.sh --status [--json]
@@ -91,7 +111,7 @@ set -euo pipefail
 . "$(dirname "$0")/workflow-lib.sh"
 suivi() { python3 -I "$(dirname "$0")/suivi.py" "$@"; }
 
-usage="usage: chantier.sh [--dry-run] [--start <sub-issue>]... <issue-number>... | --done <parent> | --pause <n> | [--no-trial] --release <n>[<letters>] | --status [--json]"
+usage="usage: chantier.sh [--dry-run] [--start <sub-issue>]... <issue-number>... | --done <parent> | --pause <n> [--keep] [--note <text>] | --tidy-trial <n> | [--no-trial] --release <n>[<letters>] | --status [--json]"
 dry=0
 issues=()
 starts=()
@@ -99,16 +119,22 @@ done_parent=""
 pause_n=""
 release_name=""
 no_trial=0
+keep=0
+note=""
+tidy_n=""
 status=0
 json=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
     --dry-run) dry=1 ;;
-    --start | --done | --pause)
+    --keep) keep=1 ;;
+    --note) [ "$#" -ge 2 ] || { echo "$usage" >&2; exit 2; }; note="$2"; shift ;;
+    --start | --done | --pause | --tidy-trial)
         case "${2:-}" in *[!0-9]* | '') echo "$usage" >&2; exit 2 ;; esac
         case "$1" in
         --start) starts+=("$2") ;;
         --done) done_parent="$2" ;;
+        --tidy-trial) tidy_n="$2" ;;
         *) pause_n="$2" ;;
         esac
         shift ;;
@@ -126,7 +152,7 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 [ "$json" = 0 ] || [ "$status" = 1 ] || { echo "$usage" >&2; exit 2; }
-[ "${#issues[@]}" -gt 0 ] || [ -n "$done_parent$pause_n$release_name" ] || [ "$status" = 1 ] \
+[ "${#issues[@]}" -gt 0 ] || [ -n "$done_parent$pause_n$release_name$tidy_n" ] || [ "$status" = 1 ] \
     || { echo "$usage" >&2; exit 2; }
 
 main="$(sf_main_dir)"
@@ -378,8 +404,8 @@ package_worktrees() {
     done
 }
 
-# --pause <n>: drop the owner of any issue or package; the worktrees stay.
-if [ -n "$pause_n" ]; then
+# --pause <n> --keep: drop the owner of any issue or package; the worktrees stay.
+if [ -n "$pause_n" ] && [ "$keep" = 1 ]; then
     if suivi is-package "$pause_n"; then
         left="$(package_worktrees "$pause_n" | paste -sd' ' -)"
         if [ -n "$left" ]; then
@@ -393,6 +419,146 @@ if [ -n "$pause_n" ]; then
     fi
     suivi pause "$pause_n"
     exit $?
+fi
+
+suivi_state_dir() { printf '%s\n' "${SF_SUIVI_DIR:-$root/.suivi}"; }
+
+# Head recorded for the folder of issue $1 by its pause, empty when none.
+paused_head_of() {
+    suivi paused-info "$1" 2> /dev/null | python3 -I -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except ValueError:
+    sys.exit(0)
+for w in d.get("worktrees", []):
+    if w.get("dir") == sys.argv[1]:
+        print(w.get("head", ""))' "feature$1" || true
+}
+
+# --pause <n> (full, #563): see the header. Every check first; nothing is done when one fails.
+pause_full() {
+    local n="$1" members m wt wts=() reasons=() r b h rel base line text f out sib
+    local inside
+    members="$(suivi members "$n")"
+    for m in $members; do
+        [ -f "$(suivi_state_dir)/issues/$m.json" ] || [ "$m" != "$n" ] || { echo "pause: no record of #$n (nothing to pause)" >&2; return 1; }
+    done
+    while IFS= read -r wt; do [ -z "$wt" ] || wts+=("$wt"); done < <(package_worktrees "$n")
+    git -C "$main" remote | grep -qx origin || reasons+=("no remote named origin: nothing to push to")
+    suivi is-package "$n" || [ "${#wts[@]}" -gt 0 ] || reasons+=("no worktree for #$n (use --keep to drop the owner only)")
+    for m in $members; do
+        out="$(suivi owner-check "$m" 2>&1)" || reasons+=("$(printf '%s' "$out" | tr '\n' ' ')")
+        if suivi deliver-live "$m" 2> /dev/null; then reasons+=("a deliver run of #$m is live"); fi
+        for sib in "$root"/tmp/"$m"-*; do [ ! -e "$sib" ] || reasons+=("sibling folder $sib (remove it first)"); done
+    done
+    for wt in "${wts[@]}"; do
+        [[ "$(basename "$wt")" =~ ^feature[0-9]+$ ]] || { reasons+=("sibling worktree $wt (merge and remove it first)"); continue; }
+        inside="$(realpath -m "$PWD")"
+        case "$inside" in "$(realpath -m "$wt")" | "$(realpath -m "$wt")"/*) reasons+=("called from inside $wt: run it from the main checkout") ;; esac
+        while IFS= read -r r; do [ -z "$r" ] || reasons+=("$r"); done < <(sf_wt_problems "$wt")
+        b="$(git -C "$wt" symbolic-ref -q --short HEAD || true)"
+        if [ -n "$b" ]; then
+            [ -n "${SF_NO_FETCH:-}" ] || git -C "$main" fetch -q origin "$b" 2> /dev/null || true
+            rel="$(sf_branch_relation "$b")"
+            case "$rel" in
+            diverged) reasons+=("$b and origin/$b have diverged (never forced): reconcile them by hand") ;;
+            behind) reasons+=("origin/$b has commits $b lacks: fast-forward $b first") ;;
+            esac
+        fi
+    done
+    if [ "${#reasons[@]}" -gt 0 ]; then
+        for r in "${reasons[@]}"; do echo "pause: $r" >&2; done
+        echo "pause: refused, nothing done" >&2
+        return 1
+    fi
+    if [ "$dry" = 1 ]; then
+        for wt in "${wts[@]}"; do
+            b="$(git -C "$wt" symbolic-ref --short HEAD)"
+            echo "would push $b to origin, comment on the issue, record the pause, then remove $wt (the local branch stays)"
+        done
+        echo "would record the pause of #$n and free its colour"
+        return 0
+    fi
+    # (2) push every branch, then check origin reads back the local head
+    for wt in "${wts[@]}"; do
+        b="$(git -C "$wt" symbolic-ref --short HEAD)"; h="$(git -C "$wt" rev-parse HEAD)"
+        git -C "$wt" push -q --no-follow-tags origin "refs/heads/$b:refs/heads/$b" \
+            || { echo "pause: the push of $b was refused; nothing removed, owner and colour untouched" >&2; return 1; }
+        r="$(git -C "$main" ls-remote origin "refs/heads/$b" | cut -f1)"
+        [ "$r" = "$h" ] || { echo "pause: origin does not show $b at $h after the push; nothing removed" >&2; return 1; }
+        git -C "$main" update-ref "refs/remotes/origin/$b" "$h" 2> /dev/null || true
+    done
+    # (3) the comment, (4) the record, (5) the removal, one folder at a time
+    for wt in "${wts[@]}"; do
+        m="$(sf_issue_of "$wt")"; b="$(git -C "$wt" symbolic-ref --short HEAD)"; h="$(git -C "$wt" rev-parse HEAD)"
+        line="$(sf_line_of "$m")"; base=origin/main; [ "$line" = main ] || base="origin/$line"
+        if [ "$(paused_head_of "$m")" != "$h" ]; then   # a rerun after a kill does not comment twice
+            text="Paused #$m: branch \`$b\` at \`$h\`, $(git -C "$wt" rev-list --count "$base..$h" 2> /dev/null || echo '?') commit(s) ahead of $base. Pushed to origin; the local branch is kept.
+$(suivi pause-summary "$m" 2> /dev/null)${note:+
+$note}
+Resume with \`lance #$m\`."
+            post_pause_comment "$m" "$text"
+        fi
+        suivi pause "$m" --full --removed "feature$m:$b:$h" || return 1
+        out="$(sf_wt_problems "$wt")"
+        [ -z "$out" ] || { echo "pause: $wt changed since the checks, kept (rerun the pause):" >&2; echo "$out" >&2; return 1; }
+        sf_remove_wt "$wt" || { echo "pause: could not remove $wt (never forced); rerun the pause" >&2; return 1; }
+        echo "removed $wt; branch $b kept (local and origin)"
+    done
+    if [ "${#wts[@]}" -eq 0 ]; then
+        post_pause_comment "$n" "Paused #$n (no folder to remove). Resume with \`lance #$n\`.${note:+
+$note}"
+    fi
+    if suivi is-package "$n"; then suivi pause "$n" --full; fi
+}
+
+# One comment on GitLab; when glab fails the text is printed and kept in the suivi folder, the pause goes on.
+post_pause_comment() {
+    local m="$1" text="$2" f
+    if glab issue note "$m" -m "$text" > /dev/null 2>&1; then return 0; fi
+    f="$(suivi_state_dir)/pause-comments/$m.md"
+    mkdir -p "$(dirname "$f")"
+    printf '%s\n' "$text" > "$f"
+    echo "pause: glab could not post the comment on #$m; text kept in $f:" >&2
+    printf '%s\n' "$text" >&2
+}
+
+if [ -n "$pause_n" ]; then
+    pause_full "$pause_n" || exit 1
+    exit 0
+fi
+
+# --tidy-trial <n> (#563): remove the folder try.sh recreated for a trial during a pause. Refuses (exit 1, folder kept)
+# unless every condition holds; a changed file or a moved head is recorded for the page.
+tidy_trial() {
+    local n="$1" wt="$root/feature$1" mk problems head want
+    [ -d "$wt" ] || { echo "tidy: no folder $wt; nothing to do"; return 0; }
+    mk="$(sf_trial_marker "$wt")"
+    [ -f "$mk" ] || { echo "tidy: $wt is not a pause-trial folder; kept" >&2; return 1; }
+    suivi paused "$n" || { echo "tidy: #$n is not paused; kept" >&2; return 1; }
+    [ "$(suivi trial-todo "$n")" = 0 ] || { echo "tidy: an entry of #$n is still to try; kept" >&2; return 1; }
+    case "$(realpath -m "$PWD")" in "$(realpath -m "$wt")" | "$(realpath -m "$wt")"/*) echo "tidy: called from inside $wt; kept" >&2; return 1 ;; esac
+    head="$(git -C "$wt" rev-parse HEAD)"; want="$(paused_head_of "$n")"
+    if [ -n "$want" ] && [ "$head" != "$want" ]; then
+        suivi trial-kept "$n" head || true
+        echo "tidy: HEAD moved since the pause; kept" >&2
+        return 1
+    fi
+    problems="$(sf_wt_problems "$wt")"
+    if [ -n "$problems" ]; then
+        if grep -qE 'uncommitted change|untracked file|ignored file' <<< "$problems"; then suivi trial-kept "$n" changed || true; fi
+        printf 'tidy: kept:\n%s\n' "$problems" >&2
+        return 1
+    fi
+    sf_remove_wt "$wt" || { echo "tidy: could not remove $wt; kept" >&2; return 1; }
+    suivi trial-kept "$n" --clear || true
+    echo "tidy: removed the trial folder $wt (branch kept)"
+}
+
+if [ -n "$tidy_n" ]; then
+    tidy_trial "$tidy_n" || exit 1
+    exit 0
 fi
 
 if [ -n "$done_parent" ]; then
@@ -411,6 +577,24 @@ if [ "$dry" = 0 ] && [ -z "${SF_NO_FETCH:-}" ] && git -C "$main" remote | grep -
 fi
 base=main
 git -C "$main" rev-parse --verify -q origin/main > /dev/null && base=origin/main
+
+# End of a resume (#563), the folder exists and the issue is claimed: say when the branch head is not the recorded one,
+# merge the base once (a conflict is aborted and named), list the entries to re-read, and only then clear `paused`
+# (a killed resume merges again). $1 issue, $2 folder, $3 branch, $4 base.
+resume_finish() {
+    local n="$1" wt="$2" branch="$3" wbase="$4" files want cur ids
+    want="$(paused_head_of "$n")"; cur="$(git -C "$wt" rev-parse HEAD)"
+    if [ -n "$want" ] && [ "$want" != "$cur" ]; then
+        rnotes+=("#$n: the branch head ($cur) is not the one recorded at the pause ($want); read git log before going on")
+    fi
+    if files="$(sf_merge_base_in "$wt" "$wbase")"; then
+        rnotes+=("#$n: resumed $branch; $wbase merged into it once")
+    else
+        rnotes+=("#$n: resumed $branch; merging $wbase conflicts${files:+ in: $files}; the merge was aborted, the branch is untouched: merge $wbase yourself in $wt")
+    fi
+    ids="$(suivi test list --issue "$n" 2> /dev/null | awk -F'\t' '$4 == "(try)" && $2 != "ok" { printf "%s ", $1 }')"
+    [ -z "$ids" ] || rnotes+=("#$n: re-read these trial entries against the new head before the user sees them: ${ids% }")
+}
 
 # Create (or find) the worktree of issue $1 titled $2 and claim the issue for this
 # session. $3 = parent package, $4 = its colour (dry run only). Sets wt, colour, branch.
@@ -433,6 +617,15 @@ ensure_wt() {
         branch="$(git -C "$wt" symbolic-ref --short HEAD 2> /dev/null || echo '?')"
         if [ "$dry" = 0 ]; then
             colour="$(suivi claim "$n" "${args[@]}")" || exit 1
+            # #563: a paused issue whose folder exists (a killed resume, or the folder try.sh recreated for a trial):
+            # a resume. The marker goes, the base is merged once, `paused` is cleared last.
+            local mk=""
+            mk="$(sf_trial_marker "$wt" 2> /dev/null || true)"
+            if suivi paused-info "$n" > /dev/null 2>&1 || { [ -n "$mk" ] && [ -f "$mk" ]; }; then
+                [ -z "$mk" ] || rm -f "$mk"
+                resume_finish "$n" "$wt" "$branch" "$wbase"
+                resume_pending=1
+            fi
             # #528: a rerun removes the leftover of an interrupted template copy (kept while a copy runs there)
             # and, only then, redoes the copy when the worktree has no target/.
             local tt stale
@@ -445,6 +638,7 @@ ensure_wt() {
                 *) tnotes+=("#$n: $stale") ;;
                 esac
             fi
+            [ -z "${resume_pending:-}" ] || { suivi resumed "$n"; resume_pending=""; }
         else
             colour="${pcolour:-$(suivi claim --dry-run "$n" "${args[@]}" --avoid "$reserved")}" || exit 1
         fi
@@ -477,13 +671,9 @@ ensure_wt() {
             mkdir -p "$root"
             sf_recreate_wt "$wt" "$branch" || exit 1
             colour="$(suivi claim "$n" "${args[@]}")" || exit 1
-            local files
-            if files="$(sf_merge_base_in "$wt" "$wbase")"; then
-                rnotes+=("#$n: resumed $branch; $wbase merged into it once")
-            else
-                rnotes+=("#$n: resumed $branch; merging $wbase conflicts${files:+ in: $files}; the merge was aborted, the branch is untouched: merge $wbase yourself in $wt")
-            fi
+            resume_finish "$n" "$wt" "$branch" "$wbase"
             tnotes+=("#$n: $("$(dirname "$0")/template-target.sh" copy "$wt" 2>&1 | tail -n 1 || true)")
+            suivi resumed "$n"      # LAST: a resume killed before this point merges again
         fi
         return
     fi

@@ -23,6 +23,12 @@
 # scripts/line.sh (LINE_TRIAL_ISSUE) whose try command is `scripts/try.sh <line>`.
 # An issue declared on an integration line (#480, suivi.py line <n>) is read against that line:
 # the last merges are those of the line and "not yet on" names the line (`try.sh main` unchanged).
+# A PAUSED issue without a folder (#563, chantier.sh --pause): the folder is recreated here from the LOCAL branch (no
+# network, no fetch, no merge of main, no claim; a branch known only by origin's last-fetched ref is used as it is),
+# the template target copied when possible, then built and opened. A marker in the folder's git dir names it a
+# pause-trial folder. When the app exits, `chantier.sh --tidy-trial <n>` removes it if every trial entry of the issue
+# is answered (OK or retour) and nothing changed there; otherwise it stays, and the service tries again at the last
+# answer. --dry-run creates nothing. An unpaused issue without a folder keeps the message below.
 # The build skips the cargo queue (#476): a trial is for the user at the PC, who must not wait
 # behind agent builds (SF_CARGO_QUEUE=off on the build command only; the app itself is unchanged).
 set -euo pipefail
@@ -47,6 +53,7 @@ if [ -n "$file" ]; then
 fi
 
 main="$(sf_main_dir)"
+recreated=""
 line=main
 if [ "$target" = main ]; then
     wt="$main"
@@ -67,7 +74,24 @@ else
         "branch refs/heads/feature/$target-"*) wt="$cur" ;;
         esac
     done < <(git -C "$main" worktree list --porcelain)
-    if [ -z "$wt" ]; then
+    if [ -z "$wt" ] && [[ "$target" =~ ^[0-9]+$ ]] && python3 -I "$(dirname "$0")/suivi.py" paused "$target" 2> /dev/null; then
+        # #563: a paused issue: the folder comes back from the local branch, nothing else is done to it
+        pbranch="$(sf_issue_branches "$target")"
+        case "$pbranch" in
+        '') echo "#$target is paused but has no branch feature/$target-* (local or origin's last-fetched); nothing created" >&2; exit 1 ;;
+        *$'\n'*) echo "#$target has several branches ($(printf '%s' "$pbranch" | paste -sd' ' -)); nothing created" >&2; exit 1 ;;
+        esac
+        wt="$(realpath -m "$(sf_wt_root)")/feature$target"
+        if [ "$dry" = 1 ]; then
+            echo "would recreate $wt from the local branch $pbranch (no network, no merge of main, no claim), copy the template target, build, run, then tidy the folder when every entry is answered"
+            recreated=dry
+        else
+            sf_recreate_wt "$wt" "$pbranch" || exit 1
+            : > "$(sf_trial_marker "$wt")"
+            "$(dirname "$0")/template-target.sh" copy "$wt" 2>&1 | tail -n 1 || true
+            recreated=1
+        fi
+    elif [ -z "$wt" ]; then
         echo "No worktree for issue #$target. Work already merged? Try: scripts/try.sh main" >&2
         exit 1
     fi
@@ -83,7 +107,7 @@ if [ "$line" != main ] && [ -n "$issue" ] && ! git -C "$main" rev-parse --verify
 fi
 echo "== last merges on $line"
 git -C "$main" log --first-parent --merges -5 --format='%h %s' "$line"
-if [ "$target" != main ]; then
+if [ "$target" != main ] && [ "$recreated" != dry ]; then
     ahead="$line"
     [ "$target" != "$line" ] || ahead=main    # a line is compared with main
     echo "== commits of $(git -C "$wt" symbolic-ref --short HEAD) not yet on $ahead"
@@ -117,4 +141,11 @@ fi
 "${build[@]}"
 unset STOKESFORGE_X11
 export STOKESFORGE_DEMO=1
+# A folder marked as a pause-trial folder (#563): the app runs as a child, the cleanup follows its exit.
+if [ -n "$issue" ] && [ -d "$wt" ] && [ -f "$(sf_trial_marker "$wt" 2> /dev/null || echo /nonexistent)" ]; then
+    rc=0
+    "${run[@]}" || rc=$?
+    "$(dirname "$0")/chantier.sh" --tidy-trial "$issue" || echo "try: the trial folder $wt stays for now (the page says why when a file changed)" >&2
+    exit "$rc"
+fi
 exec "${run[@]}"

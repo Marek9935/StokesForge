@@ -163,3 +163,83 @@ sf_merge_base_in() {
     printf '%s\n' "$files"
     return 1
 }
+
+# ---- Pause and the pause-trial folder (#563) -------------------------------------------------
+# A full pause (chantier.sh --pause) removes the worktree; scripts/try.sh may recreate one for a trial; both
+# first ask the same question: is this folder safe to delete? One line per reason on stdout, nothing when safe.
+
+# Ignored paths a worktree may carry at removal (build output, caches, copies made by the scripts); anything
+# else is refused by name (it may be a private file).
+sf_ignored_ok() {
+    case "$1" in
+    target | target/* | .target-copying | .target-copying/* | dist | dist/* | manual/book | manual/book/*) return 0 ;;
+    __pycache__ | __pycache__/* | */__pycache__ | */__pycache__/* ) return 0 ;;
+    vendor/python/extracted | vendor/python/extracted/* | vendor/smithay-clipboard/Cargo.lock) return 0 ;;
+    esac
+    return 1
+}
+
+# Processes whose cwd or executable is inside folder $1: "<pid> <name>" lines.
+sf_wt_busy() {
+    local wt d pid k t
+    wt="$(realpath -m "$1")"
+    for d in /proc/[0-9]*; do
+        pid="${d#/proc/}"
+        [ "$pid" != "$$" ] || continue
+        for k in cwd exe; do
+            t="$(readlink "$d/$k" 2> /dev/null)" || continue
+            t="${t% (deleted)}"
+            case "$t" in
+            "$wt" | "$wt"/*) printf '%s %s\n' "$pid" "$(cat "$d/comm" 2> /dev/null)"; break ;;
+            esac
+        done
+    done
+}
+
+# Reasons why worktree $1 cannot be removed now (empty output: it can). Reads git and /proc only.
+sf_wt_problems() {
+    local wt="$1" gd line p lock held
+    if ! git -C "$wt" rev-parse --git-dir > /dev/null 2>&1; then echo "$wt is not a worktree"; return 0; fi
+    gd="$(git -C "$wt" rev-parse --absolute-git-dir)"
+    git -C "$wt" symbolic-ref -q HEAD > /dev/null 2>&1 || echo "$wt has a detached HEAD"
+    for p in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD rebase-merge rebase-apply BISECT_LOG; do
+        [ ! -e "$gd/$p" ] || echo "$wt has a merge, rebase or similar in progress ($p)"
+    done
+    while IFS= read -r line; do
+        case "$line" in
+        '?? '*) echo "$wt has an untracked file: ${line#?? }" ;;
+        '!! '*) sf_ignored_ok "${line#!! }" || echo "$wt has an ignored file outside the allow-list: ${line#!! }" ;;
+        '') ;;
+        *) echo "$wt has an uncommitted change: ${line:3}" ;;
+        esac
+    done < <(git -C "$wt" status --porcelain --ignored=matching)
+    held=0
+    for lock in "$wt"/target/.cargo-lock "$wt"/target/*/.cargo-lock "$wt"/target/*/.cargo-build-lock "$wt"/target/*/.cargo-artifact-lock "$wt"/.target-copying; do
+        [ -e "$lock" ] || continue
+        flock -n -x "$lock" true 2> /dev/null || held=1
+    done
+    [ "$held" = 0 ] || echo "$wt has a running cargo build or a running target copy"
+    while IFS= read -r line; do
+        [ -z "$line" ] || echo "$wt is in use by process $line"
+    done < <(sf_wt_busy "$wt")
+}
+
+# Marker of a worktree recreated by try.sh for a trial during a pause: a file in its git dir, never tracked.
+sf_trial_marker() { printf '%s/sf-pause-trial\n' "$(git -C "$1" rev-parse --absolute-git-dir)"; }
+
+# Remove worktree $1 and its target without waiting on a huge delete: target/ is renamed aside (same disk, outside
+# the worktree), the worktree removed (never --force), then the renamed folder deleted. On a refused removal the
+# target goes back. A kill between the steps leaves a `.deleting-*` folder that template-target.sh weekly clears.
+sf_remove_wt() {
+    local wt="$1" main aside=""
+    main="$(sf_main_dir)"
+    if [ -e "$wt/target" ]; then
+        aside="$(dirname "$wt")/.deleting-$(basename "$wt")-$$"
+        mv "$wt/target" "$aside" || return 1
+    fi
+    if ! git -C "$main" worktree remove "$wt" > /dev/null; then
+        [ -z "$aside" ] || mv "$aside" "$wt/target"
+        return 1
+    fi
+    [ -z "$aside" ] || rm -rf "$aside"
+}

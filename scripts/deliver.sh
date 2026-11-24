@@ -43,6 +43,7 @@
 # with the orchestrator. The CI is not polled: the watcher of `suivi.py serve`
 # shows red on the tracking page (read it only for a tag, a release or a change to CI itself).
 #
+# A paused issue (#563) is refused before the lock: `lance #<n>` resumes it first.
 # After the push (#563) the remote branch origin/feature/<n>-* is deleted when its head is an ancestor of the pushed
 # main (or line); otherwise it is kept; a failure is one warning line. Never another branch, never a tag.
 #
@@ -100,6 +101,11 @@ if [ -n "$wait_tag" ] && grep -qiE "\\b(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed
 fi
 first="$(head -n 1 "$msgfile")"
 case "$first" in "Merge #$n:"*) ;; *) die "the first line of the message must start with 'Merge #$n:' (got: $first)" ;; esac
+
+# #563: a paused issue is not merged (its folder is gone or only a trial folder): `lance #<n>` resumes it first.
+if python3 -I "$here/suivi.py" paused "$n" 2> /dev/null; then
+    die "#$n is paused: resume it first (scripts/chantier.sh $n, or lance #$n); nothing merged"
+fi
 
 # #496: a retour fixed without a new trial must be settled first (read-only, before the lock).
 # Exit 1 = unsettled retours (listed); anything else (no state yet) is not a refusal.

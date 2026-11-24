@@ -2411,6 +2411,151 @@ class TestMergePost(MergeRunBase):
         self.assertEqual(gone, 0)
 
 
+class TestPausedIssue(MergeRunBase):
+    """A full pause (#563): the cards stay, grey and badged, the merge is refused, nothing in tests/ is rewritten."""
+
+    def prepare_env(self):
+        super().prepare_env()
+        self.fake_script("tidy", 'echo "$*" >> "$D/tidy.calls"')
+        self.EXTRA_ENV.update(SF_SUIVI_TIDY_LAUNCH="direct", SF_SUIVI_TIDY_SCRIPT=os.path.join(self.fk, "tidy"))
+
+    def full_pause(self, n=1):
+        r = self.run_cli("pause", str(n), "--full", "--removed", "feature%d:feature/%d-x:abc123" % (n, n), env=self.as_session("S1"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r
+
+    def get_state(self):
+        return json.loads(self.req("GET", "/api/state")[2])
+
+    def test_full_pause_frees_the_colour_even_with_open_cards_and_records_the_branch(self):
+        self.store()
+        os.makedirs(os.path.join(self.state, "qcm", "q1"))
+        with open(os.path.join(self.state, "qcm", "q1", "meta.json"), "w") as f:
+            json.dump({"issue": 1, "finished": False}, f)
+        self.assertEqual(self.held(C[0]), ["agent", "essai", "qcm"])
+        r = self.full_pause()
+        self.assertEqual(self.held(C[0]), [])
+        rec = self.rec(1)
+        self.assertIsNone(rec["colour"])
+        self.assertEqual(rec["last_colour"], C[0])
+        self.assertIsNone(rec["owner"])
+        self.assertEqual((rec["paused"]["worktrees"], rec["paused"]["by"]), ([{"dir": "feature1", "branch": "feature/1-x", "head": "abc123"}], "S1"))
+        self.assertTrue(r.stdout.startswith("Dossier #1 en pause"))
+        self.assertFalse(os.path.exists(os.path.join(self.state, "deliver", "1.json")), "a stored merge message survived the pause")
+        row = [p for p in self.status()["paused"] if p["issue"] == 1][0]
+        self.assertEqual(row["pause"], {"branch": "feature/1-x", "kept": ""})
+        # plain `pause` keeps its meaning: the colour stays held by the open card
+        self.claim(3)
+        os.makedirs(os.path.join(self.state, "tests"), exist_ok=True)
+        with open(os.path.join(self.state, "tests", "3-1.json"), "w") as f:
+            json.dump({"title": "T", "status": "todo", "try": "x"}, f)
+        self.assertIn("reste prise", self.run_cli("pause", "3").stdout)
+
+    def test_the_cards_are_grey_and_badged_at_read_time_and_the_files_are_never_rewritten(self):
+        os.makedirs(os.path.join(self.state, "qcm", "q1"), exist_ok=True)
+        with open(os.path.join(self.state, "qcm", "q1", "meta.json"), "w") as f:
+            json.dump({"issue": 1, "finished": False}, f)
+        before, mtime = self.entry_text(), os.stat(self.entry).st_mtime_ns
+        self.assertNotEqual(self.get_state()["tests"][0].get("colour"), "\u2b1c")
+        self.full_pause()
+        st = self.get_state()
+        t = st["tests"][0]
+        self.assertEqual((t["paused"], t["colour"]), (True, "\u2b1c"))
+        self.assertEqual([q.get("paused") for q in st["qcms"]], [True])
+        self.assertEqual(self.entry_text(), before)
+        self.assertEqual(os.stat(self.entry).st_mtime_ns, mtime)
+        self.assertEqual(self.get_state()["pending"], st["pending"])                 # still counted: the cards are waiting
+        self.assertTrue([c for c in st["paused"] if c["issue"] == 1][0]["paused"])
+        self.run_cli("resumed", "1")                                              # resumed: the record's own colour again
+        self.claim(1)
+        t = self.get_state()["tests"][0]
+        self.assertNotIn("paused", t)
+        self.assertEqual(self.entry_text(), before)
+
+    def test_the_merge_is_refused_while_paused(self):
+        self.set_entry("ok")
+        self.full_pause()
+        self.assertEqual(self.store().returncode, 0)                              # the agent could store it again
+        e = [p for p in self.get_state()["paused"] if p["issue"] == 1][0]
+        self.assertTrue(e["paused"] and e["merge_ready"])
+        code, _, body = self.merge()
+        self.assertEqual(code, 409, body)
+        self.assertEqual(self.fk_lines("calls"), [])
+        self.assertFalse(os.path.exists(os.path.join(self.state, "merge")))
+        self.assertEqual(self.run_cli("resumed", "1").returncode, 0)
+        self.claim(1)
+        self.assertEqual(self.merge()[0], 200)
+        self.ended()
+
+    def test_the_button_is_hidden_while_paused(self):
+        src = re.search(r"/\*CARDLINE-START\*/(.*)/\*CARDLINE-END\*/", slurp(os.path.join(HERE, "suivi-page.html")), re.S).group(1)
+        c = {"issue": 7, "held_by": [], "merge_prepared": True, "merge_ready": True}
+        tests = [{"issue": 7, "status": "ok", "try": "x"}]
+        def line(extra):
+            code = src + "\nprocess.stdout.write(JSON.stringify(cardLine(%s,%s,[])));" % (json.dumps(dict(c, **extra)), json.dumps(tests))
+            r = subprocess.run(["node", "-e", code], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return json.loads(r.stdout)
+        self.assertTrue(line({})["mergeButton"])
+        l = line({"paused": True})
+        self.assertFalse(l["mergeButton"])
+        self.assertIn("En pause", l["mergeNote"])      # lang: fr
+
+    def test_check_is_silent_for_a_paused_issue_and_flags_a_plain_missing_worktree(self):
+        self.full_pause(2)                              # issue 2 has no worktree
+        out = self.run_cli("check").stdout
+        self.assertNotIn("#2 has a record", out)
+        self.run_cli("resumed", "2")
+        self.assertIn("issue #2 has a record but no worktree", self.run_cli("check").stdout)
+
+    def test_resumed_clears_the_issue_and_its_package_parent(self):
+        self.put(10, kind="package", colour=C[3], paused={"at": "t", "by": "x", "worktrees": []})
+        self.put(11, parent=10, colour=C[3], paused={"at": "t", "by": "x", "worktrees": []})
+        self.assertEqual(self.run_cli("paused", "11").returncode, 0)
+        self.assertEqual(self.run_cli("resumed", "11").returncode, 0)
+        self.assertNotIn("paused", self.rec(11))
+        self.assertNotIn("paused", self.rec(10))
+        self.assertEqual(self.run_cli("paused", "11").returncode, 1)
+
+    def test_helper_commands(self):
+        self.full_pause()
+        self.assertEqual(json.loads(self.run_cli("paused-info", "1").stdout)["worktrees"][0]["head"], "abc123")
+        self.assertEqual(self.run_cli("trial-todo", "1").stdout.strip(), "1")
+        out = self.run_cli("pause-summary", "1").stdout
+        self.assertIn("Open trial entries: 1-1 (T)", out)
+        self.assertEqual(self.run_cli("trial-kept", "1", "changed").returncode, 0)
+        self.assertEqual(self.rec(1)["paused"]["kept"], "changed")
+        self.assertEqual([p for p in self.status()["paused"] if p["issue"] == 1][0]["pause"]["kept"], "changed")
+        self.assertEqual(self.run_cli("trial-kept", "1", "--clear").returncode, 0)
+        self.assertNotIn("kept", self.rec(1)["paused"])
+        self.put(5, owner=self.live_owner("OTHER"))
+        r = self.run_cli("owner-check", "5", env=self.as_session("S1"))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("owned by another live session", r.stderr)
+        self.assertEqual(self.run_cli("deliver-live", "1").returncode, 1)
+
+    def test_the_last_answer_of_a_paused_issue_starts_the_tidy_detached(self):
+        os.makedirs(os.path.join(self.root, "feature1"))                           # the pause-trial folder
+        self.full_pause()
+        with open(os.path.join(self.state, "tests", "1-2.json"), "w") as f:
+            json.dump({"n": 1, "title": "T2", "status": "todo", "try": "x"}, f)
+        self.assertEqual(self.post("/api/tests/1-1", {"status": "ok"})[0], 200)
+        self.assertEqual(self.post("/api/tests/1-1", {"comment": "only a comment"})[0], 200)
+        self.assertEqual(self.fk_lines("tidy.calls"), [], "an entry is still todo")
+        self.assertEqual(self.post("/api/tests/1-2", {"status": "retour", "comment": "c"})[0], 200)   # a retour answers too
+        self.until(lambda: self.fk_lines("tidy.calls"))
+        self.assertEqual(self.fk_lines("tidy.calls"), ["--tidy-trial 1"])
+        # an issue that is not paused, or whose folder is gone: nothing is started
+        self.run_cli("resumed", "1")
+        self.post("/api/tests/1-1", {"status": "todo"})
+        self.post("/api/tests/1-1", {"status": "ok"})
+        self.full_pause()
+        shutil.rmtree(os.path.join(self.root, "feature1"))
+        self.post("/api/tests/1-2", {"status": "ok"})
+        self.assertEqual(self.req("GET", "/api/state")[0], 200)
+        self.assertEqual(self.fk_lines("tidy.calls"), ["--tidy-trial 1"])
+
+
 class TestMergeMessage(Base):
     """`suivi.py merge-message` (#531): the checks of deliver.sh, now, at store time."""
 

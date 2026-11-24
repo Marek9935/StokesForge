@@ -8,7 +8,8 @@ The single source of truth is ../_stokesforge/.suivi/ (override: SF_SUIVI_DIR):
     issues/<n>.json        one record per issue: colour, last_colour, kind
                            (issue|package), parent, subs, name, state, waiting,
                            wait_kind, what, since, owner{session,pid,pid_start,at},
-                           done_at, line (absent = main; #480, see below)
+                           done_at, line (absent = main; #480, see below),
+                           paused {at, by, worktrees:[{dir, branch, head}], kept?} (#563: a full pause, see PAUSE)
     ended/<session_id>     empty files touched by the SessionEnd hook
     qcm/<id>/data.js       the decisions (injected into the form template when served)
     qcm/<id>/meta.json     {issue, title, created, created_ts (epoch), cards, finished, finished_at}
@@ -119,6 +120,15 @@ child, no systemd-run), SF_SUIVI_WAIT_POLL (seconds), SF_SUIVI_WAIT_SETTLE (dela
 session owns: exit 2 with the text on stderr for an event, exit 0 silent otherwise. `hook-news` (SessionStart / UserPromptSubmit hooks) prints and records an owning session's unseen events,
 or tells a new session which issues hold unread answers; it always exits 0.
 
+PAUSE (#563). `chantier.sh --pause <n>` pushes the branch, removes the worktree and calls `pause <n> --full --removed
+dir:branch:head ...`: owner dropped, colour freed EVEN with a trial entry or a form open (nothing else changes), the
+record carries `paused`, a stored merge message is dropped. The entries and forms stay in « En attente »: read-time,
+/api/state shows them with `paused: true` and the grey square, tests/*.json is never rewritten. A paused issue's merge is
+refused (the button is hidden, POST 409, deliver.sh). `resumed <n>` (end of a resume) clears it; `paused <n>` exits 0
+when it is set; `paused-info`, `owner-check`, `deliver-live`, `pause-summary`, `trial-todo`, `trial-kept` serve the scripts.
+When the last entry of a paused issue is answered the service starts `chantier.sh --tidy-trial <n>` detached
+(tests: SF_SUIVI_TIDY_LAUNCH=direct|off, SF_SUIVI_TIDY_SCRIPT): it removes the folder `try.sh` recreated for the trial.
+
 INTEGRATION LINE (#480). An issue may target an integration branch (today `PostV1.1`) instead of `main`.
 The record field `line` names it; absent means `main`. `claim --line L` writes it and every claim rewrites
 it (a claim without `--line` removes it); a sub-issue without its own line inherits its parent's.
@@ -131,7 +141,8 @@ need it, never answered with `main`. The permanent worktrees `line-*` are not wo
 A record migrated from the old layout carries `legacy: true`: it counts as held
 until the issue is claimed, paused or done (its session is unknown).
 
-Commands: claim, line, line-clear, line-trial, status, set, pause, done, release-line, check, migrate,
+Commands: claim, line, line-clear, line-trial, status, set, pause, paused, paused-info, resumed, owner-check, deliver-live,
+trial-todo, pause-summary, trial-kept, done, release-line, check, migrate,
 members, is-package, merge-message, deliver-run, session-end, hook-wait, hook-news, wait, news, serve (the local page, 127.0.0.1 only),
 test add|merged|remove|settle|unsettled|list, qcm pose|answers|withdraw|list, import-online, tag-wait, labels sync, tag-check.
 """
@@ -155,6 +166,7 @@ import tempfile
 import threading
 import time
 
+PAUSED_SQUARE = "⬜"
 COLOURS = ["🟦", "🟩", "🟧", "🟪", "🟥", "🟨"]
 STATES = ["questions", "code", "essai", "fusion"]
 WAIT_KINDS = ["you", "dep", "ag"]
@@ -179,6 +191,8 @@ def colour_line(kind, *a):
         return "Paquet #%s en pause : couleur %s libérée." % (a[0], a[1])
     if kind == "paused-issue":
         return "Dossier #%s en pause : couleur %s libérée." % (a[0], a[1])
+    if kind == "paused-sub":
+        return "Sous-issue #%s en pause : le paquet #%s garde la couleur %s." % (a[0], a[1], a[2])
     if kind == "paused-already":
         return "#%s déjà en pause (aucune couleur prise)." % a[0]
     if kind == "done-paused":
@@ -625,6 +639,40 @@ def free_colour(r):
     r["colour"] = None
 
 
+def parse_removed(items):
+    out = []
+    for v in items or []:
+        d, _, rest = v.partition(":")
+        b, _, h = rest.partition(":")
+        if not d or not b or not h:
+            raise Fail("--removed wants dir:branch:head, got %r" % v)
+        out.append({"dir": d, "branch": b, "head": h})
+    return out
+
+
+def is_paused(recs, n):
+    r = recs.get(n)
+    return bool(r and r.get("paused"))
+
+
+def group_paused(recs, root):
+    return any(is_paused(recs, m) for m in members_of(recs, root))
+
+
+def issue_paused(recs, n):
+    """The issue itself or its package parent is paused (#563)."""
+    r = recs.get(n) or {}
+    return is_paused(recs, n) or is_paused(recs, r.get("parent"))
+
+
+def drop_stored_merge(root):
+    for p in (deliver_path(root), deliver_msg_path(root)):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+
+
 def cmd_pause(a):
     with Lock():
         recs = load_all()
@@ -632,16 +680,105 @@ def cmd_pause(a):
         was = r.get("colour")
         r["owner"] = None
         r["legacy"] = False
-        if not held_by(r):
+        if a.full:
+            prev = r.get("paused") if isinstance(r.get("paused"), dict) else {}
+            r["paused"] = {"at": prev.get("at") or datetime.datetime.now().isoformat(timespec="seconds"),
+                           "by": os.environ.get("CLAUDE_CODE_SESSION_ID") or "cli",
+                           "worktrees": parse_removed(a.removed)}
+            free_colour(r)                 # even with a trial entry or a form open: they stay in « En attente »
+            drop_stored_merge(group_of(r))
+            if r.get("kind") == "package":
+                for x in recs.values():
+                    if x.get("parent") == a.issue and not x.get("done_at") and x.get("colour"):
+                        x["owner"] = None
+                        free_colour(x)
+                        save(x)
+        elif not held_by(r):
             free_colour(r)
         save(r)
+        parent = recs.get(r.get("parent")) if r.get("parent") else None
         label = "paused" if r.get("kind") == "package" else "paused-issue"
-        if r.get("colour"):
+        if parent and a.full and parent.get("colour"):
+            print(colour_line("paused-sub", a.issue, parent["issue"], parent["colour"]))
+        elif r.get("colour"):
             print(colour_line("kept", r["colour"], why_text(r)))
         elif was:
             print(colour_line(label, a.issue, was))
         else:
             print(colour_line("paused-already", a.issue))
+    return 0
+
+
+def cmd_paused(a):
+    return 0 if issue_paused(load_all(), a.issue) else 1
+
+
+def cmd_paused_info(a):
+    p = (load_all().get(a.issue) or {}).get("paused")
+    if not isinstance(p, dict):
+        return 1
+    json.dump(p, sys.stdout, ensure_ascii=False)
+    print()
+    return 0
+
+
+def cmd_resumed(a):
+    """End of a resume: the pause marks of the issue and of its package parent go, LAST (a killed resume merges again)."""
+    with Lock():
+        recs = load_all()
+        for n in (a.issue, (recs.get(a.issue) or {}).get("parent")):
+            r = recs.get(n)
+            if r and "paused" in r:
+                r.pop("paused")
+                save(r)
+    return 0
+
+
+def cmd_trial_kept(a):
+    """The reason the service or try.sh left a pause-trial folder in place (the page says so); `--clear` removes it."""
+    with Lock():
+        r = need(load_all(), a.issue)
+        if not isinstance(r.get("paused"), dict):
+            return 1
+        if a.clear:
+            r["paused"].pop("kept", None)
+        elif a.code:
+            r["paused"]["kept"] = a.code
+        save(r)
+    return 0
+
+
+def cmd_owner_check(a):
+    settle_owner_check(a.issue)
+    return 0
+
+
+def cmd_deliver_live(a):
+    recs = load_all()
+    run = effective_run(deliver_record(group_of(recs[a.issue]))) if a.issue in recs else None
+    return 0 if run and run["state"] in RUN_LIVE else 1
+
+
+def cmd_trial_todo(a):
+    print(sum(1 for t in load_tests(a.issue) if t.get("status", "todo") == "todo"))
+    return 0
+
+
+def cmd_pause_summary(a):
+    """Lines for the pause comment on GitLab: open entries and forms, entries citing the removed folder."""
+    n = a.issue
+    todo = [t for t in sorted(load_tests(n), key=lambda t: natural(t["id"])) if t.get("status", "todo") == "todo"]
+    forms = qcm_open_ids(n)
+    pat = re.compile(r"feature%d[a-z]*/" % n)
+
+    def cites(t):
+        vals = [t.get("try", "")] + list(t.get("where") or []) + list(t.get("steps") or [])
+        return any(pat.search(str(v)) for v in vals)
+    print("Open trial entries: " + (", ".join("%s (%s)" % (t["id"], t.get("title", "")) for t in todo) or "none"))
+    print("Open forms: " + (", ".join(forms) or "none"))
+    cited = [t["id"] for t in sorted(load_tests(n), key=lambda t: natural(t["id"])) if cites(t)]
+    if cited:
+        print("Entries whose steps cite feature%d/ paths (re-read them after the resume): %s" % (n, ", ".join(cited)))
     return 0
 
 
@@ -724,6 +861,16 @@ def days_since(iso):
     return iso, (today() - d).days
 
 
+def pause_view(r):
+    """Steady fields of a full pause for the page (#563): the branch kept, why a trial folder stayed. No timestamp (ETag)."""
+    p = r.get("paused")
+    if not isinstance(p, dict):
+        return {}
+    wts = p.get("worktrees") or []
+    return {"pause": {"branch": (wts[0].get("branch") if wts and isinstance(wts[0], dict) else "") or "",
+                      "kept": p.get("kept") or ""}}
+
+
 def build_status():
     recs = load_all()
     wts = worktrees()
@@ -779,14 +926,14 @@ def build_status():
             paused.append({"issue": r["issue"], "kind": r.get("kind", "issue"), "name": r.get("name", ""),
                            "last_colour": r.get("colour") or r.get("last_colour"), "subs": r.get("subs", []),
                            "what": r.get("what", ""), "agent_idle_min": agent_idle_min(r),
-                           **wait_view(recs, r["issue"]),
+                           **wait_view(recs, r["issue"]), **pause_view(r),
                            "worktrees": group_wts(r["issue"]), "since": since, "days": days})
         elif not held_by(r):
             since, days = days_since(r.get("since"))
             paused.append({"issue": r["issue"], "kind": "issue", "parent": r["parent"], "name": r.get("name", ""),
                            "last_colour": r.get("colour") or r.get("last_colour"), "subs": [],
                            "what": r.get("what", ""), "agent_idle_min": agent_idle_min(r),
-                           **wait_view(recs, group_of(r)),
+                           **wait_view(recs, group_of(r)), **pause_view(r),
                            "worktrees": by_issue.get(r["issue"], []), "since": since, "days": days})
     done.sort(key=lambda d: (d["done_at"], d["issue"]), reverse=True)
     return {"colours": colours, "paused": sorted(paused, key=lambda p: p["issue"]),
@@ -837,7 +984,7 @@ def cmd_check(a):
             problems.append("colour %s is held by %s" % (c, ", ".join("#%d" % g for g in sorted(groups))))
     wt_issues = {issue_of(w) for w in wts}
     for r in recs.values():
-        if r.get("kind") != "package" and not r.get("done_at") and r["issue"] not in wt_issues:
+        if r.get("kind") != "package" and not r.get("done_at") and not r.get("paused") and r["issue"] not in wt_issues:
             problems.append("issue #%d has a record but no worktree and is not done" % r["issue"])
     for w in wts:
         if issue_of(w) not in recs:
@@ -1198,6 +1345,39 @@ def launch_deliver(root):
     threading.Thread(target=go, daemon=True).start()
 
 
+def tidy_argv(n, main, script, setenv):
+    """Pure: the detached command of the removal of a pause-trial folder (#563), like the merge: a transient unit."""
+    return (["systemd-run", "--user", "--collect", "--unit=stokesforge-tidy-%d" % n, "--working-directory=" + main]
+            + ["--setenv=%s=%s" % (k, v) for k, v in sorted(setenv.items())] + ["--", script, "--tidy-trial", str(n)])
+
+
+def tidy_trial_after_answer(tid):
+    """The last entry of a paused issue was answered and its pause-trial folder exists: start `chantier.sh --tidy-trial`
+    detached (the request thread never waits; the script re-checks everything and refuses when unsure)."""
+    mode = os.environ.get("SF_SUIVI_TIDY_LAUNCH", "")
+    n = tid.split("-")[0]
+    try:
+        if mode == "off" or not n.isdigit():
+            return
+        n = int(n)
+        recs = load_all()
+        main = main_dir()
+        if not main or not is_paused(recs, n) or any(t.get("status", "todo") == "todo" for t in load_tests(n)):
+            return
+        if not os.path.isdir(os.path.join(os.path.dirname(suivi_dir()), "feature%d" % n)):
+            return
+        script = os.environ.get("SF_SUIVI_TIDY_SCRIPT") or os.path.join(main, "scripts", "chantier.sh")   # test seam
+        if mode == "direct":
+            argv = [script, "--tidy-trial", str(n)]
+        else:
+            argv = tidy_argv(n, main, script, {k: os.environ[k] for k in DELIVER_PASS_ENV if os.environ.get(k)})
+        proc = subprocess.Popen(argv, cwd=main, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, start_new_session=True)
+        threading.Thread(target=proc.wait, daemon=True).start()
+    except Exception:
+        pass
+
+
 def logged_run(argv, cwd, log):
     """Run argv appending to the log; (rc, the output of this run)."""
     with open(log, "a", encoding="utf-8") as f:
@@ -1434,7 +1614,7 @@ def wait_view(recs, root):
     sid = owner_session(recs.get(root))
     return {"listening": listening(recs, root), "unread": len([e for e in unseen_events(items, load_heard(root, sid)) if e["kind"] != "withdrawn"]),
             "merge_ready": merge_ready(items), "merge_requested": any(it["kind"] == "merge" for it in items.values()),
-            **merge_run_view(root)}
+            "paused": group_paused(recs, root), **merge_run_view(root)}
 
 
 def exit_reason(b, sid):
@@ -3509,8 +3689,16 @@ def line_rows():
 
 def build_state():
     s = build_status()
+    recs = load_all()
     tests = sorted(load_tests(), key=lambda t: natural(t["id"]))
     qcms = open_qcms()
+    for t in tests:        # #563: computed at read, the entry file is never rewritten (its mtime is part of merge_key)
+        n = t["id"].split("-")[0]
+        if n.isdigit() and is_paused(recs, int(n)):
+            t["paused"], t["colour"] = True, PAUSED_SQUARE
+    for q in qcms:
+        if isinstance(q.get("issue"), int) and is_paused(recs, q["issue"]):
+            q["paused"] = True
     return {"colours": s["colours"], "paused": s["paused"], "colourless": s["colourless"],
             "done": s["done"][:10], "qcms": qcms, "tests": tests,
             "control": read_json(os.path.join(suivi_dir(), "control.json")), "ci": ci_view(),
@@ -3785,6 +3973,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if n not in recs:
             return self.fail(409, "no such issue")
         root = group_of(recs[n])
+        if group_paused(recs, root):
+            return self.fail(409, "the issue is paused: resume it (lance #%d) before merging" % n)
         items, _, _ = scan_group(members_of(recs, root), root)
         if not merge_ready(items):
             return self.fail(409, "the merge condition does not hold: every trial entry must be OK")
@@ -3909,6 +4099,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if "images" in body:
             prune_images(test_images_dir(tid), t.get("images", []))
         self.send(200, json.dumps({"ok": True}), "application/json")
+        if "status" in body:
+            tidy_trial_after_answer(tid)
 
     def other(self):
         if self.guard():
@@ -3984,6 +4176,21 @@ def parser():
     p.add_argument("--force", action="store_true", help="allow `--wait you` with no card on the page")
     p = add("pause", cmd_pause, "drop the owner (the colour is freed unless a QCM or a trial holds it)")
     p.add_argument("issue", type=int)
+    p.add_argument("--full", action="store_true", help="a full pause (#563): colour freed even with open cards, `paused` recorded")
+    p.add_argument("--removed", action="append", metavar="DIR:BRANCH:HEAD", help="a worktree removed by the full pause")
+    for name, fn, h in (("paused", cmd_paused, "exit 0 when the issue is paused (#563)"),
+                        ("paused-info", cmd_paused_info, "print the `paused` record of the issue as JSON"),
+                        ("resumed", cmd_resumed, "clear the pause marks of the issue (end of a resume)"),
+                        ("owner-check", cmd_owner_check, "refuse when another live session owns the issue"),
+                        ("deliver-live", cmd_deliver_live, "exit 0 when a deliver run of the issue lives"),
+                        ("trial-todo", cmd_trial_todo, "print how many trial entries of the issue are still todo"),
+                        ("pause-summary", cmd_pause_summary, "open entries and forms, for the pause comment"),
+                        ("trial-kept", cmd_trial_kept, "note why a pause-trial folder was kept (or --clear)")):
+        q = add(name, fn, h)
+        q.add_argument("issue", type=int)
+        if name == "trial-kept":
+            q.add_argument("code", nargs="?", default="")
+            q.add_argument("--clear", action="store_true")
     p = add("done", cmd_done, "the issue is finished: colour freed")
     p.add_argument("issue", type=int)
     p = add("release-line", cmd_release_line, "the line to report after a worktree of the issue was removed")
