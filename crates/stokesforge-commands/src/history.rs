@@ -37,6 +37,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use stokesforge_core::script_settings;
 use stokesforge_core::{ColumnMeta, ColumnType, ColumnValues, MixedCell, RawSheetMark, WindowMeta};
 use stokesforge_core::{CoreError, CoreResult, NodeId, Project, Staleness, Tree, ValueBlock};
 use stokesforge_plot::{GraphTheme, PlotSpec, SavedColors};
@@ -1197,6 +1198,8 @@ impl History {
                 Ok(structural(before, project, label))
             }
             Command::AddScriptSettings { parent, name, text } => {
+                // #571: LF in the model, whatever platform produced the text.
+                let text = script_settings::normalize_newlines(&text);
                 project.add_script_settings(parent, name.as_deref(), &text)?;
                 Ok(structural(before, project, label))
             }
@@ -1478,6 +1481,9 @@ impl History {
                 })
             }
             Command::SetScriptSettingsText { id, text } => {
+                // #571: `after` is the LF text; `before` stays the raw bytes,
+                // so undo restores them exactly.
+                let text = script_settings::normalize_newlines(&text).into_owned();
                 let before = project.set_script_settings_text(id, &text)?;
                 Ok(Entry::Data {
                     delta: Box::new(DataDelta::ScriptSettingsText {

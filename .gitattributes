@@ -7,6 +7,9 @@ vendor/crate-license-notices/provenance.json -text
 vendor/python/licenses-linux/** -text
 vendor/python/licenses-windows/** -text
 
+# The Script Settings template is stored as text: LF on every platform (#571).
+crates/stokesforge-app-state/src/script_settings_example.toml text eol=lf
+
 # Imported notices keep the whitespace and text endings of the originals.
 vendor/crate-license-notices/NOTICE.txt whitespace=-blank-at-eol,-blank-at-eof
 vendor/python/licenses-linux/LICENSE.libX11.txt whitespace=-blank-at-eof

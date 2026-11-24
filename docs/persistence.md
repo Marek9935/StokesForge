@@ -965,7 +965,8 @@ read back with no theme (`witness_files.rs`); `b3_hostile_project_themes`,
 mirror `KindRecordKnown::ScriptSettings`), the twin of `Note`: a raw TOML text
 that scripts read (`NodeKind::ScriptSettings`). The text is an **opaque
 string** at the format level: no parsing at load or save, nothing normalised
-(CRLF, control characters and Unicode come back byte for byte). **`FORMAT_VERSION`
+(CRLF, control characters and Unicode come back byte for byte; only the
+commands write LF, #571). **`FORMAT_VERSION`
 did not move.** Same shape as the Mixed precedent below: an older reader does
 not know the variant, its strict decoding fails, `unknown.rs` keeps the node as
 `KindRecord::Unknown` and a re-save gives it back unchanged (invariant 10), so

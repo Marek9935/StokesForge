@@ -6256,7 +6256,11 @@ impl AppState {
     /// entry for nothing). A text that is not valid TOML is **kept**: the
     /// window says why and freezes its form.
     fn set_script_settings_text(&mut self, settings: NodeId, text: String) {
-        if self.script_settings_text(settings).as_ref() == Some(&text) {
+        // Line endings aside (#571): an object kept in CRLF equals its LF twin.
+        if self
+            .script_settings_text(settings)
+            .is_some_and(|stored| script_settings::same_text(&stored, &text))
+        {
             return;
         }
         if text.len() > script_settings::MAX_TEXT_BYTES {

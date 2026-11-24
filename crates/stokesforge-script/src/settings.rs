@@ -209,7 +209,7 @@ pub(crate) fn set_settings(
         let (name, text) = stored_text(&snapshot, id, epoch)?;
         let updated = script_settings::apply_values(&text, &tree)
             .map_err(|error| HostError::InvalidValue(format!("{name}: {error}")))?;
-        if updated != text {
+        if !script_settings::same_text(&updated, &text) {
             context
                 .session()
                 .execute(Command::SetScriptSettingsText { id, text: updated })
