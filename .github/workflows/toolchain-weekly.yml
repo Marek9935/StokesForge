@@ -49,7 +49,7 @@ jobs:
       # directory override, toolchain file, default).
       RUSTUP_TOOLCHAIN: ${{ matrix.tc }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: rustup toolchain install ${{ matrix.tc }} --profile minimal --component clippy
       - run: rustc -vV
       - uses: Swatinem/rust-cache@v2
@@ -106,7 +106,7 @@ jobs:
       SF_PROPTEST_SEED: ${{ github.run_number }}
       SF_PROPTEST_SCALE: 8
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: rustup show
       - uses: Swatinem/rust-cache@v2
         with:
