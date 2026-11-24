@@ -975,11 +975,14 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
                 env.text_style.edit_field,
             )
         });
-        on_hover(
-            font.response.clone(),
-            tr!("format-font"),
-            Some(tr!("format-font", "hint")),
-        );
+        // No tooltip over an open list: it would hide the first rows.
+        if !font.open {
+            on_hover(
+                font.response.clone(),
+                tr!("format-font"),
+                Some(tr!("format-font", "hint")),
+            );
+        }
         if let Some(name) = font.picked {
             requests.push(ToolbarRequest::FormatText(TextFormat::Font(name)));
         }

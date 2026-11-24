@@ -67,6 +67,8 @@ pub struct FontField {
     /// The font picked this frame: `Some("")` is « Graph font ». `None` when
     /// nothing changed (including picking the font already in place).
     pub picked: Option<String>,
+    /// The list is open: the caller shows no tooltip, it would cover the rows.
+    pub open: bool,
 }
 
 /// Where the list must scroll to on its next painting.
@@ -96,6 +98,10 @@ struct State {
     view_height: f32,
     /// The list's rectangle of the last frame.
     area: Option<egui::Rect>,
+    /// The list was opened by the arrow this frame: the field may have lost the
+    /// focus to the arrow button (a clickable widget takes it at the press); the
+    /// next frame gives it back instead of leaving (#554, seen in Graph Properties).
+    just_opened: bool,
 }
 
 /// How a frame closes the list.
@@ -272,8 +278,9 @@ pub fn font_field_in(
         pointer.is_some_and(|pos| rect.is_some_and(|rect| rect.contains(pos)))
     };
     let on_field = inside(Some(response.rect));
+    let just_opened = std::mem::take(&mut state.just_opened);
     if exit.is_none() && state.open && !response.has_focus() {
-        if pressing && (on_field || inside(state.area)) {
+        if just_opened || (pressing && (on_field || inside(state.area))) {
             response.request_focus();
         } else {
             exit = Some(Exit::Leave);
@@ -297,6 +304,7 @@ pub fn font_field_in(
         } else {
             open_whole(&mut state, &rows_for(&State::default()), current);
             state.select_all = true;
+            state.just_opened = true;
             response.request_focus();
         }
     }
@@ -308,7 +316,7 @@ pub fn font_field_in(
             .cursor
             .or_else(|| current.and_then(|c| font_search::current_index(list, c)));
         let size = egui::vec2(response.rect.width().max(LIST_MIN_WIDTH), LIST_HEIGHT);
-        let anchor = response.rect.left_bottom() + egui::vec2(0.0, 2.0);
+        let (anchor, pivot) = list_anchor(response.rect, ctx.content_rect(), size.y);
         let query = state.draft.clone().unwrap_or_default();
         let mut view = View {
             offset: state.offset,
@@ -319,6 +327,7 @@ pub fn font_field_in(
         let area = egui::Area::new(id.with("list"))
             .order(egui::Order::Foreground)
             .fixed_pos(anchor)
+            .pivot(pivot)
             .constrain(true)
             .show(&ctx, |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
@@ -352,12 +361,40 @@ pub fn font_field_in(
     if ended || state.select_all {
         ctx.request_repaint();
     }
+    let open = state.open;
     if enabled {
         ctx.data_mut(|data| data.insert_temp(state_id, state));
     } else {
         ctx.data_mut(|data| data.remove::<State>(state_id));
     }
-    FontField { response, picked }
+    FontField {
+        response,
+        picked,
+        open,
+    }
+}
+
+/// Room taken by the frame around the list, in points (margins and stroke).
+const LIST_FRAME: f32 = 16.0;
+
+/// Where the open list goes: below the field, or above it when the room below
+/// is too small and the room above is larger (a field near the bottom of the
+/// window): `constrain` alone would slide the list over the field it belongs to.
+fn list_anchor(field: egui::Rect, screen: egui::Rect, height: f32) -> (egui::Pos2, egui::Align2) {
+    let needed = height + LIST_FRAME + 2.0;
+    let below = screen.bottom() - field.bottom();
+    let above = field.top() - screen.top();
+    if below < needed && above > below {
+        (
+            field.left_top() - egui::vec2(0.0, 2.0),
+            egui::Align2::LEFT_BOTTOM,
+        )
+    } else {
+        (
+            field.left_bottom() + egui::vec2(0.0, 2.0),
+            egui::Align2::LEFT_TOP,
+        )
+    }
 }
 
 /// The font a row stands for (`""` for « Graph font »); a title stands for none.
@@ -392,7 +429,8 @@ fn give_focus_back(
 ) {
     match return_to {
         Some(editor) => {
-            ctx.data_mut(|data| data.insert_temp(return_focus_slot(), editor));
+            let asked = ctx.cumulative_pass_nr();
+            ctx.data_mut(|data| data.insert_temp(return_focus_slot(), (editor, asked)));
         }
         None => {
             state.select_all = true;
@@ -401,22 +439,33 @@ fn give_focus_back(
     }
 }
 
+/// Passes during which a painted editor takes the focus back: a row clicked took
+/// the focus at its press, and egui lets go of that vanished widget after the first
+/// request, so one request is not enough. An editor that is gone (closed meanwhile)
+/// never receives a request: the ask expires (#554).
+const RETURN_PASSES: u64 = 3;
+
 fn return_focus_slot() -> egui::Id {
     egui::Id::new("stokesforge_font_list_return_focus")
 }
 
 /// Whether the font field asked for the focus to go back to the text editor
-/// `field` (and forgets the request). Read by the editor when it is painted,
+/// `field` (the request expires after a few passes). Read by the editor when it is painted,
 /// which is after the bar: it then restores the selection it kept (#242) and
 /// takes the focus.
 pub fn take_return_focus(ctx: &egui::Context, field: egui::Id) -> bool {
-    ctx.data_mut(|data| {
-        let asked = data.get_temp::<egui::Id>(return_focus_slot()) == Some(field);
-        if asked {
-            data.remove::<egui::Id>(return_focus_slot());
-        }
-        asked
-    })
+    let now = ctx.cumulative_pass_nr();
+    ctx.data_mut(
+        |data| match data.get_temp::<(egui::Id, u64)>(return_focus_slot()) {
+            Some((editor, asked)) if now > asked + RETURN_PASSES => {
+                let _ = editor;
+                data.remove::<(egui::Id, u64)>(return_focus_slot());
+                false
+            }
+            Some((editor, _)) => editor == field,
+            None => false,
+        },
+    )
 }
 
 /// Consumes the key `shortcut` of the registry.
@@ -1018,6 +1067,47 @@ mod tests {
         assert!(!bench.painted("Graph font"));
         assert!(bench.focused(), "the field keeps the focus");
         assert_eq!(bench.selection(), (0, 8), "text selected");
+    }
+
+    /// The arrow button takes the focus from the field at its press (a
+    /// clickable widget is focusable): seen in Graph Properties, where the
+    /// list then closed at once. The list stays open and the field gets the
+    /// focus back. Witness: without `just_opened` the list closes.
+    #[test]
+    fn the_arrow_opens_the_list_even_when_the_field_loses_the_focus_at_the_click() {
+        let mut bench = Bench::with(
+            "Face 001",
+            vec![fam("Face 001", false), fam("Face 002", false)],
+        );
+        let pos = list_frame::arrow_rect(bench.field).center();
+        bench.image(vec![egui::Event::PointerMoved(pos)]);
+        bench.image(vec![button(pos, true)]);
+        bench.image(vec![button(pos, false)]);
+        let id = bench.id.expect("id");
+        bench.ctx.memory_mut(|memory| memory.surrender_focus(id));
+        bench.image(Vec::new());
+        bench.image(Vec::new());
+        assert!(bench.open(), "the list stays open");
+        assert!(bench.focused(), "the field has the focus back");
+    }
+
+    /// A field near the bottom of the window gets its list above it, not
+    /// slid over it. Witness: always below, the list covers the field.
+    #[test]
+    fn the_list_goes_above_a_field_too_near_the_bottom() {
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 700.0));
+        let field =
+            |y: f32| egui::Rect::from_min_size(egui::pos2(100.0, y), egui::vec2(120.0, 22.0));
+        let (pos, pivot) = list_anchor(field(40.0), screen, LIST_HEIGHT);
+        assert_eq!(pivot, egui::Align2::LEFT_TOP, "room below: below");
+        assert!(pos.y > 62.0);
+        let (pos, pivot) = list_anchor(field(560.0), screen, LIST_HEIGHT);
+        assert_eq!(pivot, egui::Align2::LEFT_BOTTOM, "no room below: above");
+        assert!(pos.y < 560.0);
+        // Little room on both sides: the larger one.
+        let tiny = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 300.0));
+        let (_, pivot) = list_anchor(field(60.0), tiny, LIST_HEIGHT);
+        assert_eq!(pivot, egui::Align2::LEFT_TOP);
     }
 
     #[test]

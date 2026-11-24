@@ -859,6 +859,7 @@ mod tests {
         ctx: egui::Context,
         frame: eframe::Frame,
         output: egui::FullOutput,
+        time: f64,
     }
 
     impl Screen {
@@ -871,11 +872,14 @@ mod tests {
                 ctx,
                 frame: eframe::Frame::_new_kittest(),
                 output: egui::FullOutput::default(),
+                time: 0.0,
             }
         }
 
         fn paint(&mut self, app: &mut StokesForgeApp, events: Vec<egui::Event>) {
             use eframe::App as _;
+            self.time += 0.1;
+            let time = self.time;
             let frame = &mut self.frame;
             self.output = self.ctx.run_ui(
                 egui::RawInput {
@@ -884,6 +888,8 @@ mod tests {
                         egui::vec2(1400.0, 900.0),
                     )),
                     events,
+                    time: Some(time),
+                    focused: true,
                     ..Default::default()
                 },
                 |ui| app.ui(ui, frame),
@@ -935,6 +941,24 @@ mod tests {
             self.click(app, pos);
         }
 
+        /// Clicks the lowest painted text equal to `name` (the row of the open
+        /// font list: the field above shows the typed draft, not the name).
+        fn click_row(&mut self, app: &mut StokesForgeApp, name: &str) {
+            let pos = self
+                .output
+                .shapes
+                .iter()
+                .filter_map(|painted| match &painted.shape {
+                    egui::Shape::Text(shape) if shape.galley.job.text == name => {
+                        Some(shape.pos + shape.galley.rect.center().to_vec2())
+                    }
+                    _ => None,
+                })
+                .max_by(|a, b| a.y.total_cmp(&b.y))
+                .unwrap_or_else(|| panic!("no row {name:?}"));
+            self.click(app, pos);
+        }
+
         fn has_focus(&self, id: egui::Id) -> bool {
             self.ctx.memory(|memory| memory.has_focus(id))
         }
@@ -947,6 +971,16 @@ mod tests {
     }
 
     use stokesforge_app_state::tr;
+
+    fn escape_key() -> egui::Event {
+        egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
 
     fn first_embedded_font() -> String {
         stokesforge_render_egui::available_families()
@@ -1058,6 +1092,110 @@ mod tests {
         assert_eq!(screen.selection(field), Some((0, 2)));
         // The old name is back in the bar and no list is open.
         find_text_center(&screen.output.shapes, &tr!("format-font-default"));
+        session.shutdown().unwrap();
+    }
+
+    /// #554: a font picked by a CLICK on a row (the press takes the focus away
+    /// from the editor, and egui lets go of the vanished row) gives the editor
+    /// its focus and selection back, so that typing goes on in the text.
+    /// Witness: a hand-back asked for one pass only (`RETURN_PASSES` 0) loses the
+    /// focus to nothing, and the typed letter lands in no field.
+    #[test]
+    fn a_font_picked_by_a_click_on_a_row_gives_the_editor_its_focus_back() {
+        let (session, mut app, graph, mut screen, field) = editing_the_free_text();
+        let wanted = first_embedded_font();
+        screen.click_font_field(&mut app);
+        screen.type_text(&mut app, &wanted);
+        screen.click_row(&mut app, &wanted);
+        assert!(screen.has_focus(field), "focus is back in the editor");
+        assert_eq!(screen.selection(field), Some((0, 2)));
+        screen.type_text(&mut app, "Z");
+        let ctx = screen.ctx.clone();
+        assert_eq!(
+            annotation_draft(&ctx, &app, graph).as_deref(),
+            Some("Zxt"),
+            "the letter replaced the selection in the text"
+        );
+        session.shutdown().unwrap();
+    }
+
+    /// #554: the hand-back is asked only by a pick or an Escape, and expires: Tab
+    /// or a click elsewhere ask nothing, and an ask nobody took (editor closed
+    /// meanwhile) never reaches a field painted later. Witness: an ask that never
+    /// expires is still there after many passes.
+    #[test]
+    fn the_hand_back_is_asked_by_a_pick_or_escape_only_and_expires() {
+        for route in ["Tab", "click elsewhere", "Escape"] {
+            let (session, mut app, _graph, mut screen, field) = editing_the_free_text();
+            let ctx = screen.ctx.clone();
+            screen.click_font_field(&mut app);
+            screen.type_text(&mut app, "zz");
+            match route {
+                "Tab" => screen.paint(
+                    &mut app,
+                    vec![egui::Event::Key {
+                        key: egui::Key::Tab,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                ),
+                "Escape" => screen.paint(&mut app, vec![escape_key()]),
+                _ => {
+                    let pos = egui::pos2(700.0, 300.0);
+                    let button = |pressed| egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    };
+                    screen.paint(&mut app, vec![egui::Event::PointerMoved(pos)]);
+                    screen.paint(&mut app, vec![button(true)]);
+                }
+            }
+            let asked = crate::font_list::take_return_focus(&ctx, field);
+            assert_eq!(asked, route == "Escape", "{route}");
+            for _ in 0..8 {
+                screen.paint(&mut app, Vec::new());
+            }
+            assert!(
+                !crate::font_list::take_return_focus(&ctx, field),
+                "{route}: nothing asked, or the ask expired"
+            );
+            session.shutdown().unwrap();
+        }
+    }
+
+    /// #554: the tooltip of the Font field shows while the list is closed and is
+    /// absent while it is open (it would hide the first rows). Witness: a tooltip
+    /// kept over the open list is painted there.
+    #[test]
+    fn the_font_tooltip_is_hidden_while_the_list_is_open() {
+        let (session, mut app, _graph, mut screen, _field) = editing_the_free_text();
+        let hint = tr!("format-font", "hint");
+        let field = find_text_center(&screen.output.shapes, &tr!("format-font-default"));
+        // Closed: hovering long enough shows it.
+        screen.paint(&mut app, vec![egui::Event::PointerMoved(field)]);
+        for _ in 0..20 {
+            screen.paint(&mut app, Vec::new());
+        }
+        find_text_center(&screen.output.shapes, &hint);
+        // Open (typed): the pointer rests on the field, no tooltip.
+        screen.click_font_field(&mut app);
+        screen.type_text(&mut app, "zz");
+        screen.paint(
+            &mut app,
+            vec![egui::Event::PointerMoved(field + egui::vec2(2.0, 0.0))],
+        );
+        for _ in 0..20 {
+            screen.paint(&mut app, Vec::new());
+        }
+        let painted = screen.output.shapes.iter().any(|painted| {
+            matches!(&painted.shape,
+                egui::Shape::Text(shape) if shape.galley.job.text.contains(&hint))
+        });
+        assert!(!painted, "no tooltip over the open list");
         session.shutdown().unwrap();
     }
 
