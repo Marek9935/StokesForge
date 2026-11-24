@@ -30,12 +30,12 @@ application decides without drawing it: `state.rs` + `state/` (`AppState`,
 `history_text.rs`, `quantities.rs`, `user_colors.rs`, `object_format.rs`,
 `text_format.rs`, `errors.rs`, `i18n.rs` (with the `i18n/` catalogs) and
 `file_picker.rs`. **`stokesforge-app`** keeps `main.rs`, `app.rs`, `app/`,
-`theme.rs`, `icons.rs`, `app_logo.rs`, `field_state.rs`, `number_field.rs`, `toolbar.rs`,
+`theme.rs`, `icons.rs`, `app_logo.rs`, `field_state.rs`, `number_field.rs`, `font_list.rs`, `toolbar.rs`,
 `list_frame.rs`, `tree_lines.rs` and `color_picker.rs`: everything that names an
 egui type, and the offer of the figure to the clipboard (`stokesforge-clipboard`
 pulls in winit, so it cannot move down). In the paths of this document, a module
 without a prefix is in `stokesforge-app/src/` if it is under `app/` or named
-`theme`, `icons`, `app_logo`, `field_state`, `number_field`, `toolbar`, `list_frame`,
+`theme`, `icons`, `app_logo`, `field_state`, `number_field`, `font_list`, `toolbar`, `list_frame`,
 `tree_lines`, `color_picker`, and in `stokesforge-app-state/src/` otherwise.
 
 ### Code split: `app.rs` and `src/app/` (#115)
@@ -87,6 +87,7 @@ subfolders included, and look for their functions by name (#116): see
 | `app/plot_settings.rs` | graph properties: `plot_settings_window`, its tabs, one editor per page, the formula syntax help (`formula_field`, `formula_help`); `column_metadata_window` |
 | `app/hover_help.rs` | shared building block of the hover help of a field (#197): `hover_help`, the greyed icon to the right of the field whose bubble shows the reminder |
 | `field_state.rs` (crate root, like `color_picker.rs`) | shared building block of the state of a field (#219): `FieldIssue` (refused red / brought back orange), `show_issue`, 2 s memory (`flag`, `active`), cycle of a validated text field (`edit_text`, `decide`, `Verdict`) |
+| `font_list.rs` (crate root) and `font_search.rs` (in `stokesforge-app-state`) | "font" building block (#554): `font_field` (typed field with a searchable list, same frame and arrow as the number list, list in an `egui::Area`, rows by `show_rows`, hand-back of the focus to the canvas text editor through `take_return_focus`), used by the Format bar and the General and Legend tabs of Graph Properties; `font_search` is the pure filter (`rows`, `step`, `first_selectable`, `current_index`) |
 | `number_field.rs` (crate root) and `quantities.rs` (in `stokesforge-app-state`) | "number" building block (#220): `number_field` (text field, full arrow in the frame if the quantity has values, keyboard arrows, hover wheel that follows the list, list in an `egui::Area`) and the table of quantities (`Quantity`); built on `field_state::edit_text_with_arrow`; `list_frame.rs`: arrow and backgrounds shared with the drop-down lists (#234) |
 | `app/confirmations.rs` | blocking dialogs of the application (#229): "Discard Changes · Cancel · Save", serious failure (S-M8), overwriting an export, axis choice of a row drop; confirmation / choice classification at the top of the module |
 | `app/dialogs.rs` | shared building block of modal dialogs: `modal_dialog`, `modal_dialog_with`, `modal_wizard` (wizard), `modal_read_only` (Close only), `modal_confirm` (Cancel by default, destructive verb), `modal_save_changes` (trio, Enter = Save), `modal_alert` (S-M8), shared body `modal_frame`; ordered footer (S-F6), message area (error of `AppState::dialog_error`, otherwise reason for the greyed primary button), two-level Escape, geometry per kind of dialog in the preferences and initial focus on the first field (#228); `sync_dialogs`, called by `show_edit_dialogs`, links footer, preferences and state |

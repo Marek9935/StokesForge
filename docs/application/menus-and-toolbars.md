@@ -132,8 +132,13 @@ is ignored on reading. The `//!` of the module says why the panel is an
   An inherited size displays its effective size from the shared pipeline;
   the "Auto" entry is then checked. Choosing it removes the explicit size
   of a title or the legend, and restores the default size of a free text.
-  The "Graph font" entry is checked for an inherited font, while the
-  field displays the name of the graph font. "Auto" reuses the common
+  The font field is a typed field with a searchable list (#554, S-N13,
+  `font_list::font_field`; same block in General and Legend of Graph
+  Properties): it shows « Graph font » for an inherited font, the family
+  otherwise, and the neutral label "Font" for a mixed format. Typing opens the
+  filtered list, `▼` or Alt+↓ the whole one; Enter picks, Esc (one press), Tab or
+  a click elsewhere give the old name back. After a pick or an Esc, the canvas
+  text being edited gets focus and selection back. "Auto" reuses the common
   key `common-auto` of both languages.
   A local font or size setting in the markup displays the neutral label
   "Font" or "Size": the bar summarizes the zone without interpreting the

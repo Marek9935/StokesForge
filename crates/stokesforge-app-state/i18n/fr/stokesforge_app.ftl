@@ -1458,6 +1458,7 @@ format-font = Police
 format-font-default = Police du graphe
 format-font-embedded = Fournies avec StokesForge
 format-font-system = Installées sur cet ordinateur
+font-list-no-match = Aucun nom de police ne contient « { $text } ». Effacez le texte pour voir toutes les polices.
 format-size = Taille
     .hint = Règle la taille, en points, du texte sélectionné
 format-color = Couleur du texte

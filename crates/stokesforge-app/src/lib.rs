@@ -43,6 +43,7 @@ pub mod app;
 pub mod app_logo;
 pub mod color_picker;
 pub mod field_state;
+pub mod font_list;
 pub mod icons;
 pub mod list_frame;
 pub mod number_field;

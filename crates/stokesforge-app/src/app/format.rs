@@ -27,6 +27,12 @@ use super::tab::active_tab_kind;
 use super::tab::Tab;
 use super::StokesForgeApp;
 
+/// The field of a canvas text editor, for the font list to give the focus
+/// back to (`None` in a detached window, #554).
+fn edit_field_of(editor: egui::Id, detached: bool) -> Option<egui::Id> {
+    (!detached).then(|| editor.with("field"))
+}
+
 impl StokesForgeApp {
     /// What the contextual bar shows for the foreground window.
     pub(super) fn tools_context(&self, active_tab: Option<Tab>) -> crate::toolbar::ToolsContext {
@@ -107,6 +113,9 @@ impl StokesForgeApp {
         else {
             return TextFormatState::default();
         };
+        // The editor of a detached graph lives in another viewport: its field
+        // is never asked for the focus from the root.
+        let detached = self.detached_graphs.contains_key(&graph);
         let state = self
             .read_graph_view(graph, |view| {
                 let annotation_editor =
@@ -142,6 +151,9 @@ impl StokesForgeApp {
                             color: Some(annotation.color.clone()),
                             auto_family: annotation.font.trim().is_empty(),
                             auto_size: annotation.follows_graph_size,
+                            edit_field: annotation_editor
+                                .as_ref()
+                                .and_then(|_| edit_field_of(annotation_editor_id(view), detached)),
                             align: Some(annotation.align),
                         }
                         .with_markup(&annotation.text),
@@ -193,6 +205,9 @@ impl StokesForgeApp {
                         color: target.color(&spec),
                         auto_family: font.family().is_none(),
                         auto_size: font.size.is_none(),
+                        edit_field: editor
+                            .as_ref()
+                            .and_then(|_| edit_field_of(text_editor_id(view), detached)),
                         align: Some(font.align),
                     }
                     .with_markup(&text),
@@ -596,7 +611,7 @@ impl StokesForgeApp {
 
 #[cfg(test)]
 mod tests {
-    use super::super::graph_text_edit::open_text_editor;
+    use super::super::graph_text_edit::{open_annotation_editor, open_text_editor};
     use super::super::graph_window::graph_drop_target;
     use super::super::graph_window::tests::plotted_graph;
     use super::super::object_manager_ui::{selected_manager_target, ObjectManagerRequest};
@@ -835,6 +850,300 @@ mod tests {
             graph,
             egui::Context::default(),
         )
+    }
+
+    // — The font list of the bar against the editor of the canvas (#554). —
+
+    /// The whole application painted frame by frame, with real events.
+    struct Screen {
+        ctx: egui::Context,
+        frame: eframe::Frame,
+        output: egui::FullOutput,
+    }
+
+    impl Screen {
+        fn new() -> Self {
+            let ctx = egui::Context::default();
+            ctx.set_fonts(stokesforge_render_egui::font_definitions());
+            theme::install(&ctx);
+            egui_extras::install_image_loaders(&ctx);
+            Self {
+                ctx,
+                frame: eframe::Frame::_new_kittest(),
+                output: egui::FullOutput::default(),
+            }
+        }
+
+        fn paint(&mut self, app: &mut StokesForgeApp, events: Vec<egui::Event>) {
+            use eframe::App as _;
+            let frame = &mut self.frame;
+            self.output = self.ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1400.0, 900.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.ui(ui, frame),
+            );
+            self.output.textures_delta.clear();
+        }
+
+        fn settle(&mut self, app: &mut StokesForgeApp) {
+            for _ in 0..3 {
+                self.paint(app, Vec::new());
+            }
+        }
+
+        fn click(&mut self, app: &mut StokesForgeApp, pos: egui::Pos2) {
+            let button = |pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            self.paint(app, vec![egui::Event::PointerMoved(pos)]);
+            self.paint(app, vec![button(true)]);
+            self.paint(app, vec![button(false)]);
+            self.settle(app);
+        }
+
+        fn press(&mut self, app: &mut StokesForgeApp, key: egui::Key) {
+            self.paint(
+                app,
+                vec![egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+            self.settle(app);
+        }
+
+        fn type_text(&mut self, app: &mut StokesForgeApp, text: &str) {
+            self.paint(app, vec![egui::Event::Text(text.to_owned())]);
+            self.settle(app);
+        }
+
+        /// Clicks the font field of the bar, which shows « Graph font ».
+        fn click_font_field(&mut self, app: &mut StokesForgeApp) {
+            let pos = find_text_center(&self.output.shapes, &tr!("format-font-default"));
+            self.click(app, pos);
+        }
+
+        fn has_focus(&self, id: egui::Id) -> bool {
+            self.ctx.memory(|memory| memory.has_focus(id))
+        }
+
+        fn selection(&self, id: egui::Id) -> Option<(usize, usize)> {
+            let state = egui::TextEdit::load_state(&self.ctx, id)?;
+            let [low, high] = state.cursor.char_range()?.sorted_cursors();
+            Some((low.index.0, high.index.0))
+        }
+    }
+
+    use stokesforge_app_state::tr;
+
+    fn first_embedded_font() -> String {
+        stokesforge_render_egui::available_families()
+            .iter()
+            .find(|family| family.embedded)
+            .map(|family| family.name.clone())
+            .expect("an embedded font")
+    }
+
+    /// An application showing the graph of [`setup`], its free text being
+    /// edited with its first two characters selected. Returns the field id of
+    /// the editor.
+    fn editing_the_free_text() -> (Session, StokesForgeApp, NodeId, Screen, egui::Id) {
+        let (session, mut app, graph, _) = setup();
+        let mut screen = Screen::new();
+        app.open_tab(Tab::Graph(graph));
+        screen.settle(&mut app);
+        let tree = app.state.tree().clone();
+        let ctx = screen.ctx.clone();
+        let field = app
+            .with_graph_view(graph, |view| {
+                open_annotation_editor(&ctx, view, &tree, graph, FREE_TEXT);
+                annotation_editor_id(view).with("field")
+            })
+            .expect("the graph view");
+        screen.settle(&mut app);
+        assert_eq!(
+            app.format_target(&ctx, Some(Tab::Graph(graph))),
+            FormatTarget::Field,
+            "the editor of the free text is open"
+        );
+        // Select "Te" of "Text".
+        let mut state = egui::TextEdit::load_state(&ctx, field).expect("editor field");
+        state
+            .cursor
+            .set_char_range(Some(egui::text::CCursorRange::two(
+                egui::text::CCursor::new(0),
+                egui::text::CCursor::new(2),
+            )));
+        state.store(&ctx, field);
+        screen.settle(&mut app);
+        assert_eq!(screen.selection(field), Some((0, 2)));
+        (session, app, graph, screen, field)
+    }
+
+    fn annotation_draft(
+        ctx: &egui::Context,
+        app: &StokesForgeApp,
+        graph: NodeId,
+    ) -> Option<String> {
+        let id = app.read_graph_view(graph, annotation_editor_id)?;
+        ctx.data(|data| data.get_temp::<AnnotationEditor>(id))
+            .map(|editor| editor.draft.text)
+    }
+
+    /// #554: a font typed and picked in the bar leaves the editor of the
+    /// canvas open, its text intact and its selection back (a Bold then wraps
+    /// the same passage). Witness: without the hand-back the editor loses the
+    /// focus and egui shrinks its selection, so Bold wraps nothing.
+    #[test]
+    fn a_font_picked_in_the_bar_gives_the_editor_its_focus_and_selection_back() {
+        let (session, mut app, graph, mut screen, field) = editing_the_free_text();
+        let wanted = first_embedded_font();
+        screen.click_font_field(&mut app);
+        assert!(!screen.has_focus(field), "the bar field took the focus");
+        screen.type_text(&mut app, &wanted);
+        screen.press(&mut app, egui::Key::Enter);
+        let ctx = screen.ctx.clone();
+        assert_eq!(
+            annotation_draft(&ctx, &app, graph).as_deref(),
+            Some("Text"),
+            "the editor is still open, its text intact"
+        );
+        assert!(screen.has_focus(field), "focus is back in the editor");
+        assert_eq!(
+            screen.selection(field),
+            Some((0, 2)),
+            "\"Te\" selected again"
+        );
+        let mut actions = Vec::new();
+        app.format_text(
+            &ctx,
+            TextFormat::Bold,
+            Some(Tab::Graph(graph)),
+            &mut actions,
+        );
+        screen.settle(&mut app);
+        let expected = apply("Text", 0..2, &TextFormat::Bold).text;
+        assert_eq!(annotation_draft(&ctx, &app, graph), Some(expected));
+        session.shutdown().unwrap();
+    }
+
+    /// #554: the Escape of the font list closes the list and gives the old name
+    /// back; it never cancels the text being edited on the canvas. Witness: an
+    /// Escape left unconsumed by the bar reaches the editor, which closes.
+    #[test]
+    fn escape_in_the_font_list_does_not_cancel_the_edited_text() {
+        let (session, mut app, graph, mut screen, field) = editing_the_free_text();
+        screen.click_font_field(&mut app);
+        screen.type_text(&mut app, "zz");
+        screen.press(&mut app, egui::Key::Escape);
+        let ctx = screen.ctx.clone();
+        assert_eq!(
+            annotation_draft(&ctx, &app, graph).as_deref(),
+            Some("Text"),
+            "one Escape: the editor is still open"
+        );
+        assert!(screen.has_focus(field), "focus and selection are back");
+        assert_eq!(screen.selection(field), Some((0, 2)));
+        // The old name is back in the bar and no list is open.
+        find_text_center(&screen.output.shapes, &tr!("format-font-default"));
+        session.shutdown().unwrap();
+    }
+
+    /// #554: the title being edited keeps its editor and its selection after a
+    /// pick in the bar, like the free text.
+    #[test]
+    fn a_font_picked_in_the_bar_gives_the_title_editor_its_selection_back() {
+        let (session, mut app, graph, _) = setup();
+        let mut screen = Screen::new();
+        app.open_tab(Tab::Graph(graph));
+        screen.settle(&mut app);
+        let tree = app.state.tree().clone();
+        let ctx = screen.ctx.clone();
+        let field = app
+            .with_graph_view(graph, |view| {
+                open_text_editor(&ctx, view, &tree, graph, TextTarget::Title);
+                text_editor_id(view).with("field")
+            })
+            .expect("the graph view");
+        screen.settle(&mut app);
+        assert_eq!(
+            app.format_target(&ctx, Some(Tab::Graph(graph))),
+            FormatTarget::Field
+        );
+        let mut state = egui::TextEdit::load_state(&ctx, field).expect("editor field");
+        state
+            .cursor
+            .set_char_range(Some(egui::text::CCursorRange::two(
+                egui::text::CCursor::new(1),
+                egui::text::CCursor::new(3),
+            )));
+        state.store(&ctx, field);
+        screen.settle(&mut app);
+        screen.click_font_field(&mut app);
+        screen.type_text(&mut app, &first_embedded_font());
+        screen.press(&mut app, egui::Key::Enter);
+        assert_eq!(
+            app.format_target(&ctx, Some(Tab::Graph(graph))),
+            FormatTarget::Field,
+            "the title editor is still open"
+        );
+        assert!(screen.has_focus(field));
+        assert_eq!(screen.selection(field), Some((1, 3)));
+        session.shutdown().unwrap();
+    }
+
+    /// #554: with a free text selected on the graph, a Delete typed in the font
+    /// field edits the field, never the text of the graph, even right after a
+    /// pick by a click on a row. Witness: a field that loses the focus after
+    /// the pick lets the Delete reach the graph, which deletes the text.
+    #[test]
+    fn delete_typed_in_the_font_field_never_reaches_the_selected_text() {
+        let (session, mut app, graph, _) = setup();
+        let mut screen = Screen::new();
+        app.open_tab(Tab::Graph(graph));
+        screen.settle(&mut app);
+        let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
+        app.with_graph_view(graph, |view| view.select_annotation(Some(FREE_TEXT), &spec));
+        screen.settle(&mut app);
+        screen.click_font_field(&mut app);
+        let wanted = first_embedded_font();
+        screen.type_text(&mut app, &wanted);
+        // Pick by clicking the row.
+        let row = find_text_center(&screen.output.shapes, &wanted);
+        let row = screen
+            .output
+            .shapes
+            .iter()
+            .filter_map(|painted| match &painted.shape {
+                egui::Shape::Text(shape) if shape.galley.job.text == wanted => {
+                    Some(shape.pos + shape.galley.rect.center().to_vec2())
+                }
+                _ => None,
+            })
+            .max_by(|a, b| a.y.total_cmp(&b.y))
+            .unwrap_or(row);
+        screen.click(&mut app, row);
+        screen.press(&mut app, egui::Key::Delete);
+        screen.press(&mut app, egui::Key::Delete);
+        let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
+        assert_eq!(
+            spec.panels[0].annotations.len(),
+            1,
+            "the free text of the graph is kept"
+        );
+        session.shutdown().unwrap();
     }
 
     #[test]

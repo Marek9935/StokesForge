@@ -54,7 +54,8 @@ fn matches(name: &str, words: &[String]) -> bool {
 
 /// The rows to show for `query`. `current` is the family of the setting: if
 /// it is non-empty and not in `families` (font missing on this PC) it is
-/// listed at the end of the system group, filtered like the others.
+/// listed right after the Default row, before the titles and with no title of
+/// its own (it is neither included nor installed), filtered like the others.
 /// `default_label` is the translated « Graph font », filtered like a name. A
 /// title with no matching family is left out.
 pub fn rows<'a>(
@@ -70,6 +71,11 @@ pub fn rows<'a>(
     }
     let missing =
         (!current.is_empty() && !families.iter().any(|f| f.name == current)).then_some(current);
+    out.extend(
+        missing
+            .filter(|name| matches(name, &words))
+            .map(Row::Family),
+    );
     for (section, embedded) in [(Section::Embedded, true), (Section::System, false)] {
         let title_at = out.len();
         out.push(Row::Title(section));
@@ -79,13 +85,6 @@ pub fn rows<'a>(
                 .filter(|f| f.embedded == embedded && matches(&f.name, &words))
                 .map(|f| Row::Family(f.name.as_str())),
         );
-        if section == Section::System {
-            out.extend(
-                missing
-                    .filter(|name| matches(name, &words))
-                    .map(Row::Family),
-            );
-        }
         if out.len() == title_at + 1 {
             out.pop();
         }
@@ -229,15 +228,20 @@ mod tests {
         assert!(rows(&f, "", "Graph font", "graph").contains(&Row::Default("Graph font")));
     }
 
+    /// A current font missing on this PC is listed right after the Default
+    /// row, under no title. Witness: pushing it back into the system group
+    /// puts it last, under « Installed on this computer ».
     #[test]
-    fn a_font_not_installed_here_stays_listed_at_the_end() {
+    fn a_font_not_installed_here_is_listed_after_the_default_row_without_a_title() {
         let f = sample();
         let r = rows(&f, "Calibri", "Graph font", "");
-        assert_eq!(r.last(), Some(&Row::Family("Calibri")));
+        assert_eq!(r[0], Row::Default("Graph font"));
+        assert_eq!(r[1], Row::Family("Calibri"));
+        assert_eq!(r[2], Row::Title(Section::Embedded));
         assert_eq!(titles(&r), 2);
         assert!(rows(&f, "Calibri", "Graph font", "zzz").is_empty());
         let r = rows(&f, "Calibri", "Graph font", "cali");
-        assert_eq!(r, vec![Row::Title(Section::System), Row::Family("Calibri")]);
+        assert_eq!(r, vec![Row::Family("Calibri")]);
         // An installed current family is not listed twice.
         let r = rows(&f, "Ubuntu", "Graph font", "");
         assert_eq!(names(&r).iter().filter(|n| **n == "Ubuntu").count(), 1);

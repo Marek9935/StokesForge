@@ -296,6 +296,9 @@ pub struct TextFormatState {
     pub color: Option<String>,
     pub auto_family: bool,
     pub auto_size: bool,
+    /// The field of the canvas text editor being used, if any: the font list
+    /// gives it back the focus and its selection after a pick (#554).
+    pub edit_field: Option<egui::Id>,
     /// Alignment of the targeted box (#244); `None` with no target. Lights up the
     /// matching button.
     pub align: Option<TextAlign>,
@@ -954,52 +957,30 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
             response.on_hover_text(tooltip)
         };
 
-        // Font.
         let rich = matches!(env.text_format, FormatTarget::Field | FormatTarget::Block);
-        let chosen = egui::ComboBox::from_id_salt("stokesforge_format_font")
-            .selected_text(
-                env.text_style
-                    .family
-                    .clone()
-                    .unwrap_or_else(|| tr!("format-font")),
+
+        // Font: a typed field with a searchable list (#554). `Some("")` is the
+        // graph font; a mixed format (no family) shows the neutral label.
+        let current_font = if env.text_style.auto_family {
+            Some("")
+        } else {
+            env.text_style.family.as_deref()
+        };
+        let font = crate::field_state::for_target(ui, env.text_style.source, |ui| {
+            crate::font_list::font_field(
+                ui,
+                "stokesforge_format_font",
+                110.0,
+                current_font,
+                env.text_style.edit_field,
             )
-            .width(110.0)
-            .show_ui(ui, |ui| {
-                let mut chosen = None;
-                let mut shown_system_title = false;
-                if ui
-                    .selectable_label(env.text_style.auto_family, tr!("format-font-default"))
-                    .clicked()
-                {
-                    chosen = Some(String::new());
-                }
-                ui.separator();
-                ui.label(crate::theme::dimmed_text(tr!("format-font-embedded")));
-                for family in stokesforge_render_egui::available_families() {
-                    if !family.embedded && !shown_system_title {
-                        ui.separator();
-                        ui.label(crate::theme::dimmed_text(tr!("format-font-system")));
-                        shown_system_title = true;
-                    }
-                    if ui
-                        .selectable_label(
-                            !env.text_style.auto_family
-                                && env.text_style.family.as_ref() == Some(&family.name),
-                            &family.name,
-                        )
-                        .clicked()
-                    {
-                        chosen = Some(family.name.clone());
-                    }
-                }
-                chosen
-            });
+        });
         on_hover(
-            chosen.response.clone(),
+            font.response.clone(),
             tr!("format-font"),
             Some(tr!("format-font", "hint")),
         );
-        if let Some(name) = chosen.inner.flatten() {
+        if let Some(name) = font.picked {
             requests.push(ToolbarRequest::FormatText(TextFormat::Font(name)));
         }
 
