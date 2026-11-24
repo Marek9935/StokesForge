@@ -138,11 +138,13 @@ stokesforge-cli run --project data.stf --out result.stf process.pyst
 
 | Argument | Meaning |
 |---|---|
-| `process.pyst` | The script file, read as UTF-8 text. Required. The extension does not matter. |
+| `process.pyst` | The script file. Required. The extension does not matter. |
 | `--project data.stf` | A project to start from. Without it, the script starts with an empty project. |
 | `--out result.stf` | Where to save the project when the script succeeds. Without it, nothing is saved. |
 
-The script runs the same way as in the console, with `pyst` already loaded.
+The script runs the same way as in the console, with `pyst` already loaded, except that it starts from a fresh set of variables and that the folder of the script file is importable: a module placed next to the script (`helper.py`) can be imported with `import helper`, whatever the folder you ran the command from. Relative paths still start from the folder you ran the command in; use `Path(__file__).parent` to find files next to the script.
+
+`exit()` or `exit(0)` ends the script normally and keeps its changes. `exit(2)` or `exit("message")` is an error, like an exception: the changes are undone and the `--out` file is not written. The same holds in the console.
 
 - What the script prints goes to the terminal, on the standard output and the error output.
 - If the script fails, the full Python trace is printed and the program ends with a non-zero code. The `--out` file is not written.

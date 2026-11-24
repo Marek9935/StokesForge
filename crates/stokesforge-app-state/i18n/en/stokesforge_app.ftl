@@ -760,6 +760,7 @@ error-export-png-encode = Could not encode the PNG: { $detail }
 # Scripts
 error-script-thread = Could not start the script engine: { $detail }
 error-script-install = Could not set up the pyst module: { $detail }
+error-script-read-file = Could not read the script file { $path }: { $cause }
 error-script-busy = A script is already running
 error-script-stopped = The script engine has stopped. Run the script again
 error-python-home = Python was not found in { $path }

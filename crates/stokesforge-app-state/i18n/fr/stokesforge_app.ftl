@@ -759,6 +759,7 @@ error-export-png-encode = Impossible d'encoder le PNG : { $detail }
 # Scripts
 error-script-thread = Impossible de démarrer le moteur de script : { $detail }
 error-script-install = Impossible de configurer le module pyst : { $detail }
+error-script-read-file = Impossible de lire le fichier de script { $path } : { $cause }
 error-script-busy = Un script est déjà en cours
 error-script-stopped = Le moteur de script s'est arrêté. Relancer le script
 error-python-home = Python est introuvable dans { $path }

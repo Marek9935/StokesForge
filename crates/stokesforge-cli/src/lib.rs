@@ -362,7 +362,9 @@ fn run_script(args: &[String], out: &mut dyn Write) -> Result<(), String> {
         }
     }
     let path = script.ok_or_else(|| format!("run expects a script file\n{USAGE}"))?;
-    let source = std::fs::read_to_string(&path)
+    // Fail before loading anything when the file is missing; the engine reads
+    // it again on its own thread (#552).
+    std::fs::metadata(&path)
         .map_err(|err| format!("cannot read script {}: {err}", path.display()))?;
     let project = match input {
         Some(path) => {
@@ -385,7 +387,12 @@ fn run_script(args: &[String], out: &mut dyn Write) -> Result<(), String> {
         stokesforge_python::interpreter::EmbeddedPython::locate().map_err(|err| err.to_string())?,
     )
     .map_err(|err| err.to_string())?;
-    let outcome = engine.run(&source).map_err(|err| err.to_string())?;
+    let outcome = engine.run_file(&path).map_err(|err| match err {
+        stokesforge_script::ScriptError::ReadFile { path, source } => {
+            format!("cannot read script {}: {source}", path.display())
+        }
+        other => other.to_string(),
+    })?;
     engine.shutdown().map_err(|err| err.to_string())?;
     out.write_all(outcome.stdout.as_bytes())
         .map_err(|err| err.to_string())?;

@@ -14,6 +14,10 @@ A tiny interruption thread keeps `ScriptEngine::interrupt` non-blocking (raising
 
 The painted console lives in `stokesforge-app/src/app/script_console.rs` (`script_header`, `script_contents`, `script_panel`), tested without a window, with and without interpreter. Its texts are `script-*` keys via `tr!`. Detached console (#100): the same `script_contents` paints attached and detached from the shared `AppState` (the detached window locks the app in its own pass, `app/detached_panel.rs`, and edits `script_source` directly); engine and job stay in the `AppState`; polling continues when View hides the console.
 
+## Script files (#552)
+
+`ScriptEngine::run_file(path)` (`stokesforge-script/src/script_file.rs`, engine `execute`) is the file counterpart of `run`: read on the script thread, compiled from bytes under the absolute name, fresh namespace that is `sys.modules["__main__"]`, folder first in `sys.path`, `sys.dont_write_bytecode`, then restoration and a purge of the modules under the folder (outside the embedded prefix, native extensions kept). The console's #312 read-version table is taken away for the run and put back. The interpreter starts in isolated mode: a folder with accents needs `utf8_mode` (open point, ignored test `a_folder_with_accents_is_importable`). Contract: `docs/python-and-scripting.md` § Running a script file.
+
 ## Windows packaging (#332)
 
 `scripts/app-dist-windows.sh` (Git Bash) assembles the staging, validates it (window, `stokesforge-selftest` in an emptied environment, two witnesses: without `python312.dll` or without `lib/python` it must fail), compiles the installer `scripts/stokesforge.iss` (Inno Setup 6), installs into a folder with a space and an accent, reruns the selftest and uninstalls. Differences from Linux: no rpath, Visual C++ DLLs beside the exe, `PATH` reduced to `System32`, `MSYS2_ARG_CONV_EXCL='*'` for `/DIR=…`, `python -X utf8` to read Python output from Git Bash. `stokesforge-app` is a windowed subsystem in release and reattaches to the parent terminal (`console_windows.rs`).
