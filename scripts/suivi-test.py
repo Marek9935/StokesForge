@@ -1817,6 +1817,18 @@ class TestHookNews(WaitBase):
         self.armed()
         self.assertNotIn("no wait running", self.hook("S1").stdout)
 
+    def test_a_paused_issue_keeps_what_its_last_session_heard(self):
+        # #563: answers handled by the session that paused the issue are not unread, and a new session stays silent
+        self.owned(1)
+        self.entry("1-1", "retour", "dark")
+        self.assertIn("1-1 retour: dark", self.run_cli("news", "1", env=self.as_session()).stdout)
+        self.run_cli("pause", "1")
+        self.assertEqual(self.status()["paused"][0]["unread"], 0)
+        self.assertEqual(self.hook("S9").stdout, "")
+        self.entry("1-2", "ok")                            # a tick or an answer after the pause still counts
+        self.assertEqual(self.status()["paused"][0]["unread"], 1)
+        self.assertIn("#1", self.hook("S9").stdout)
+
     def test_new_session_lists_dead_owners_with_unread_answers_and_records_nothing(self):
         child = subprocess.Popen(["sleep", "30"])
         start = suivi.pid_start(child.pid)

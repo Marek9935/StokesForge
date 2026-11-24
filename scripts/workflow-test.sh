@@ -411,6 +411,31 @@ git branch -q -D feature/40-x feature/41-x feature/42-x feature/43-x feature/30d
     eq "$(entry_field 7-1 commit)" "$m" "follow-up kept the old commit"
     eq "$(remote_head)" "$(main_head)" "follow-up pushed"
 
+    # #563: a pushed branch (the save of a paused package) is deleted from origin after the merge; other
+    # branches (a sibling, another issue) stay; no tag goes with it even with push.followTags.
+    dsb
+    for b in feature/7-x feature/7b-x feature/70-y; do git -C "$wt" push -q origin "HEAD:refs/heads/$b"; done
+    git -C "$wt" tag -a v9 -m "local tag" HEAD
+    deliver || fail "remote branch deletion: $(cat "$sb/out")"
+    git -C "$sb/remote.git" rev-parse -q --verify refs/heads/feature/7-x > /dev/null && fail "the merged branch stayed on origin" || true
+    git -C "$sb/remote.git" rev-parse -q --verify refs/heads/feature/7b-x > /dev/null || fail "deliver deleted the sibling feature/7b-x"
+    git -C "$sb/remote.git" rev-parse -q --verify refs/heads/feature/70-y > /dev/null || fail "deliver deleted feature/70-y"
+    eq "$(git -C "$sb/remote.git" tag | wc -l)" 0 "a tag reached the remote with the branch deletion"
+    # A remote head with commits main does not have is kept, with one line.
+    dsb
+    git -C "$wt" push -q origin feature/7-x
+    git clone -q "$sb/remote.git" "$sb/other" && git -C "$sb/other" checkout -q feature/7-x
+    git -C "$sb/other" -c user.name=o -c user.email=o@o commit -q --allow-empty -m "elsewhere"
+    git -C "$sb/other" push -q origin feature/7-x
+    git -C "$sb/StokesForge" fetch -q origin feature/7-x   # the object is local: only the ancestor test keeps the branch
+    deliver || fail "delivery with a richer remote branch: $(cat "$sb/out")"
+    git -C "$sb/remote.git" rev-parse -q --verify refs/heads/feature/7-x > /dev/null || fail "deliver deleted a remote branch holding commits main lacks"
+    grep -q 'kept origin/feature/7-x' "$sb/out" || fail "no line for the kept branch: $(cat "$sb/out")"
+    # No remote branch at all: nothing to say.
+    dsb
+    deliver || fail "delivery without a remote branch: $(cat "$sb/out")"
+    ! grep -q 'origin/feature' "$sb/out" || fail "talked about a missing remote branch: $(cat "$sb/out")"
+
     # --wait-tag (#467): refused before the lock if the message closes the issue; otherwise the wait
     # is recorded locally, never through glab (a fake glab on PATH logs any call).
     mkdir -p "$tmp/fakebin"; printf '#!/usr/bin/env bash\necho "$*" >> "%s/glab.log"\nexit 1\n' "$tmp" > "$tmp/fakebin/glab"
@@ -642,6 +667,86 @@ git branch -q -D feature/40-x feature/41-x feature/42-x feature/43-x feature/30d
     grep -q 'origin/Nope does not exist' "$sb/out" || fail "unknown line message: $(cat "$sb/out")"
     [ ! -e "$sb/_stokesforge/feature10" ] && ! git -C "$sb/StokesForge" rev-parse -q --verify feature/10-nine > /dev/null || fail "unknown line created something"
     unset SF_ISSUE_TITLE
+
+    # ---- Resume from an existing branch (#563): the branch of a paused package, never a recomputed slug.
+    nofetch() { env -u SF_NO_FETCH "$@"; }
+    rchant() { ( cd "$sb/StokesForge" && SF_ISSUE_TITLE="Retitled thing" nofetch "$here/chantier.sh" "$@" ); }
+    adv_main() {   # a commit on origin/main (and main) after the branch was made: $1 file, $2 content
+        ( cd "$sb/StokesForge" && echo "$2" > "$1" && git add "$1" && git commit -q -m "main: $1" && git push -q origin main )
+    }
+    rsetup() {   # dsb, then the worktree of 7 removed by hand: only the branch feature/7-x is left
+        dsb; git -C "$sb/StokesForge" worktree remove --force "$wt"
+    }
+    resumed_ok() {   # $1 label: the worktree is on feature/7-x, no upstream, no recomputed branch, origin/main merged once
+        [ -d "$wt" ] || fail "$1: no worktree: $(cat "$sb/out")"
+        eq "$(git -C "$wt" symbolic-ref --short HEAD)" feature/7-x "$1: branch"
+        git -C "$wt" rev-parse --abbrev-ref '@{u}' > /dev/null 2>&1 && fail "$1: the branch got an upstream" || true
+        git -C "$sb/StokesForge" rev-parse -q --verify feature/7-retitled-thing > /dev/null && fail "$1: the slug was recomputed" || true
+        git -C "$wt" merge-base --is-ancestor origin/main HEAD || fail "$1: origin/main not merged"
+        eq "$(git -C "$wt" rev-list --merges --count origin/main..HEAD)" 1 "$1: merged once"
+        git -C "$wt" status --porcelain | grep -q . && fail "$1: dirty tree" || true
+    }
+    # local only; the issue was retitled (the slug would differ)
+    rsetup; adv_main m1 one
+    rchant 7 > "$sb/out" 2>&1 || fail "resume local: $(cat "$sb/out")"
+    resumed_ok "resume local only"
+    grep -q '^Resume #7: resumed feature/7-x; origin/main merged' "$sb/out" || fail "resume briefing: $(cat "$sb/out")"
+    rchant 7 > /dev/null 2>&1   # a rerun merges nothing more
+    eq "$(git -C "$wt" rev-list --merges --count origin/main..HEAD)" 1 "rerun merged again"
+    # origin only (local branch deleted)
+    rsetup; git -C "$sb/StokesForge" push -q origin feature/7-x; git -C "$sb/StokesForge" branch -q -D feature/7-x; adv_main m1 one
+    rchant 7 > "$sb/out" 2>&1 || fail "resume origin only: $(cat "$sb/out")"
+    resumed_ok "resume origin only"
+    # both, local behind origin: fast-forwarded, then main merged
+    rsetup; git -C "$sb/StokesForge" push -q origin feature/7-x
+    git clone -q "$sb/remote.git" "$sb/other"; git -C "$sb/other" checkout -q feature/7-x
+    git -C "$sb/other" -c user.name=o -c user.email=o@o commit -q --allow-empty -m "from elsewhere"; git -C "$sb/other" push -q origin feature/7-x
+    adv_main m1 one
+    rchant 7 > "$sb/out" 2>&1 || fail "resume behind: $(cat "$sb/out")"
+    resumed_ok "resume both behind"
+    git -C "$wt" merge-base --is-ancestor origin/feature/7-x HEAD || fail "behind: origin's commit missing"
+    # diverged: refused, nothing created
+    rsetup; git -C "$sb/StokesForge" push -q origin feature/7-x
+    git -C "$sb/StokesForge" branch -q -f feature/7-x "$(git -C "$sb/StokesForge" commit-tree -p feature/7-x -m local-only "feature/7-x^{tree}")"
+    git clone -q "$sb/remote.git" "$sb/other"; git -C "$sb/other" checkout -q feature/7-x
+    git -C "$sb/other" -c user.name=o -c user.email=o@o commit -q --allow-empty -m "remote-only"; git -C "$sb/other" push -q origin feature/7-x
+    if rchant 7 > "$sb/out" 2>&1; then fail "diverged branch accepted"; fi
+    grep -q 'diverged' "$sb/out" && [ ! -e "$wt" ] || fail "diverged: $(cat "$sb/out")"
+    # conflict: the merge is aborted, the head is untouched, one line names the file
+    dsb; echo branch > "$wt/f"; git -C "$wt" commit -q -am "branch f"; git -C "$sb/StokesForge" worktree remove --force "$wt"
+    adv_main f main-side; head_before="$(git -C "$sb/StokesForge" rev-parse feature/7-x)"
+    rchant 7 > "$sb/out" 2>&1 || fail "resume with a conflict failed: $(cat "$sb/out")"
+    git -C "$wt" rev-parse -q --verify MERGE_HEAD > /dev/null && fail "conflict: MERGE_HEAD left" || true
+    eq "$(git -C "$wt" rev-parse HEAD)" "$head_before" "conflict: the branch head moved"
+    git -C "$wt" status --porcelain | grep -q . && fail "conflict: dirty tree" || true
+    grep -q '^Resume #7: .*conflicts in: f;' "$sb/out" || fail "conflict briefing: $(cat "$sb/out")"
+    # an issue on a line resumes from, and merges, origin/<line> (not main)
+    rsetup; "$here/line.sh" create $L > /dev/null; lwt="$sb/_stokesforge/line-$L"; lcommit "line only"
+    adv_main m2 two
+    SF_ISSUE_LINE_7=$L rchant 7 > "$sb/out" 2>&1 || fail "resume on a line: $(cat "$sb/out")"
+    git -C "$wt" merge-base --is-ancestor "origin/$L" HEAD || fail "line not merged"
+    git -C "$wt" merge-base --is-ancestor origin/main HEAD && fail "main merged into a line issue" || true
+    # a sibling feature/7b-x is never taken: a new branch is made
+    rsetup; git -C "$sb/StokesForge" branch -q -m feature/7-x feature/7b-x
+    rchant 7 > "$sb/out" 2>&1 || fail "sibling: $(cat "$sb/out")"
+    eq "$(git -C "$wt" symbolic-ref --short HEAD)" feature/7-retitled-thing "a sibling branch was taken"
+    # merged branch refused; an empty unmerged branch accepted
+    dsb; deliver || fail "delivery for the merged case: $(cat "$sb/out")"
+    git -C "$sb/StokesForge" worktree remove --force "$wt"
+    if rchant 7 > "$sb/out" 2>&1; then fail "merged branch resumed"; fi
+    grep -q 'already merged' "$sb/out" && [ ! -e "$wt" ] || fail "merged refusal: $(cat "$sb/out")"
+    git -C "$sb/StokesForge" branch -q feature/8-e main
+    SF_ISSUE_TITLE="Empty" nofetch "$here/chantier.sh" 8 > "$sb/out" 2>&1 || fail "empty branch refused: $(cat "$sb/out")"
+    eq "$(git -C "$sb/_stokesforge/feature8" symbolic-ref --short HEAD)" feature/8-e "empty branch"
+    # a package's --start of a paused sub-issue resumes it; the briefing lists it
+    cat > "$sb/pkg.json" <<'JSON'
+[{"iid": 31, "title": "Sub one", "state": "opened", "description": "Parent: #30"}, {"iid": 32, "title": "Sub two", "state": "opened", "description": "Parent: #30"}]
+JSON
+    git -C "$sb/StokesForge" branch -q feature/31-old-name main
+    ( cd "$sb/StokesForge" && SF_ISSUES_JSON="$sb/pkg.json" SF_ISSUE_TITLE_30="Pkg" SF_ISSUE_TITLE_31="New name" SF_ISSUE_TITLE_32="Sub two" nofetch "$here/chantier.sh" 30 > "$sb/out" 2>&1 ) || fail "package briefing: $(cat "$sb/out")"
+    grep -q '#31 .*<- paused, --start resumes' "$sb/out" || fail "paused sub not listed: $(cat "$sb/out")"
+    ( cd "$sb/StokesForge" && SF_ISSUES_JSON="$sb/pkg.json" SF_ISSUE_TITLE_30="Pkg" SF_ISSUE_TITLE_31="New name" nofetch "$here/chantier.sh" 30 --start 31 > "$sb/out" 2>&1 ) || fail "package --start resume: $(cat "$sb/out")"
+    eq "$(git -C "$sb/_stokesforge/feature31" symbolic-ref --short HEAD)" feature/31-old-name "package --start resume"
 
     # Delivery to the line: M on the line, pushed; main, origin/main and the main checkout untouched,
     # even dirty and on another branch; the message path is relative.

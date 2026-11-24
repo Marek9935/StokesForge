@@ -979,8 +979,10 @@ def heard_path(root):
 
 
 def load_heard(root, sid):
+    """What session `sid` heard of group `root`. An empty `sid` is an issue nobody owns (paused, #563):
+    it keeps what its last session heard, so answers already handled do not read as unread."""
     d = read_json(heard_path(root))
-    if isinstance(d, dict) and sid and d.get("session") == sid and isinstance(d.get("seen"), dict):
+    if isinstance(d, dict) and isinstance(d.get("seen"), dict) and (d.get("session") == sid if sid else True):
         return d["seen"]
     return {}
 

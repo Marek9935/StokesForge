@@ -10,6 +10,17 @@
 # title; no upstream tracking, so `main` is never the upstream), then CLAIMS the
 # issue for this session with scripts/suivi.py (#441).
 #
+# Resume (#563): when a branch of the issue already exists (a paused package: local `feature/<n>-*`, else
+# origin's, found by `feature/<n>-`, never `feature/<n>b-*` and never a recomputed slug: the issue may have been
+# retitled), the worktree is recreated from it instead of from a new branch: local only: as it is; origin only:
+# a local branch from it, no upstream; both: the local one, fast-forwarded when behind origin (kept when ahead,
+# refused when diverged). The base (origin/main or origin/<line>) is then merged into the branch ONCE; on a
+# conflict the merge is aborted, the branch is untouched and the briefing names the conflicting files for the
+# agent to merge. A branch already merged (an ancestor of the base AND a `Merge #<n>:` commit there) is refused.
+# A package's `--start` of a sub-issue whose branch exists resumes the same way; the briefing lists such a
+# sub-issue without a folder as "paused, --start resumes". Refusals come before anything is created.
+# No branch: a new one from the base, as always. The recreation itself is sf_recreate_wt (workflow-lib.sh).
+#
 # Colours live in ../_stokesforge/.suivi, one record per issue (scripts/suivi.py;
 # its header states the rule). An issue holds its colour while an agent session
 # owns it, a QCM of the issue is open or a trial entry awaits the user; otherwise
@@ -439,6 +450,43 @@ ensure_wt() {
         fi
         return
     fi
+    # #563: a branch of the issue exists (a paused package): resume from it, never from a recomputed slug.
+    local found
+    found="$(sf_issue_branches "$n")"
+    if [ -n "$found" ]; then
+        case "$found" in
+        *$'\n'*) echo "chantier: #$n has several branches ($(printf '%s' "$found" | paste -sd' ' -)); keep one; nothing created" >&2; exit 1 ;;
+        esac
+        branch="$found"
+        if sf_branch_merged "$n" "$branch" "$wbase"; then
+            echo "chantier: #$n: $branch is already merged into $wbase; nothing created (release it, or open a new issue)" >&2
+            exit 1
+        fi
+        [ "$(sf_branch_relation "$branch")" != diverged ] \
+            || { echo "chantier: #$n: $branch and origin/$branch have diverged; nothing created (never forced): reconcile them by hand" >&2; exit 1; }
+        if [ "$dry" = 1 ]; then
+            if [ -n "$pcolour" ]; then
+                colour="$pcolour"
+            else
+                colour="$(suivi claim --dry-run "$n" "${args[@]}" --avoid "$reserved")" || exit 1
+                reserved="$reserved $colour"
+            fi
+            echo "would run: git worktree add $wt $branch (resume the existing branch); then would merge $wbase into it once, then copy the template target"
+        else
+            suivi claim --dry-run "$n" "${args[@]}" > /dev/null || exit 1   # refuse before creating anything
+            mkdir -p "$root"
+            sf_recreate_wt "$wt" "$branch" || exit 1
+            colour="$(suivi claim "$n" "${args[@]}")" || exit 1
+            local files
+            if files="$(sf_merge_base_in "$wt" "$wbase")"; then
+                rnotes+=("#$n: resumed $branch; $wbase merged into it once")
+            else
+                rnotes+=("#$n: resumed $branch; merging $wbase conflicts${files:+ in: $files}; the merge was aborted, the branch is untouched: merge $wbase yourself in $wt")
+            fi
+            tnotes+=("#$n: $("$(dirname "$0")/template-target.sh" copy "$wt" 2>&1 | tail -n 1 || true)")
+        fi
+        return
+    fi
     branch="feature/$n-$(slug_of "$title")"
     if [ "$dry" = 1 ]; then
         if [ -n "$pcolour" ]; then
@@ -458,6 +506,7 @@ ensure_wt() {
     fi
 }
 tnotes=()
+rnotes=()   # #563: one line per resumed branch (merged once, or the conflict)
 
 # Sub-issues of each given issue (one lookup per issue).
 declare -A kids=()
@@ -509,6 +558,13 @@ for n in "${issues[@]}"; do
         case " ${starts[*]:-} " in *" $m "*) started=1 ;; esac
         [ -d "$root/feature$m" ] && started=1
         mark=""
+        if [ "$started" = 0 ]; then   # #563: a paused sub-issue keeps its branch; --start resumes it
+            pb="$(sf_issue_branches "$m" | head -n 1)"
+            pbase="$base"; [ -z "$pline" ] || pbase="origin/$pline"
+            if [ -n "$pb" ] && ! sf_branch_merged "$m" "$pb" "$pbase" 2> /dev/null; then
+                mark="  <- paused, --start resumes (branch $pb)"
+            fi
+        fi
         if [ "$started" = 1 ]; then
             ensure_wt "$m" "$mt" "$n" "$pcolour"
             names+=("$pcolour #$n › #$m $(name_of "$mt")")
@@ -535,6 +591,7 @@ echo "Work package briefing (scripts/chantier.sh); the tag goes in forms, the tr
 for i in "${!names[@]}"; do
     echo "  ${names[$i]}  worktree ${wts[$i]}  branch ${brs[$i]}"
 done
+for x in "${rnotes[@]:-}"; do [ -z "$x" ] || echo "Resume $x"; done
 for x in "${tnotes[@]:-}"; do [ -z "$x" ] || echo "Build cache $x"; done
 [ -z "$used_lines" ] || echo "Line $used_lines: deliver with scripts/deliver.sh (merges into the line, never main); write Refs #<n>, not Closes: the issue stays open until the line lands."
 for x in "${pkgnotes[@]:-}"; do [ -z "$x" ] || printf '%s\n' "$x"; done

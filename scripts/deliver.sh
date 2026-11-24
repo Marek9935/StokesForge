@@ -43,6 +43,9 @@
 # with the orchestrator. The CI is not polled: the watcher of `suivi.py serve`
 # shows red on the tracking page (read it only for a tag, a release or a change to CI itself).
 #
+# After the push (#563) the remote branch origin/feature/<n>-* is deleted when its head is an ancestor of the pushed
+# main (or line); otherwise it is kept; a failure is one warning line. Never another branch, never a tag.
+#
 # `--wait-tag rc|final` (#467): the issue stays open on purpose because only a tag proves it.
 # Refused before the lock if the message closes the issue (`Closes #<n>` and the other GitLab
 # keywords); after the push it runs `suivi.py tag-wait <n> <kind>`, and the service then adds the
@@ -242,6 +245,25 @@ if push_main; then pushed=1; else
     done
 fi
 [ "$pushed" = 1 ] || die "push failed after retries; the merge $m is local only, rerun to push it"
+
+# #563: the work is now on $line: delete the pushed branch(es) feature/<n>-* of the issue on origin (a paused work
+# package saved its branch there), only when the remote head is an ancestor of the line just pushed. Never another
+# branch, never a tag (explicit refspec, --no-follow-tags); the delete is leased on the head it checked. Any failure is
+# one warning line, never an error; a head with commits the line lacks is kept, with one line saying so.
+delete_remote_branches() {
+    local sha ref b
+    while read -r sha ref; do
+        case "$ref" in "refs/heads/feature/$n-"*) ;; *) continue ;; esac
+        b="${ref#refs/heads/}"
+        if ! git cat-file -e "$sha^{commit}" 2> /dev/null || ! git merge-base --is-ancestor "$sha" "$line"; then
+            echo "deliver: kept origin/$b: it holds commits that $line does not have"
+            continue
+        fi
+        git push -q --no-follow-tags "--force-with-lease=$ref:$sha" origin ":$ref" 2> /dev/null \
+            || echo "deliver: warning: could not delete origin/$b; delete it by hand" >&2
+    done < <(git ls-remote --heads origin "refs/heads/feature/$n-*" 2> /dev/null || true)
+}
+delete_remote_branches
 
 # #523: after a push to MAIN (not a line) the template target is refreshed, detached, warm in class big (low only when cold)
 # never waited for, never a failure. Only when a template exists (the first one is built by hand).
