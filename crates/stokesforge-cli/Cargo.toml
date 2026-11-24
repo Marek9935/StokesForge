@@ -17,7 +17,6 @@ stokesforge-session = { path = "../stokesforge-session", optional = true }
 stokesforge-script = { path = "../stokesforge-script", optional = true, features = ["python"] }
 stokesforge-python = { path = "../stokesforge-python", optional = true, features = ["python"] }
 stokesforge-core = { path = "../stokesforge-core" }
-stokesforge-commands = { path = "../stokesforge-commands" }
 stokesforge-import = { path = "../stokesforge-import" }
 stokesforge-importer = { path = "../stokesforge-importer" }
 stokesforge-persistence = { path = "../stokesforge-persistence" }
