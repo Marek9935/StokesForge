@@ -540,9 +540,9 @@ tidy_trial() {
     [ "$(suivi trial-todo "$n")" = 0 ] || { echo "tidy: an entry of #$n is still to try; kept" >&2; return 1; }
     case "$(realpath -m "$PWD")" in "$(realpath -m "$wt")" | "$(realpath -m "$wt")"/*) echo "tidy: called from inside $wt; kept" >&2; return 1 ;; esac
     head="$(git -C "$wt" rev-parse HEAD)"; want="$(paused_head_of "$n")"
-    if [ -n "$want" ] && [ "$head" != "$want" ]; then
+    if [ "$head" != "$want" ]; then         # no recorded head counts as moved: kept
         suivi trial-kept "$n" head || true
-        echo "tidy: HEAD moved since the pause; kept" >&2
+        echo "tidy: HEAD moved since the pause (or no head recorded); kept" >&2
         return 1
     fi
     problems="$(sf_wt_problems "$wt")"
