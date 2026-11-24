@@ -3301,8 +3301,9 @@ fn script_settings_add_and_set_text_round_trip() {
     };
     assert_eq!(text_of(&f), "b = 2");
 
+    // The addition stored LF although the command carried CRLF (#571).
     assert_eq!(history.undo(&mut f.project), Ok(true));
-    assert_eq!(text_of(&f), "a = 1\r\n");
+    assert_eq!(text_of(&f), "a = 1\n");
     assert_eq!(**f.project.tree(), *before);
     assert_eq!(history.redo(&mut f.project), Ok(true));
     assert_eq!(text_of(&f), "b = 2");
@@ -3311,4 +3312,40 @@ fn script_settings_add_and_set_text_round_trip() {
     assert_eq!(history.undo(&mut f.project), Ok(true));
     assert_eq!(history.undo(&mut f.project), Ok(true));
     assert_eq!(**f.project.tree(), *empty);
+}
+
+/// #571: a text set by a command is stored with LF; the previous bytes (here an
+/// old CRLF object made by the core primitive, as a loaded `.stf` would hold
+/// one) come back exactly on undo.
+#[test]
+fn set_script_settings_text_stores_lf_and_undo_restores_the_old_crlf() {
+    let mut f = fixture();
+    let mut history = History::new();
+    let root = f.project.root();
+    let settings = f
+        .project
+        .add_script_settings(root, None, "a = 1\r\nb = 2\r\n")
+        .expect("old object");
+    let text_of = |f: &Fixture| match f.project.tree().get(settings).expect("node").kind() {
+        NodeKind::ScriptSettings { text, .. } => text.clone(),
+        other => panic!("expected script settings, found {other:?}"),
+    };
+    assert_eq!(text_of(&f), "a = 1\r\nb = 2\r\n");
+    let before = snapshot(&f.project);
+
+    history
+        .execute(
+            &mut f.project,
+            Command::SetScriptSettingsText {
+                id: settings,
+                text: "a = 5\r\nb = 2\r\n".to_string(),
+            },
+        )
+        .expect("text");
+    assert_eq!(text_of(&f), "a = 5\nb = 2\n");
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    assert_eq!(text_of(&f), "a = 1\r\nb = 2\r\n");
+    assert_eq!(**f.project.tree(), *before);
+    assert_eq!(history.redo(&mut f.project), Ok(true));
+    assert_eq!(text_of(&f), "a = 5\nb = 2\n");
 }

@@ -1,8 +1,10 @@
 //! Script Settings text: reading, hints, lossless edits, script writes (#548).
 
+use std::borrow::Cow;
+
 use stokesforge_core::script_settings::{
-    apply_values, parse, to_values, EditError, ElementKind, EntryValue, Scalar, ScalarKind, Seg,
-    SettingsValue,
+    apply_values, normalize_newlines, parse, same_text, to_values, EditError, ElementKind,
+    EntryValue, Scalar, ScalarKind, Seg, SettingsValue,
 };
 
 fn key(k: &str) -> Vec<Seg> {
@@ -440,4 +442,51 @@ fn a_hint_rejects_one_scalar_at_a_time() {
     let c = doc.entry(&key("c")).expect("c");
     assert!(c.hint.rejects(&Scalar::String("z".into())));
     assert!(!c.hint.rejects(&Scalar::String("a".into())));
+}
+
+#[test]
+fn normalize_newlines_drops_only_a_cr_that_starts_a_plain_crlf() {
+    assert_eq!(normalize_newlines("a\r\nb"), "a\nb");
+    // Not a CRLF pair: untouched (TOML refuses them, they must stay refused).
+    for kept in ["a\r\r\nb", "a\rb", "a\r\r\r\nb", "a\r", "\r"] {
+        assert_eq!(normalize_newlines(kept), kept);
+    }
+    // LF text is borrowed, and a second pass changes nothing.
+    assert!(matches!(normalize_newlines("a\nb"), Cow::Borrowed(_)));
+    for text in ["a\r\nb\r\n", "x\r\r\ny\r\n", "\r\r\r\n"] {
+        let once = normalize_newlines(text).into_owned();
+        assert_eq!(normalize_newlines(&once), once);
+    }
+    assert!(same_text("a\r\nb", "a\nb"));
+    assert!(!same_text("a\r\nb", "a\nc"));
+}
+
+#[test]
+fn normalizing_line_endings_changes_neither_refusals_nor_values() {
+    for refused in ["a = 1\r\r\n", "# c\rx"] {
+        assert!(parse(refused).is_err());
+        assert!(parse(&normalize_newlines(refused)).is_err());
+    }
+    let crlf = "a = \"\"\"\r\nx\r\ny\"\"\"\r\nb = '''\r\np\r\nq'''\r\n\
+                c = \"\"\"\\\r\n   joined\"\"\"\r\nd = 1\r\n";
+    let lf = normalize_newlines(crlf);
+    assert_ne!(lf, crlf);
+    assert_eq!(
+        to_values(&parse(crlf).expect("crlf")),
+        to_values(&parse(&lf).expect("lf"))
+    );
+}
+
+#[test]
+fn a_string_with_a_crlf_is_written_escaped_and_read_back() {
+    let doc = parse("s = 'x'\n").expect("parses");
+    let out = doc
+        .set_scalar(&key("s"), &Scalar::String("a\r\nb".to_string()))
+        .expect("set");
+    assert!(!out.contains('\r'));
+    assert_eq!(
+        entry_value(&out, "s"),
+        EntryValue::Scalar(Scalar::String("a\r\nb".to_string()))
+    );
+    assert_eq!(normalize_newlines(&out), out);
 }

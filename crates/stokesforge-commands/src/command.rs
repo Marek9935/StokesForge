@@ -266,7 +266,8 @@ pub enum Command {
         text: String,
     },
     /// Adds a Script Settings object carrying the raw TOML `text` (#548).
-    /// `name: None` → first free "SettingsN".
+    /// `name: None` → first free "SettingsN". CRLF line endings of `text` are
+    /// stored as LF (#571).
     AddScriptSettings {
         /// Host folder.
         parent: NodeId,
@@ -309,7 +310,9 @@ pub enum Command {
         /// New text.
         text: String,
     },
-    /// Replaces the raw TOML text of a Script Settings object (#548).
+    /// Replaces the raw TOML text of a Script Settings object (#548). CRLF
+    /// line endings of `text` are stored as LF; undo restores the previous
+    /// bytes exactly (#571).
     SetScriptSettingsText {
         /// Target Script Settings.
         id: NodeId,
