@@ -37,7 +37,7 @@
 # folder, and is renamed to target/ at the end; INT/TERM/HUP remove the half-done folder at once. After a
 # SIGKILL or a Bash timeout the leftover stays: the next copy, a rerun of chantier.sh on the worktree, and
 # prune/weekly (every worktree, paused ones too) remove it, unless flock -n -x on the folder fails (a copy
-# is still running: kept). status lists leftovers. The removal never happens while holding $T/lock.
+# is still running: kept). status lists leftovers. weekly also clears `.deleting-*` (a killed pause, #563). The removal never happens while holding $T/lock.
 #
 # prune. Worktrees paused for SF_TEMPLATE_PRUNE_DAYS (default 3) days or more lose
 # target/debug/incremental and target/release (deps kept). Never a held issue, a line-* worktree,
@@ -265,8 +265,21 @@ for p in d.get("paused", []):
     done <<< "$json"
 }
 
+# #563: `chantier.sh --pause` renames target/ to ../_stokesforge/.deleting-feature<n>-<pid> before the long delete;
+# a kill leaves it. Removed here unless its process still lives.
+sweep_deleting() {
+    local d pid
+    for d in "$(realpath -m "$(sf_wt_root)")"/.deleting-*; do
+        [ -e "$d" ] || continue
+        pid="${d##*-}"
+        if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2> /dev/null; then continue; fi
+        rm -rf "$d" && say "removed the leftover of an interrupted pause: $d"
+    done
+}
+
 cmd_weekly() {
     cmd_prune || true
+    sweep_deleting
     if [ -d "$T/target" ] && [ "$(size_kb "$T/target")" -gt "$max_kb" ]; then
         say "template above the threshold: refresh"
         cmd_refresh

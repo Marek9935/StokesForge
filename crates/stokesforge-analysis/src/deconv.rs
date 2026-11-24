@@ -156,6 +156,14 @@ fn grid_of(x: &[f64], w: &mut DeconvWarnings) -> Result<Grid, AnalysisError> {
     if !(mean > 0.0) || x.windows(2).any(|p| p[1] <= p[0]) {
         return Err(AnalysisError::DuplicateX);
     }
+    // Finite X whose extent overflows give `mean` = inf: the uniformity test
+    // below would pass (`|step - inf| <= tol * inf` is `inf <= inf`) with a
+    // grid of step inf.
+    if !mean.is_finite() {
+        return Err(AnalysisError::InvalidParameter {
+            name: "signal".into(),
+        });
+    }
     if x.windows(2)
         .all(|p| ((p[1] - p[0]) - mean).abs() <= STEP_TOLERANCE * mean)
     {
@@ -176,8 +184,8 @@ fn grid_of(x: &[f64], w: &mut DeconvWarnings) -> Result<Grid, AnalysisError> {
     //
     // The cap is checked on `ratio` itself, before any conversion: `f64::max`
     // swallows a NaN (`inf - inf` would become 0 and give one node), and the
-    // ratio is infinite when the span overflows or the median step is
-    // subnormal; `as usize` would saturate and `+ 1` overflow.
+    // ratio is infinite when the median step is subnormal; `as usize` would
+    // saturate and `+ 1` overflow.
     let ratio = (x[n - 1] - x[0]) / step;
     if !(ratio.is_finite() && ratio <= (MAX_GRID - 1) as f64) {
         return Err(AnalysisError::InvalidParameter {
@@ -953,6 +961,49 @@ mod tests {
     }
 
     #[test]
+    fn grid_refuses_an_overflowing_extent() {
+        let x = [-1.7e308, 0.0, 1.0, 2.0, 3.0, 1.7e308];
+        assert_eq!(grid_of(&x, &mut warns()).err().unwrap(), invalid_signal());
+    }
+
+    #[test]
+    fn grid_accepts_an_extent_of_exactly_f64_max() {
+        let h = f64::MAX / 2.0;
+        let mut w = warns();
+        let g = grid_of(&[-h, 0.0, h], &mut w).unwrap();
+        assert!(g.identity);
+        assert_eq!((g.step, g.n), (h, 3));
+        assert!(!w.non_uniform_signal);
+    }
+
+    #[test]
+    fn grid_refuses_uniform_steps_whose_extent_overflows() {
+        let h = f64::MAX / 2.0;
+        for x in [
+            vec![-h, 0.0, h * (1.0 + 1e-7)],
+            vec![-1.7e308, -8.5e307, 0.0, 8.5e307, 1.7e308],
+        ] {
+            assert_eq!(grid_of(&x, &mut warns()).err().unwrap(), invalid_signal());
+        }
+    }
+
+    #[test]
+    fn grid_overflow_guard_keeps_the_order_of_errors() {
+        for x in [
+            vec![1.7e308, 0.0, -1.7e308],
+            vec![-1.7e308, 0.0, 0.0, 1.7e308],
+            vec![-1.7e308, 2.0, 1.0, 1.7e308],
+            vec![f64::NAN, 0.0, 1.0],
+        ] {
+            assert_eq!(
+                grid_of(&x, &mut warns()).err().unwrap(),
+                AnalysisError::DuplicateX,
+                "{x:?}"
+            );
+        }
+    }
+
+    #[test]
     fn grid_cap_boundary() {
         let at_cap = [0.0, 1.0, 2.0, 3.0, (MAX_GRID - 1) as f64];
         assert_eq!(node_count(&at_cap), MAX_GRID);
@@ -975,6 +1026,7 @@ mod tests {
         };
         for x in [
             vec![0.0, 1.0, 2.0, 3.0, 1e300],
+            vec![-1.7e308, 0.0, 1.0, 2.0, 3.0, 1.7e308],
             vec![0.0, 5e-324, 1e-323, 1.5e-323, 1.0],
         ] {
             let y = vec![1.0; x.len()];
