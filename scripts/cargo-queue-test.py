@@ -7,6 +7,7 @@ canary `busctl` whose log must stay empty unless the test opts in (`enable_bus`)
 always a temporary one. Run: python3 scripts/cargo-queue-test.py
 """
 import contextlib
+import fcntl
 import importlib.util
 import io
 import json
@@ -682,7 +683,7 @@ class TestPriority(Base):
         self.open_gate("ga2")
         self.assertTrue(self.until(lambda: self.started("l")))
 
-    def test_aged_low_waiter_still_starts_after_a_later_big(self):
+    def test_low_never_ages_past_a_later_big(self):
         self.set_mode_file("dev")
         ageing = {"SF_CARGO_QUEUE_AGE": "0.5"}
         self.go("test", tag="a", root="a", extra=ageing)
@@ -693,10 +694,53 @@ class TestPriority(Base):
         self.go("test", tag="b", root="b", extra=ageing)
         self.idle(0.3)
         self.open_gate("ga")
-        self.assertTrue(self.until(lambda: self.started("l") or self.started("b")))
+        self.assertTrue(self.until(lambda: self.started("b")))
         self.idle(0.3)
-        self.assertTrue(self.started("l"), "the aged low waiter should go first (earlier arrival, same rank)")
-        self.assertFalse(self.started("b"))
+        self.assertFalse(self.started("l"), "a low build aged past a later big one")
+        self.open_gate("gb")
+        self.open_gate("ga2")
+        self.assertTrue(self.until(lambda: self.started("l")))
+
+    def forge_low(self):
+        """A live rank-1 ticket of class low that arrived first (#573): it heads the queue unless demoted."""
+        qd = os.path.join(self.qdir, "queue")
+        os.makedirs(qd, exist_ok=True)
+        path = os.path.join(qd, "w-1-%020d-%d.json" % (1, os.getpid()))
+        fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+        self.addCleanup(os.close, fd)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        with open(path, "w") as f:
+            json.dump({"pid": os.getpid(), "class": "low", "start": time.time(), "cwd": self.tmp, "command": "cargo clippy"}, f)
+
+    def test_blocked_low_ticket_is_not_counted_ahead_in_background(self):
+        self.forge_low()
+        a = self.go("test", tag="a", root="a")
+        self.assertTrue(self.until(lambda: self.started("a")), "the first build did not start past the blocked low")
+        b = self.go("test", tag="b", root="b")
+        self.assertTrue(self.until(lambda: "ahead (position" in self.output(b)), self.output(b))
+        self.assertIn("1 ahead (position 2", self.output(b))
+        self.open_gate("ga")
+        self.assertTrue(self.until(lambda: self.started("b")), self.output(b))
+        self.assertTrue(self.until(lambda: len(self.tsv()) >= 1))
+        self.assertEqual(self.tsv()[-1][6], "1")
+
+    def test_blocked_low_ticket_follows_the_mode(self):
+        self.forge_low()
+        self.set_mode_file("dev")
+        self.go("test", tag="b", root="b")
+        self.idle(0.5)
+        self.assertFalse(self.started("b"), "a low ticket that can start did not head the queue")
+        self.set_mode_file("background")
+        self.assertTrue(self.until(lambda: self.started("b")), "b stayed behind a low ticket that cannot start")
+
+    def test_aged_low_does_not_block_a_big_in_background(self):
+        ageing = {"SF_CARGO_QUEUE_AGE": "0.5"}
+        l = self.go("test", tag="l", root="l", extra=dict(ageing, **self.LOW))
+        self.idle(0.9)
+        self.go("test", tag="b", root="b", extra=ageing)
+        self.assertTrue(self.until(lambda: self.started("b")), "an old low build blocked every big one")
+        self.assertFalse(self.started("l"))
+        self.assertIsNone(l.poll())
 
     def test_low_runs_with_two_jobs_in_full_mode(self):
         self.set_mode_file("full")
@@ -724,9 +768,11 @@ class TestPriority(Base):
 
     def test_low_never_starts_in_background_mode(self):
         self.assertEqual(effective_background(self), "background")
-        self.go("test", tag="l", root="l", extra=self.LOW)
+        l = self.go("test", tag="l", root="l", extra=self.LOW)
         self.idle(0.8)
         self.assertFalse(self.started("l"), "a low build started in background mode with a free slot")
+        self.assertIsNone(l.poll(), self.output(l))
+        self.assertIn("0 ahead (position 1, class low, mode background", self.output(l))
         self.set_mode_file("dev")
         self.assertTrue(self.until(lambda: self.started("l")), "should start once the mode leaves background")
 
