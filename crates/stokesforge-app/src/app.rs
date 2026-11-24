@@ -158,7 +158,7 @@ mod detached_graph;
 mod detached_keys;
 mod detached_panel;
 mod dialogs;
-mod empty_state;
+pub(crate) mod empty_state;
 mod figure_copy;
 mod file_drop;
 mod form;

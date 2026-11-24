@@ -49,6 +49,7 @@ mechanics.
 | S-N7 | `hors-bornes-ramene` | An out-of-bounds value is brought back to the bound and flagged in orange for 2 s (a text the field rewrote: 10 s, S-R17). |
 | S-N8 | `grandeur-une-definition` | A single quantities table gives bounds, step, decimals, unit and offered values. |
 | S-N9 | `barres-outils-listes-editables` | The editable lists of the toolbars (size, thickness: choose 12 or type 15) go through the same building block. |
+| S-N13 | `liste-de-polices-tapee` | The font fields (Format bar, General and Legend of Graph Properties) are one typed list field, the "font" building block: typing opens the list filtered by every typed word (any order, case ignored), `▼` or Alt+↓ shows it whole on the current font, Enter picks the highlighted row or the first match, leaving reverts and never keeps an incomplete name. The list opens below the field, or above it when there is more room there (a field near the bottom of the window), never over the field; the field shows no tooltip while its list is open, and a pick by a click on a row gives the text editor of the canvas its focus and selection back like a pick by Enter. |
 | S-N10 | `unite-dans-le-libelle` | The unit is in the label ("Line width (pt)"), never as a suffix of the field. |
 | S-N11 | `champs-couples` | "from" ≤ "to": the constraint between two fields is refused, on the second; exception: From / To of an axis (From > To is the reversed axis). |
 | S-N12 | `aucun-slider` | No slider: opacity is a field, like R, G and B. |
@@ -80,7 +81,7 @@ mechanics.
 | S-F4 | `confirmation-forme` | Confirmation = modal dialog, Cancel + verb; Quit and Open: Discard Changes · Cancel · Save; never "Keep" alone. |
 | S-F5 | `confirmation-clavier` | Enter and Esc = Cancel, default button framed on Cancel; exception: Enter = Save in the trio. |
 | S-F6 | `ordre-des-boutons` | Dialog: secondary buttons, Cancel, primary on the right; wizard: Cancel on the left, Back · Next · Finish on the right. |
-| S-F7 | `niveaux-d-echap` | Esc first closes an open list, then gives the field its value back, then does the dialog Cancel. |
+| S-F7 | `niveaux-d-echap` | Esc first closes an open list, then gives the field its value back, then does the dialog Cancel. Exception: in the font list (S-N13) **one** Esc closes the list and gives the old name back at once, and reaches neither the text editor of the canvas nor the dialog. |
 | S-F8 | `geometrie-memorisee` | Size and position of a big dialog are remembered per kind of dialog, in the preferences. A small question or alert dialog (confirmation, save, choice, alert, small read-only window) keeps the size but always opens centred on the whole window, whatever its remembered position (#562); dragged while open, it stays where dropped. |
 | S-F9 | `focus-initial` | The first input field has the focus on opening. |
 | S-F10 | `bouton-principal-grise` | A disabled primary button states its reason in the footer and in a tooltip. |
@@ -175,6 +176,7 @@ two rules above:
 | guard: no gesture outside the matrix (`no_gesture_outside_the_matrix`, witness `the_gestures_guard_sees_a_gesture_outside_the_matrix`) | every file that reads a mouse wheel or a double-click is cited by [`gestures.md`](gestures.md) (S-K8) | **in place** (#299) |
 | "work in progress" building block (`app/busy.rs`: `work_in_progress`, `indicator`) | S-P1, S-P2 | **in place** (#232); wired to the background import and the script console |
 | "empty state" building block (`app/empty_state.rs`: `empty_state`) | S-P3 | **in place** (#232) |
+| "font" building block (`font_list.rs`: `font_field`; the filter lives in `stokesforge-app-state/src/font_search.rs`) + guard `every_font_list_goes_through_the_font_field_block` | S-N13, S-F7 (exception) | **in place** (#554) |
 
 Already in place and reused by this standard: `modal_dialog_with`
 (`app/dialogs.rs`), `hover_help` (`app/hover_help.rs`), `theme::section_title`,
@@ -232,6 +234,32 @@ entry) too (S-N9).
   also applies to `pyst` and to the file.
 - **Toolbars** (S-N9): editable lists (choose 12 or type 15), same
   building block.
+- **Typed font list** (S-N13, in place, #554): the font fields are a typed list
+  field like Size (`font_list::font_field`, white fill, filled arrow inside,
+  `list_frame`), in the Format bar, General and Legend of Graph Properties. It
+  shows the current font (« Graph font » for the default). A click in the text
+  selects everything and opens nothing; the first change of the text opens the
+  list below, filtered (`font_search::rows`: every typed word anywhere in the
+  name, any order, case ignored, accents not folded; « Graph font » is filtered
+  like a name; a group title with no match disappears; a current font not
+  installed here is listed right after « Graph font », under no title). `▼` or
+  Alt+↓: the whole list on the current font, text selected; plain ↑/↓ and the
+  wheel on the closed field do nothing. Open: ↑/↓ highlight the selectable rows
+  (no wrap, never a title), the highlight goes back to the first match when the
+  text changes; Enter picks the highlighted row (nothing found: nothing happens;
+  nothing typed nor moved: no change, closes; emptied: « Graph font »). A click
+  on a row picks it. **Esc is one press**: it closes the list and gives the old
+  name back, and is consumed by the field, so it never reaches the canvas text
+  editor nor the dialog (the exception to the two levels of S-F7). Tab or a click
+  elsewhere close and revert too: an incomplete name is never kept, so this field
+  does not go through `field_state::edit_text`, which commits on leaving. The
+  list has a fixed size while open, no preview on hover, and its empty state is a
+  sentence (S-P3, `font-list-no-match`). After a pick or an Esc in the Format bar
+  while a canvas text is edited, focus **and** selection go back to that editor
+  (`font_list::take_return_focus`, read by `graph_text_edit`); without an editor
+  the field keeps the focus. Like the number list it is an `egui::Area`, not an
+  `egui::Popup`, so `Popup::is_any_open` does not see it (the readers of that test
+  also look at the text focus). No tooltip on the Properties fields (S-M2).
 - **Unit** (S-N10): in the label ("Line width (pt)"), never as a suffix,
   including % and ° of the color picker.
 - **No slider** (S-N12 → S-R16): opacity is a field, like R, G and B.
@@ -526,7 +554,8 @@ History: #225, #230 (status bar), #228 (S-M7), #229 (S-M8).
   Finish grouped on the right.
 - **Esc levels** (S-F7 + S-R1): an open list closes first; otherwise
   the first Esc gives the field its value back, the next does the dialog
-  Cancel.
+  Cancel. The font list (S-N13) is the exception: its one Esc closes the list
+  and gives the old name back.
 - **Size and position** (S-F8) remembered per kind of dialog, in the
   preferences (outside `.stf`); a small question or alert dialog keeps only
   its size and opens centred on the whole window (#562).
