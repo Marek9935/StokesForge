@@ -209,6 +209,12 @@ Sources: `app/window_chrome.rs`, `app/dialogs.rs`, `app/window_detach.rs`,
 | Wheel | hovered number field (`number_field.rs`) | changes the value by one step, or by one entry of the proposed list; the wheel is consumed (the window does not scroll) |
 | Ctrl + wheel | number field | not taken (reserved for zoom) |
 | Click | field arrow | opens the list |
+| Click | name of a font field (`font_list.rs`: Format bar, General and Legend of Graph Properties) | selects the whole name; the list stays closed |
+| Typing | font field | the list opens below, filtered by the typed words (any order, case ignored); Enter picks the highlighted row or the first match |
+| Click, Alt + ↓ | `▼` of a font field | the whole list, on the current font, name selected |
+| ↑ / ↓ | open font list | highlights the previous / next font (no wrap, titles skipped); on the closed field and with the wheel: nothing |
+| Esc | open font list | one press closes it and gives the old name back; it never reaches the canvas text editor nor the dialog |
+| Tab, click elsewhere | open font list | closes, the old name comes back, nothing is picked |
 | Click, drag | square, wheel, bar of the color picker (`color_picker.rs`) | chooses the color |
 | Right-click | swatch of a saved color | removes it |
 | Wheel | file grid of the import (`app/import_wizard/grid.rs`) | scrolls the grid; Shift + wheel scrolls sideways; a role bar or menu open on a selection closes |
@@ -241,7 +247,7 @@ Surfaces read (paths relative to `src/`; `render-egui/` for
 - `app/object_manager_ui.rs`, `app/project_manager.rs`: the trees;
 - `app/tab_strip.rs`: the tabs;
 - `app/window_chrome.rs`: the windows;
-- `number_field.rs`, `color_picker.rs`: the fields;
+- `number_field.rs`, `font_list.rs`, `color_picker.rs`: the fields (`font_list.rs` reads no wheel);
 - `app/import_wizard/grid.rs`: the file grid of the import;
 - `app/import_wizard.rs`: the import screen, which hides the wheel from itself under its template windows.
 

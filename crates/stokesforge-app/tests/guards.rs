@@ -73,8 +73,8 @@
 mod sources;
 
 use sources::{
-    body, closing, functions, ident_at, is_ident, line_of, mask_source, short_name, starts_with_at,
-    unique_function, word_at, SourceFile,
+    body, closing, functions, functions_named, ident_at, is_ident, line_of, mask_source,
+    short_name, starts_with_at, unique_function, word_at, SourceFile,
 };
 
 fn file(path: &str, text: &str) -> SourceFile {
@@ -1116,6 +1116,49 @@ fn no_numeric_field_outside_the_building_block() {
     assert!(unique_function(&sources, "number_field_core")
         .body
         .contains("edit_text"));
+}
+
+/// #554: the three font lists (Format bar, General and Legend of Graph
+/// Properties) are the one typed field of `font_list.rs`; no `ComboBox` and no
+/// `font_options` copy of the families stays behind, and the group titles live
+/// only in the block.
+#[test]
+fn every_font_list_goes_through_the_font_field_block() {
+    let sources = sources::sources();
+    assert!(unique_function(&sources, "text_format_contents")
+        .body
+        .contains("font_list::font_field("));
+    assert!(unique_function(&sources, "font_row")
+        .body
+        .contains("font_list::font_field("));
+    for caller in ["global_text_rows", "legend_font_section"] {
+        assert!(
+            unique_function(&sources, caller).body.contains("font_row("),
+            "{caller} places the font through `font_row`"
+        );
+    }
+    assert!(
+        functions_named(&sources, "font_options").is_empty(),
+        "`font_options` cloned every family every frame: the block reads them itself"
+    );
+    for file in &sources {
+        if file.path == "font_list.rs" {
+            continue;
+        }
+        let production = file.production().code_as_text();
+        assert!(
+            !production.contains("format-font-embedded")
+                && !production.contains("format-font-system"),
+            "{}: the group titles of the font list belong to `font_list.rs`",
+            file.path
+        );
+        assert!(
+            !production.contains("stokesforge_format_font\")")
+                && !production.contains("stokesforge_render_egui::available_families"),
+            "{}: a font list is drawn by `font_list::font_field`",
+            file.path
+        );
+    }
 }
 
 /// The witness: a `DragValue` or a `Slider`, in any form, is seen; a

@@ -679,20 +679,25 @@ fn reset_parts_button(form: &mut Form<'_>, spec: &mut PlotSpec) -> bool {
     clicked
 }
 
-/// The families the font list offers: « Graph font » (the embedded default),
-/// the embedded and installed fonts, and `current` if it is not installed here
-/// (it stays visible, and selected). Shared by the legend and the General tab.
-fn font_options(current: &str) -> Vec<ChoiceOption<String>> {
-    let mut options = vec![ChoiceOption::new(String::new(), tr!("format-font-default"))];
-    options.extend(
-        stokesforge_render_egui::available_families()
-            .iter()
-            .map(|family| ChoiceOption::new(family.name.clone(), family.name.clone())),
+/// The font field of a form row (#554): the typed field with a searchable
+/// list, shared by the General tab and the legend; `font` is `""` for « Graph
+/// font ». Returns whether a font was picked. No tooltip: the row has its label
+/// (S-M2).
+fn font_row(ui: &mut egui::Ui, id_salt: &'static str, font: &mut String) -> bool {
+    let field = crate::font_list::font_field(
+        ui,
+        id_salt,
+        crate::theme::FIELD_WIDTH_MEDIUM,
+        Some(font.as_str()),
+        None,
     );
-    if !options.iter().any(|option| option.value == current) {
-        options.push(ChoiceOption::new(current.to_owned(), current.to_owned()));
+    match field.picked {
+        Some(name) => {
+            *font = name;
+            true
+        }
+        None => false,
     }
-    options
 }
 
 /// The graph font and the text scale of the General tab (#545): the graph
@@ -700,9 +705,8 @@ fn font_options(current: &str) -> Vec<ChoiceOption<String>> {
 /// rendering; a text with its own font or size keeps it. Auto (the first font
 /// entry, an emptied scale) clears the graph setting.
 fn global_text_rows(form: &mut Form<'_>, spec: &mut PlotSpec) -> bool {
-    let options = font_options(&spec.text_font);
     let mut commit = form.row(tr!("format-font"), |ui| {
-        choice(ui, "plot_general_font", &mut spec.text_font, &options)
+        font_row(ui, "plot_general_font", &mut spec.text_font)
     });
     commit |= form.row(tr!("plot-general-text-scale"), |ui| {
         let mut percent = spec.text_scale.map(|scale| (scale * 100.0).round());
@@ -2483,9 +2487,8 @@ fn legend_font_section(
     env: &mut PickerEnv,
 ) -> bool {
     form.section(tr!("plot-legend-text-section"));
-    let options = font_options(&legend.font.family);
     let mut commit = form.row(tr!("format-font"), |ui| {
-        choice(ui, "plot_legend_font", &mut legend.font.family, &options)
+        font_row(ui, "plot_legend_font", &mut legend.font.family)
     });
     commit |= form.row(tr!("plot-text-size"), |ui| {
         auto_number_field(
@@ -3767,6 +3770,96 @@ mod tests {
             (model.frame_heights[0] - 141.732_283).abs() < 1e-5,
             "{model:?}"
         );
+    }
+
+    // -- The font list (#554) ------------------------------------------------
+
+    /// The first font shipped with the application: always listed, first of
+    /// its group, whatever the machine.
+    fn first_embedded_font() -> String {
+        stokesforge_render_egui::available_families()
+            .iter()
+            .find(|family| family.embedded)
+            .map(|family| family.name.clone())
+            .expect("an embedded font")
+    }
+
+    type FontReader = fn(&PlotSpec) -> String;
+
+    /// The two Properties pages that carry a font list, each with the way to
+    /// read the font from the draft.
+    fn font_pages() -> [(PlotSettingsTab, FontReader); 2] {
+        [
+            (PlotSettingsTab::Graph, |spec| spec.text_font.clone()),
+            (PlotSettingsTab::Legend, |spec| {
+                spec.panels[0].legend.font.family.clone()
+            }),
+        ]
+    }
+
+    /// #554: typing a name and Enter picks it; neither the Enter nor the
+    /// Escape of the list closes Graph Properties, in General and in Legend.
+    /// Witness: an Enter or an Escape left unconsumed closes the window.
+    #[test]
+    fn the_font_list_keeps_graph_properties_open_on_enter_and_escape() {
+        let wanted = first_embedded_font();
+        for (tab, read) in font_pages() {
+            let mut harness = harness(|_| {});
+            harness.open(tab, None);
+            let context = test_support::context();
+            let default = tr!("format-font-default");
+            focus_field(&context, &mut harness.state, &default);
+            one_frame(
+                &context,
+                &mut harness.state,
+                vec![egui::Event::Text(wanted.clone())],
+            );
+            one_frame(&context, &mut harness.state, Vec::new());
+            // Escape: the list closes, the old name is back, the window stays.
+            one_frame(&context, &mut harness.state, vec![key(egui::Key::Escape)]);
+            one_frame(&context, &mut harness.state, Vec::new());
+            assert!(harness.state.plot_settings().is_some(), "{tab:?}: Esc");
+            assert_eq!(read(&harness.draft()), "", "{tab:?}: nothing picked");
+            let painted = paint_window(&context, &mut harness.state, Vec::new());
+            assert!(is_painted(&painted, &default), "{tab:?}: old name back");
+
+            // Enter picks the first match; the window stays open.
+            focus_field(&context, &mut harness.state, &default);
+            one_frame(
+                &context,
+                &mut harness.state,
+                vec![egui::Event::Text(wanted.clone())],
+            );
+            one_frame(&context, &mut harness.state, vec![key(egui::Key::Enter)]);
+            one_frame(&context, &mut harness.state, Vec::new());
+            assert!(harness.state.plot_settings().is_some(), "{tab:?}: Enter");
+            assert_eq!(read(&harness.draft()), wanted, "{tab:?}: picked");
+        }
+    }
+
+    /// #554: a font pick is one history entry, in General and in Legend
+    /// (the window is one entry, closed with it).
+    #[test]
+    fn a_font_pick_is_one_history_entry() {
+        let wanted = first_embedded_font();
+        for (tab, read) in font_pages() {
+            let mut harness = harness(|_| {});
+            harness.open(tab, None);
+            let context = test_support::context();
+            focus_field(&context, &mut harness.state, &tr!("format-font-default"));
+            one_frame(
+                &context,
+                &mut harness.state,
+                vec![egui::Event::Text(wanted.clone())],
+            );
+            one_frame(&context, &mut harness.state, vec![key(egui::Key::Enter)]);
+            one_frame(&context, &mut harness.state, Vec::new());
+            harness.state.close_plot_settings();
+            assert_eq!(read(&harness.model()), wanted, "{tab:?}");
+            harness.state.dispatch(Action::Undo);
+            assert_eq!(read(&harness.model()), "", "{tab:?}: one Undo");
+            assert!(harness.state.undo_label().is_none(), "{tab:?}: one entry");
+        }
     }
 
     // -- Graph size: the total width and height (#407) ---------------------

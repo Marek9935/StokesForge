@@ -40,6 +40,7 @@ pub mod default_folders;
 pub mod errors;
 pub mod figure_texts;
 pub mod file_picker;
+pub mod font_search;
 mod formula_entry;
 pub mod formula_help;
 pub mod frame_sizes;

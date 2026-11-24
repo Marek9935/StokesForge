@@ -102,7 +102,7 @@ Its buttons format the text of a graph. They are greyed out until a text is sele
 
 | Icon | Button | What it does |
 |---|---|---|
-| | **Font** | Sets the font of the whole text box (a list) |
+| | **Font** | Sets the font of the whole text box. Type part of a name to find a font, or open the list with its arrow |
 | | **Size** | Sets the size, in points, of the selected text (a list) |
 | <img class="icon" src="../images/icons/text-a-underline-modify.neutral.svg" alt=""> | **Text color** | Sets the color of the text |
 | <img class="icon" src="../images/icons/text-align-left.neutral.svg" alt=""> | **Left** | Aligns the text to the left of its box |
