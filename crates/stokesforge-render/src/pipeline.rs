@@ -2657,7 +2657,7 @@ impl Projection {
         };
         let fraction = |scale: AxisScale, (low, high): (f64, f64), value: f64| {
             let t = scale::forward(scale, value)?;
-            (high != low).then(|| (t - low) / (high - low))
+            (high != low).then_some((t - low) / (high - low))
         };
         let fx = fraction(self.ranges.x.0, self.ranges.x.1, anchor.x)?;
         let fy = fraction(y_scale, y_range, anchor.y)?;
