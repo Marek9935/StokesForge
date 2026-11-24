@@ -1158,8 +1158,8 @@ mod tests {
                 .any(|t| t.text == section)
         };
         let mut panel = layer_with_group();
-        for member in 1..=3 {
-            panel.series[member].plot_type = PlotType::Line;
+        for series in &mut panel.series[1..=3] {
+            series.plot_type = PlotType::Line;
         }
         assert!(!painted(&mut panel), "only Line members: hidden");
         panel.series[3].plot_type = PlotType::Scatter;
@@ -1181,8 +1181,8 @@ mod tests {
             series.name = name.into();
             panel.series.push(series);
         }
-        for member in 1..=3 {
-            panel.series[member].group = Some(1);
+        for series in &mut panel.series[1..=3] {
+            series.group = Some(1);
         }
         assert!(panel.rename_group(1, "Batch"));
         panel
@@ -1620,8 +1620,8 @@ mod tests {
         let row = center_of(&output, "B");
         click_at(&ctx, &mut panel, (&mut selected, &mut group), row);
         page(&ctx, &mut panel, (&mut selected, &mut group), Vec::new());
-        for member in 1..=3 {
-            assert_eq!(panel.series[member].line.width, 7.0, "member {member}");
+        for (member, series) in (1..).zip(&panel.series[1..=3]) {
+            assert_eq!(series.line.width, 7.0, "member {member}");
         }
         assert_eq!(
             panel.series[0].line.width,
