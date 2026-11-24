@@ -1,0 +1,60 @@
+# Temporary proof of #559, never merged: the tag-only and Windows-only steps.
+name: Probe 559
+on:
+  push:
+    branches: ['probe/559']
+permissions:
+  contents: read
+jobs:
+  up:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - run: git tag | tail -3 && git rev-parse origin/main
+      - run: |
+          mkdir -p dist
+          for e in rpm deb tar.gz; do echo "fake $e" > "dist/StokesForge-0-linux-x86_64.$e"; done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-packages
+          path: |
+            dist/StokesForge-*-linux-x86_64.rpm
+            dist/StokesForge-*-linux-x86_64.deb
+            dist/StokesForge-*-linux-x86_64.tar.gz
+          retention-days: 1
+          if-no-files-found: error
+  down:
+    needs: [up]
+    runs-on: ubuntu-latest
+    steps:
+      - run: cat /etc/os-release
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: linux-packages
+          path: dist
+      - run: |
+          ls -lR dist
+          for e in rpm deb tar.gz; do grep -qx "fake $e" "dist/StokesForge-0-linux-x86_64.$e"; done
+          docker run --rm -v "$PWD/scripts:/scripts:ro" -v "$PWD/dist:/dist:ro" debian:12 ls /scripts/linux-packages-install-test.sh /dist/StokesForge-0-linux-x86_64.deb
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - run: git config --system core.longpaths true
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v6
+        with:
+          path: vendor/python/*.tar.gz
+          key: probe-559-${{ hashFiles('vendor/python/lock.env') }}
+      - run: mkdir -p dist && echo fake > dist/StokesForge-0-windows-setup.exe
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-installeur
+          path: dist/StokesForge-*-windows-setup.exe
+          retention-days: 1
