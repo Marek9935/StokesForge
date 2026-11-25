@@ -775,6 +775,10 @@ pub enum Action {
     },
     /// Origin chooser (#557): what the list shows; it hides, never unticks.
     SetOriginShow(OriginShow),
+    /// Origin chooser (#556, #557): "Include the columns formulas read". On,
+    /// the columns read by the formulas of the checked columns (transitively)
+    /// are imported too; off, only what was checked by hand or by a graph.
+    SetOriginIncludeReads(bool),
     /// Origin chooser: ticks every sheet that has columns, and every graph.
     CheckAllOriginSheets,
     /// Origin chooser: unticks every sheet.
@@ -7165,6 +7169,7 @@ impl AppState {
             }
             Action::ToggleOriginGraph { file, graph } => self.toggle_origin_graph(file, graph),
             Action::SetOriginShow(show) => self.set_origin_show(show),
+            Action::SetOriginIncludeReads(on) => self.set_origin_include_reads(on),
             Action::CheckAllOriginSheets => self.check_all_origin_sheets(true),
             Action::CheckNoOriginSheets => self.check_all_origin_sheets(false),
             Action::ImportOrigin => self.import_origin(),

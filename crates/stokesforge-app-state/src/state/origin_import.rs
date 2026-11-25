@@ -208,6 +208,24 @@ pub(super) struct OriginFile {
     /// column, resolved on the first read after a change of the ticks (the
     /// only write is `write_column`, which clears it), not at every frame.
     reads_warning: OnceLock<Vec<String>>,
+    /// "Include the columns formulas read" (#556, #557), copied from the
+    /// chooser: the ticks of `derived` add the columns read by the formulas of
+    /// the ticked columns.
+    include_reads: bool,
+    /// What the overlay adds to `selection`, resolved like `reads_warning`.
+    derived: OnceLock<Derived>,
+}
+
+/// The overlay of "Include the columns formulas read": the ticks Import uses,
+/// and the columns only the overlay ticked.
+#[derive(Debug, Clone)]
+struct Derived {
+    /// The ticks by hand and by graph, plus the columns the ticked formulas
+    /// read, transitively. Equal to the ticks when the box is off.
+    effective: OriginSelection,
+    /// A column that only the overlay ticked, with the short name of the
+    /// formula column that reads it: its box cannot be clicked.
+    locked: BTreeMap<ColumnPos, String>,
 }
 
 impl OriginFile {
@@ -237,7 +255,110 @@ impl OriginFile {
             graphs,
             formula_reads,
             reads_warning: OnceLock::new(),
+            include_reads: false,
+            derived: OnceLock::new(),
         }
+    }
+
+    /// The ticks of the overlay (see [`Derived`]), worked out once per change.
+    fn derived(&self) -> &Derived {
+        self.derived.get_or_init(|| {
+            let mut effective = self.selection.clone();
+            let mut locked = BTreeMap::new();
+            if self.include_reads {
+                let tick = |selection: &OriginSelection, (b, s, c): ColumnPos| {
+                    selection
+                        .get(b)
+                        .and_then(|b| b.get(s))
+                        .and_then(|s| s.get(c))
+                        .copied()
+                        .unwrap_or(true)
+                };
+                let mut pending: Vec<ColumnPos> = self
+                    .formula_reads
+                    .keys()
+                    .filter(|&&at| tick(&self.selection, at))
+                    .copied()
+                    .collect();
+                // A column is ticked once: a loop between two columns ends.
+                while let Some(reader) = pending.pop() {
+                    let Some(reads) = self.formula_reads.get(&reader) else {
+                        continue;
+                    };
+                    for &(b, s, c) in reads {
+                        if tick(&effective, (b, s, c)) {
+                            continue;
+                        }
+                        if let Some(cell) = effective
+                            .get_mut(b)
+                            .and_then(|b| b.get_mut(s))
+                            .and_then(|s| s.get_mut(c))
+                        {
+                            *cell = true;
+                            let name = self.short_name(reader);
+                            locked.insert((b, s, c), name);
+                            pending.push((b, s, c));
+                        }
+                    }
+                }
+            }
+            Derived { effective, locked }
+        })
+    }
+
+    fn short_name(&self, (b, s, c): ColumnPos) -> String {
+        self.project
+            .books
+            .get(b)
+            .and_then(|b| b.sheets.get(s))
+            .and_then(|s| s.columns.get(c))
+            .map_or_else(String::new, |column| column.short_name.clone())
+    }
+
+    /// The ticks Import and the plan use: by hand, by graph, and by the overlay.
+    fn effective(&self) -> &OriginSelection {
+        &self.derived().effective
+    }
+
+    /// The short name of the formula column that makes the box of this column
+    /// unclickable; `None` when the overlay did not tick it alone.
+    fn locked_by(&self, book: usize, sheet: usize, column: usize) -> Option<&str> {
+        self.derived()
+            .locked
+            .get(&(book, sheet, column))
+            .map(String::as_str)
+    }
+
+    /// Every column of the sheet is ticked by the overlay alone.
+    fn sheet_locked(&self, book: usize, sheet: usize) -> bool {
+        let count = self.columns_in(book, sheet);
+        count > 0 && (0..count).all(|c| self.locked_by(book, sheet, c).is_some())
+    }
+
+    fn book_locked(&self, book: usize) -> bool {
+        let sheets = self.project.books.get(book).map_or(0, |b| b.sheets.len());
+        let mut any = false;
+        for sheet in 0..sheets {
+            if self.columns_in(book, sheet) == 0 {
+                continue;
+            }
+            if !self.sheet_locked(book, sheet) {
+                return false;
+            }
+            any = true;
+        }
+        any
+    }
+
+    fn set_include_reads(&mut self, include: bool) {
+        self.include_reads = include;
+        self.reads_warning.take();
+        self.derived.take();
+    }
+
+    /// The box is useful: some formula of the file reads another column.
+    fn has_formula_reads(&self) -> bool {
+        !self.formula_reads.is_empty()
     }
 
     /// The box of a graph: empty while it is not picked; picked, ticked when
@@ -289,7 +410,7 @@ impl OriginFile {
     }
 
     fn column_ticked(&self, book: usize, sheet: usize, column: usize) -> bool {
-        self.selection
+        self.effective()
             .get(book)
             .and_then(|b| b.get(sheet))
             .and_then(|s| s.get(column))
@@ -380,6 +501,7 @@ impl OriginFile {
     /// Writes the tick; `false` for a column that does not exist.
     fn write_column(&mut self, book: usize, sheet: usize, column: usize, ticked: bool) -> bool {
         self.reads_warning.take();
+        self.derived.take();
         let tick = self
             .selection
             .get_mut(book)
@@ -427,6 +549,9 @@ pub(super) struct OriginChooser {
     pub(super) folder: ImportFolder,
     /// What the list shows (#557); hides, never unticks.
     show: OriginShow,
+    /// "Include the columns formulas read" (#556, #557): off at every opening,
+    /// kept by Reopen Last Import.
+    include_reads: bool,
     /// The stale formulas the user ticked in the window of the last Import
     /// (#556): kept so that Reopen Last Import finds the same answers.
     pub(super) accepted_formulas: BTreeSet<OriginColumnKey>,
@@ -461,6 +586,10 @@ pub struct OriginColumnView {
     /// their Origin short names. The chooser says so in orange; nothing is
     /// ticked for the user.
     pub reads_unticked: Vec<String>,
+    /// Ticked only by "Include the columns formulas read" (#556): the Origin
+    /// short name of the formula column that reads it. Its box cannot be
+    /// clicked while the box is on.
+    pub read_by: Option<String>,
 }
 
 /// A sheet as the chooser shows it.
@@ -476,6 +605,9 @@ pub struct OriginSheetView {
     pub ticked: bool,
     /// The three states of its box.
     pub tick: OriginTick,
+    /// Every column is ticked only by the formulas that read it: the box
+    /// cannot be clicked.
+    pub locked: bool,
     /// Its columns, in order.
     pub column_list: Vec<OriginColumnView>,
 }
@@ -489,6 +621,8 @@ pub struct OriginBookView {
     pub short_name: String,
     /// The three states of its box.
     pub tick: OriginTick,
+    /// Every column of it is ticked only by the formulas that read it.
+    pub locked: bool,
     /// Its sheets.
     pub sheets: Vec<OriginSheetView>,
 }
@@ -573,6 +707,7 @@ impl AppState {
                     .enumerate()
                     .map(|(book_index, book)| OriginBookView {
                         tick: file.book_tick(book_index),
+                        locked: file.book_locked(book_index),
                         name: origin_book_name(book).to_string(),
                         short_name: book.short_name.clone(),
                         sheets: book
@@ -591,6 +726,7 @@ impl AppState {
                                 ticked: file.sheet_tick(book_index, sheet_index)
                                     != OriginTick::None,
                                 tick: file.sheet_tick(book_index, sheet_index),
+                                locked: file.sheet_locked(book_index, sheet_index),
                                 column_list: sheet
                                     .columns
                                     .iter()
@@ -610,6 +746,9 @@ impl AppState {
                                             sheet_index,
                                             column_index,
                                         ),
+                                        read_by: file
+                                            .locked_by(book_index, sheet_index, column_index)
+                                            .map(str::to_string),
                                     })
                                     .collect(),
                             })
@@ -626,6 +765,24 @@ impl AppState {
         self.origin_import
             .as_ref()
             .map_or(OriginShow::All, |chooser| chooser.show)
+    }
+
+    /// "Include the columns formulas read" is on (#556); off when the chooser
+    /// is not open.
+    #[must_use]
+    pub fn origin_import_include_reads(&self) -> bool {
+        self.origin_import
+            .as_ref()
+            .is_some_and(|chooser| chooser.include_reads)
+    }
+
+    /// Why that box is greyed out: no file has a formula that reads another
+    /// column. `None` when it can be used (and when the chooser is not open).
+    #[must_use]
+    pub fn origin_import_include_reads_blocker(&self) -> Option<String> {
+        let chooser = self.origin_import.as_ref()?;
+        (!chooser.files.iter().any(OriginFile::has_formula_reads))
+            .then(|| tr!("disabled-origin-include-reads-no-formula"))
     }
 
     /// The plan Import would run, for the ticks, layouts and files of the
@@ -743,6 +900,8 @@ impl AppState {
         }
     }
 
+    /// A column that only the overlay ticked (its box is greyed out) keeps its
+    /// tick: unticking it by hand writes nothing the overlay does not redo.
     pub(super) fn toggle_origin_column(
         &mut self,
         file: usize,
@@ -849,6 +1008,16 @@ impl AppState {
         }
     }
 
+    pub(super) fn set_origin_include_reads(&mut self, include: bool) {
+        let Some(chooser) = &mut self.origin_import else {
+            return;
+        };
+        chooser.include_reads = include;
+        for file in &mut chooser.files {
+            file.set_include_reads(include);
+        }
+    }
+
     pub(super) fn set_origin_show(&mut self, show: OriginShow) {
         if let Some(chooser) = &mut self.origin_import {
             chooser.show = show;
@@ -946,10 +1115,12 @@ impl AppState {
             layout: FilesLayout::SheetPerFile,
             folder,
             show: OriginShow::All,
+            include_reads: false,
             accepted_formulas: BTreeSet::new(),
         });
-        for file in files {
+        for mut file in files {
             if !chooser.files.iter().any(|known| known.path == file.path) {
+                file.set_include_reads(chooser.include_reads);
                 chooser.files.push(file);
             }
         }
@@ -1273,7 +1444,7 @@ fn origin_sources<'a>(chooser: &'a OriginChooser, stems: &'a [String]) -> Vec<Or
         .zip(stems)
         .map(|(file, stem)| OriginSource {
             project: &file.project,
-            selection: &file.selection,
+            selection: file.effective(),
             file_stem: stem,
         })
         .collect()

@@ -2742,6 +2742,12 @@ origin-import-show = Show:
 origin-import-show-all = All
 origin-import-show-workbooks = Workbooks
 origin-import-show-graphs = Graphs
+origin-import-include-reads =
+    Include the columns that formulas read
+    .hint = Also imports the columns that the formulas of the checked columns read, so that those formulas stay live
+disabled-origin-include-reads-no-formula = No column of these files has a formula that reads other columns
+disabled-origin-column-read-by-formula = Read by the formula of { $column }
+disabled-origin-all-read-by-formulas = Every column here is imported because a formula reads it
 origin-import-no-graph = No graph in this file
 origin-import-no-graph-in = No graph in { $file }
 origin-import-no-workbook = No workbook in this file

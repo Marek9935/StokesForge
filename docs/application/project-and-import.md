@@ -207,7 +207,24 @@ imported, refused, or values kept by the user) keeps Origin's values and gets
 that is set leaves no note. The status line says how many formulas were set and kept
 (`status-import-origin-formulas`). The chooser also keeps one orange line above its footer (`origin_import_reads_warning`: count, at most three names then « and N more »; resolved once per change of the ticks, cached in `OriginFile::reads_warning` and cleared by `write_column`, the only writer of the ticks). It warns in orange under a ticked column whose
 formula reads an unticked one (`OriginColumnView::reads_unticked`, resolved once per file in
-`OriginFile::formula_reads`; nothing is ticked for the user). The CLI and `pyst.import_file` go
+`OriginFile::formula_reads`; nothing is ticked for the user unless the box below is on).
+**Include the columns formulas read (#556, #557).** `OriginChooser::include_reads` (off at every
+opening, kept in `last_origin_import`, so Reopen Last Import restores it; `Action::SetOriginIncludeReads`)
+is an overlay, never written into the ticks: `OriginFile::derived` (a `OnceLock` cleared by
+`write_column` and by the box) walks `formula_reads` from the ticked formula columns, transitively
+and with each column ticked once (a loop ends), and gives `effective`, the ticks Import uses. Every
+reader of the ticks goes through it: the tree (`column_ticked`), the summary, the Import blocker, the
+orange lines, and `OriginSource::selection` (hence the plan, shared X, side by side, the verdicts and
+the window `Formulas with Different Values`). The reads are those of `resolve_origin_formula` (the X
+of an `at`/`table` form is one of its references); no second resolution. A column that only the
+overlay ticked is `OriginColumnView::read_by` (the short name of the first formula column that reads
+it): its box is greyed out with `disabled-origin-column-read-by-formula` and neither the box nor the
+name answers a click (a sheet or workbook box whose columns are all in that case is greyed too,
+`locked`). Turning the box off drops exactly what only the overlay added; a column ticked by hand or
+through a graph stays, and unticking it while a ticked formula still reads it leaves it ticked (then
+locked). Check None clears the ticks, not the box. The box is greyed out with
+`disabled-origin-include-reads-no-formula` when no file has a formula that reads another column. The
+CLI and `pyst` are unchanged. The CLI and `pyst.import_file` go
 through `plan_origin_import_formulas`: a formula is set only when it gives Origin's values, the
 others keep their values and the note, and they never ask.
 

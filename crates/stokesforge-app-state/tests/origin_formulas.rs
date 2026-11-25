@@ -97,11 +97,22 @@ fn book(short: &str, long: &str, sheets: Vec<synthetic::Sheet>) -> synthetic::Bo
 /// Opens the chooser on one Origin file with every column of every sheet
 /// ticked.
 fn open_all(state: &mut AppState, dir: &Path, books: Vec<synthetic::Book>) -> PathBuf {
+    let path = open_unticked(
+        state,
+        dir,
+        synthetic::Project {
+            books,
+            ..synthetic::Project::default()
+        },
+    );
+    state.dispatch(Action::CheckAllOriginSheets);
+    path
+}
+
+/// Opens the chooser on one Origin file with nothing ticked.
+fn open_unticked(state: &mut AppState, dir: &Path, project: synthetic::Project) -> PathBuf {
     let path = dir.join("f.opj");
-    let bytes = synthetic::write_project(&synthetic::Project {
-        books,
-        ..synthetic::Project::default()
-    });
+    let bytes = synthetic::write_project(&project);
     std::fs::write(&path, bytes).unwrap();
     state.dispatch(Action::DropFiles {
         paths: vec![path.clone()],
@@ -113,7 +124,6 @@ fn open_all(state: &mut AppState, dir: &Path, books: Vec<synthetic::Book>) -> Pa
         assert!(std::time::Instant::now() < deadline, "import too long");
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
-    state.dispatch(Action::CheckAllOriginSheets);
     path
 }
 
@@ -633,4 +643,340 @@ fn the_orange_line_of_the_chooser_counts_the_formulas_that_read_an_unchecked_col
     assert!(line.contains("D, E, F"), "{line}");
     state.dispatch(toggle_y());
     assert_eq!(state.origin_import_reads_warning(), None, "input checked");
+}
+
+// ---- Include the columns formulas read (#556, #557) -----------------------
+
+/// `Data`: X (col 0), B (1), C = `col(B)*2` (2), D = `col(C)+1` (3), all the
+/// values consistent so that the formulas are set live.
+fn chain() -> synthetic::Project {
+    synthetic::Project {
+        books: vec![book(
+            "A",
+            "Run",
+            vec![
+                sheet(
+                    "Data",
+                    vec![
+                        numbers("X", X, &[1.0, 2.0, 3.0]),
+                        numbers("B", Y, &[10.0, 20.0, 30.0]),
+                        with_formula(numbers("C", Y, &[20.0, 40.0, 60.0]), "col(B)*2"),
+                        with_formula(numbers("D", Y, &[21.0, 41.0, 61.0]), "col(C)+1"),
+                    ],
+                ),
+                sheet(
+                    "Raw",
+                    vec![
+                        numbers("A", X, &[1.0, 2.0, 3.0]),
+                        numbers("B", Y, &[5.0, 6.0, 7.0]),
+                        numbers("E", Y, &[0.0, 0.0, 0.0]),
+                    ],
+                ),
+            ],
+        )],
+        ..synthetic::Project::default()
+    }
+}
+
+fn tick(state: &mut AppState, sheet: usize, column: usize) {
+    state.dispatch(Action::ToggleOriginColumn {
+        file: 0,
+        book: 0,
+        sheet,
+        column,
+    });
+}
+
+/// The ticks of the Data and Raw sheets, as the tree shows them.
+fn shown(state: &AppState) -> Vec<Vec<bool>> {
+    state.origin_import_files()[0].books[0]
+        .sheets
+        .iter()
+        .map(|sheet| sheet.column_list.iter().map(|c| c.ticked).collect())
+        .collect()
+}
+
+fn on(state: &mut AppState) {
+    state.dispatch(Action::SetOriginIncludeReads(true));
+}
+
+fn columns_named(state: &AppState) -> Vec<String> {
+    let tree = state.tree();
+    columns_of(state, "Run", 0)
+        .iter()
+        .map(|&id| tree.node(id).unwrap().name().to_string())
+        .collect()
+}
+
+#[test]
+fn the_box_brings_the_column_a_ticked_formula_reads_and_the_formula_is_set() {
+    let _isolation = isolate();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start(dir.path());
+    open_unticked(&mut state, dir.path(), chain());
+    assert!(!state.origin_import_include_reads(), "off at opening");
+    tick(&mut state, 0, 2);
+    // Off: C alone, an orange line, and C keeps Origin's values.
+    assert!(state.origin_import_reads_warning().is_some());
+    on(&mut state);
+    assert!(state.origin_import_include_reads());
+    assert_eq!(shown(&state)[0], [false, true, true, false]);
+    assert_eq!(state.origin_import_reads_warning(), None);
+    state.dispatch(Action::ImportOrigin);
+    let columns = columns_of(&state, "Run", 0);
+    assert_eq!(columns.len(), 2, "B and C");
+    assert!(formula_of(&state, columns[1]).is_some(), "C is live");
+    assert_eq!(
+        bits(&state, columns[0]),
+        [10.0f64, 20.0, 30.0].map(f64::to_bits)
+    );
+}
+
+#[test]
+fn without_the_box_the_formula_keeps_the_values() {
+    let _isolation = isolate();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start(dir.path());
+    open_unticked(&mut state, dir.path(), chain());
+    tick(&mut state, 0, 2);
+    state.dispatch(Action::ImportOrigin);
+    let columns = columns_of(&state, "Run", 0);
+    assert_eq!(columns.len(), 1);
+    assert!(formula_of(&state, columns[0]).is_none());
+}
+
+#[test]
+fn the_columns_are_read_transitively_and_across_sheets() {
+    let _isolation = isolate();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start(dir.path());
+    let mut project = chain();
+    // E reads Raw's own B and Data!C by name: D -> C -> B, E -> Data!D.
+    project.books[0].sheets[1].columns[2] =
+        with_formula(numbers("E", Y, &[22.0, 42.0, 62.0]), "Data!D+1");
+    open_unticked(&mut state, dir.path(), project);
+    tick(&mut state, 1, 2);
+    on(&mut state);
+    assert_eq!(shown(&state)[0], [false, true, true, true], "B, C, D");
+    assert_eq!(shown(&state)[1], [false, false, true], "E itself");
+    let view = &state.origin_import_files()[0].books[0].sheets[0].column_list;
+    assert_eq!(view[3].read_by.as_deref(), Some("E"));
+    assert_eq!(view[2].read_by.as_deref(), Some("D"));
+    assert_eq!(view[1].read_by.as_deref(), Some("C"));
+    assert_eq!(view[0].read_by, None, "X is not read");
+    state.dispatch(Action::ImportOrigin);
+    assert!(!state.origin_formulas_open());
+    let columns = columns_of(&state, "Run", 0);
+    assert_eq!(columns.len(), 3);
+    assert!(formula_of(&state, columns[2]).is_some());
+}
+
+#[test]
+fn the_x_column_an_at_form_reads_comes_too() {
+    let _isolation = isolate();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start(dir.path());
+    let mut project = chain();
+    // table(X, B, 2): reads Raw's A (the X) and B.
+    project.books[0].sheets[0].columns[3] =
+        with_formula(numbers("D", Y, &[6.0, 6.0, 6.0]), "table(Raw!A, Raw!B, 2)");
+    open_unticked(&mut state, dir.path(), project);
+    tick(&mut state, 0, 3);
+    on(&mut state);
+    assert_eq!(shown(&state)[1], [true, true, false]);
+}
+
+#[test]
+fn the_box_off_returns_to_exactly_the_previous_ticks() {
+    let _isolation = isolate();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start(dir.path());
+    open_unticked(&mut state, dir.path(), chain());
+    tick(&mut state, 0, 3);
+    let before = shown(&state);
+    on(&mut state);
+    assert_eq!(shown(&state)[0], [false, true, true, true]);
+    state.dispatch(Action::SetOriginIncludeReads(false));
+    assert_eq!(shown(&state), before, "what only the overlay added is gone");
+    // A column ticked by hand stays when the box goes off.
+    tick(&mut state, 0, 1);
+    on(&mut state);
+    state.dispatch(Action::SetOriginIncludeReads(false));
+    assert_eq!(shown(&state)[0], [false, true, false, true]);
+}
+
+#[test]
+fn a_click_on_a_column_the_overlay_ticked_changes_nothing_and_the_box_stays() {
+    let _isolation = isolate();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start(dir.path());
+    open_unticked(&mut state, dir.path(), chain());
+    tick(&mut state, 0, 2);
+    on(&mut state);
+    tick(&mut state, 0, 1);
+    assert_eq!(shown(&state)[0], [false, true, true, false]);
+    assert!(state.origin_import_include_reads());
+    // A column ticked by hand is not locked; unticking it while a ticked
+    // formula reads it leaves it ticked by the overlay, and locked.
+    state.dispatch(Action::SetOriginIncludeReads(false));
+    tick(&mut state, 0, 1);
+    on(&mut state);
+    let view = &state.origin_import_files()[0].books[0].sheets[0].column_list;
+    assert_eq!(view[1].read_by, None, "ticked by hand, not locked");
+    tick(&mut state, 0, 1);
+    let view = &state.origin_import_files()[0].books[0].sheets[0].column_list;
+    assert!(view[1].ticked, "still read by C");
+    assert_eq!(view[1].read_by.as_deref(), Some("C"), "locked now");
+}
+
+#[test]
+fn a_sheet_whose_columns_are_all_read_is_locked() {
+    let _isolation = isolate();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start(dir.path());
+    let mut project = chain();
+    project.books[0].sheets[1].columns[2] = with_formula(numbers("E", Y, &[0.0; 3]), "Raw!B");
+    project.books[0].sheets[0].columns[3] =
+        with_formula(numbers("D", Y, &[0.0; 3]), "Raw!A+Raw!B+Raw!E");
+    open_unticked(&mut state, dir.path(), project);
+    tick(&mut state, 0, 3);
+    on(&mut state);
+    let sheet = &state.origin_import_files()[0].books[0].sheets[1];
+    assert!(sheet.locked, "A, B and E are read");
+    state.dispatch(Action::ToggleOriginSheet {
+        file: 0,
+        book: 0,
+        sheet: 1,
+    });
+    assert_eq!(shown(&state)[1], [true, true, true], "no change, greyed");
+}
+
+#[test]
+fn a_graph_plotting_a_formula_column_brings_its_inputs_and_unticking_removes_them() {
+    let _isolation = isolate();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start(dir.path());
+    let mut project = chain();
+    // Datasets in file order: X 1, B 2, C 3, D 4, A 5, B 6, E 7. G plots C vs X.
+    project.graph_windows = vec![synthetic::GraphWindow {
+        short_name: "G1".into(),
+        long_name: "G1".into(),
+        layers: vec![synthetic::GraphLayer {
+            name: "Layer1".into(),
+            curves: vec![synthetic::GraphCurve::new(3, 1)],
+        }],
+    }];
+    open_unticked(&mut state, dir.path(), project);
+    on(&mut state);
+    state.dispatch(Action::ToggleOriginGraph { file: 0, graph: 0 });
+    assert_eq!(shown(&state)[0], [true, true, true, false], "X, C and B");
+    state.dispatch(Action::ToggleOriginGraph { file: 0, graph: 0 });
+    assert_eq!(shown(&state)[0], [false; 4], "B goes with C");
+}
+
+#[test]
+fn ticks_made_after_turning_the_box_on_are_covered() {
+    let _isolation = isolate();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start(dir.path());
+    open_unticked(&mut state, dir.path(), chain());
+    on(&mut state);
+    assert_eq!(shown(&state)[0], [false; 4]);
+    assert!(state.origin_import_summary().is_none());
+    tick(&mut state, 0, 3);
+    assert_eq!(shown(&state)[0], [false, true, true, true]);
+    assert!(state.origin_import_summary().is_some());
+    tick(&mut state, 0, 3);
+    assert_eq!(shown(&state)[0], [false; 4]);
+    assert!(state.origin_import_blocker().is_some(), "nothing to import");
+}
+
+#[test]
+fn a_loop_between_two_formula_columns_ends() {
+    let _isolation = isolate();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start(dir.path());
+    let project = synthetic::Project {
+        books: vec![book(
+            "A",
+            "Run",
+            vec![sheet(
+                "Data",
+                vec![
+                    with_formula(numbers("A", Y, &[1.0, 2.0]), "col(B)+1"),
+                    with_formula(numbers("B", Y, &[0.0, 1.0]), "col(A)-1"),
+                    with_formula(numbers("C", Y, &[0.0, 1.0]), "col(C)"),
+                ],
+            )],
+        )],
+        ..synthetic::Project::default()
+    };
+    open_unticked(&mut state, dir.path(), project);
+    on(&mut state);
+    tick(&mut state, 0, 0);
+    assert_eq!(shown(&state)[0], [true, true, false]);
+    tick(&mut state, 0, 2);
+    assert_eq!(
+        shown(&state)[0],
+        [true, true, true],
+        "a self read is no loop"
+    );
+}
+
+#[test]
+fn the_overlay_feeds_the_plan_with_shared_x_and_the_summary() {
+    let _isolation = isolate();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start(dir.path());
+    open_unticked(&mut state, dir.path(), chain());
+    tick(&mut state, 0, 3);
+    state.dispatch(Action::SetOriginLayout(
+        stokesforge_import::FilesLayout::SideBySide,
+    ));
+    on(&mut state);
+    state.dispatch(Action::ImportOrigin);
+    assert_eq!(columns_named(&state).len(), 3, "B, C, D side by side");
+}
+
+#[test]
+fn check_none_clears_the_ticks_and_leaves_the_box_and_reopen_restores_it() {
+    let _isolation = isolate();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start(dir.path());
+    open_unticked(&mut state, dir.path(), chain());
+    on(&mut state);
+    tick(&mut state, 0, 2);
+    state.dispatch(Action::CheckNoOriginSheets);
+    assert_eq!(shown(&state)[0], [false; 4]);
+    assert!(state.origin_import_include_reads(), "the box stays");
+    tick(&mut state, 0, 2);
+    state.dispatch(Action::ImportOrigin);
+    assert_eq!(columns_of(&state, "Run", 0).len(), 2);
+    state.dispatch(Action::ReopenLastImport);
+    assert!(state.origin_import_include_reads(), "restored");
+    assert_eq!(shown(&state)[0], [false, true, true, false]);
+}
+
+#[test]
+fn the_box_is_greyed_out_when_no_formula_reads_a_column() {
+    let _isolation = isolate();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start(dir.path());
+    let project = synthetic::Project {
+        books: vec![book(
+            "A",
+            "Run",
+            vec![sheet("Data", vec![numbers("X", X, &[1.0])])],
+        )],
+        ..synthetic::Project::default()
+    };
+    open_unticked(&mut state, dir.path(), project);
+    assert_eq!(
+        state.origin_import_include_reads_blocker(),
+        Some(tr!("disabled-origin-include-reads-no-formula"))
+    );
+    let other = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start(other.path());
+    open_unticked(&mut state, other.path(), chain());
+    assert_eq!(state.origin_import_include_reads_blocker(), None);
 }

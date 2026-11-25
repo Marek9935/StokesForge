@@ -71,6 +71,8 @@ pub(super) fn origin_import_window(
     let own_x = state.origin_import_x_warning();
     let reads_warning = state.origin_import_reads_warning();
     let show = state.origin_import_show();
+    let include_reads = state.origin_import_include_reads();
+    let include_reads_blocker = state.origin_import_include_reads_blocker();
     let accept_label = tr!("origin-import-accept");
     let accept_hint = tr!("origin-import-accept", "hint");
     let reason = blocker.clone().unwrap_or_default();
@@ -104,7 +106,7 @@ pub(super) fn origin_import_window(
             ui.horizontal(|ui| to_and_folder(ui, state, &mut requested));
             ui.horizontal(|ui| show_buttons(ui, show, &mut requested));
             ui.add_space(theme::SPACE_ITEM);
-            let reserved = 26.0
+            let reserved = 52.0
                 + if own_x.is_some() { 44.0 } else { 0.0 }
                 + if reads_warning.is_some() { 44.0 } else { 0.0 };
             let list_height = (ui.available_height() - reserved).max(80.0);
@@ -148,6 +150,12 @@ pub(super) fn origin_import_window(
                     }
                 });
             ui.add_space(theme::SPACE_ITEM);
+            include_reads_box(
+                ui,
+                include_reads,
+                include_reads_blocker.as_deref(),
+                &mut requested,
+            );
             if let Some(line) = &reads_warning {
                 ui.label(
                     egui::RichText::new(line).color(theme::warning_color(ui.visuals().dark_mode)),
@@ -233,6 +241,27 @@ fn to_and_folder(ui: &mut egui::Ui, state: &AppState, requested: &mut Vec<Action
         if let Some(picked) = picked {
             requested.push(Action::SetImportFolder(picked));
         }
+    }
+}
+
+/// The box "Include the columns formulas read" (#556, #557): greyed out, with
+/// the reason, while no file has a formula that reads another column.
+fn include_reads_box(
+    ui: &mut egui::Ui,
+    on: bool,
+    blocker: Option<&str>,
+    requested: &mut Vec<Action>,
+) {
+    let mut checked = on;
+    let response = ui
+        .add_enabled(
+            blocker.is_none(),
+            egui::Checkbox::new(&mut checked, tr!("origin-import-include-reads")),
+        )
+        .on_hover_text(tr!("origin-import-include-reads", "hint"))
+        .on_disabled_hover_text(blocker.unwrap_or_default());
+    if response.changed() {
+        requested.push(Action::SetOriginIncludeReads(checked));
     }
 }
 
@@ -387,10 +416,14 @@ fn book_node(
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                 let response = ui
                     .add_enabled(
-                        importable,
+                        importable && !book.locked,
                         egui::Checkbox::new(&mut checked, book.name.as_str()).indeterminate(mixed),
                     )
-                    .on_disabled_hover_text(tr!("disabled-origin-sheet-empty"));
+                    .on_disabled_hover_text(if book.locked {
+                        tr!("disabled-origin-all-read-by-formulas")
+                    } else {
+                        tr!("disabled-origin-sheet-empty")
+                    });
                 let response = if book.name.chars().count() > LONG_NAME {
                     response.on_hover_text(&book.name)
                 } else {
@@ -442,11 +475,15 @@ fn sheet_node(
                     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                     let response = ui
                         .add_enabled(
-                            sheet.columns > 0,
+                            sheet.columns > 0 && !sheet.locked,
                             egui::Checkbox::new(&mut checked, sheet.name.as_str())
                                 .indeterminate(mixed),
                         )
-                        .on_disabled_hover_text(tr!("disabled-origin-sheet-empty"));
+                        .on_disabled_hover_text(if sheet.locked {
+                            tr!("disabled-origin-all-read-by-formulas")
+                        } else {
+                            tr!("disabled-origin-sheet-empty")
+                        });
                     let response = if sheet.name.chars().count() > LONG_NAME {
                         response.on_hover_text(&sheet.name)
                     } else {
@@ -552,7 +589,17 @@ fn column_row(
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                 let mut ticked = column.ticked;
                 let hint = tr!("origin-import-column-hint");
-                let boxed = ui.add(egui::Checkbox::without_text(&mut ticked));
+                // Ticked only because a formula reads it: greyed out, with the
+                // reason; neither the box nor the name answers a click.
+                let reason = column.read_by.as_ref().map(|reader| {
+                    tr!(
+                        "disabled-origin-column-read-by-formula",
+                        column = reader.as_str()
+                    )
+                });
+                let boxed = ui
+                    .add_enabled(reason.is_none(), egui::Checkbox::without_text(&mut ticked))
+                    .on_disabled_hover_text(reason.clone().unwrap_or_default());
                 let badge = ui
                     .add_sized(
                         egui::vec2(badge_width(ui), ui.spacing().interact_size.y),
@@ -562,9 +609,15 @@ fn column_row(
                         .truncate(),
                     )
                     .on_hover_text(designation_text(column.designation));
-                let name =
-                    ui.add(egui::Label::new(column.long_name.as_str()).sense(egui::Sense::click()));
-                let name = if column.long_name.chars().count() > LONG_NAME {
+                let sense = if reason.is_some() {
+                    egui::Sense::hover()
+                } else {
+                    egui::Sense::click()
+                };
+                let name = ui.add(egui::Label::new(column.long_name.as_str()).sense(sense));
+                let name = if let Some(reason) = &reason {
+                    name.on_hover_text(reason)
+                } else if column.long_name.chars().count() > LONG_NAME {
                     name.on_hover_text(format!("{}\n{hint}", column.long_name))
                 } else {
                     name.on_hover_text(hint)
@@ -1415,6 +1468,88 @@ mod tests {
         assert!(harness.query_by_label(&line).is_none());
     }
 
+    fn formula_project() -> synthetic::Project {
+        let mut column = synthetic::Column::numbers("C", Y, &[20.0, 40.0, 60.0]);
+        column.formula = Some("col(Y)*2".into());
+        let mut input = synthetic::Column::numbers("Y", Y, &[10.0, 20.0, 30.0]);
+        input.long_name = "Signal".into();
+        synthetic::Project {
+            books: vec![book(
+                "A",
+                "Run",
+                vec![sheet(
+                    "Data",
+                    vec![
+                        synthetic::Column::numbers("X", X, &[1.0, 2.0, 3.0]),
+                        input,
+                        column,
+                    ],
+                )],
+            )],
+            ..synthetic::Project::default()
+        }
+    }
+
+    fn disabled_boxes(harness: &egui_kittest::Harness<'static, Bench>) -> usize {
+        harness
+            .get_all_by_role(egui::accesskit::Role::CheckBox)
+            .filter(|node| node.accesskit_node().is_disabled())
+            .count()
+    }
+
+    /// The box "Include the columns formulas read" ticks what the checked
+    /// formulas read, and the box of such a column is greyed out: neither its
+    /// box nor its name answers a click (#556, #557). Witness: without the
+    /// greying, no checkbox is disabled and the click unticks the column.
+    #[test]
+    fn the_include_reads_box_greys_the_columns_it_ticked() {
+        let (bench, _) = start_project(formula_project());
+        let mut harness = harness(bench);
+        let label = tr!("origin-import-include-reads");
+        harness.get_by_label(&label).click();
+        harness.run();
+        assert!(harness.state().state.origin_import_include_reads());
+        harness
+            .state_mut()
+            .state
+            .dispatch(Action::ToggleOriginColumn {
+                file: 0,
+                book: 0,
+                sheet: 0,
+                column: 2,
+            });
+        harness.run();
+        expand(&mut harness, "Run");
+        expand(&mut harness, "Data");
+        assert_eq!(column_ticks(&harness, 0), vec![false, true, true]);
+        assert_eq!(disabled_boxes(&harness), 1, "the column Y");
+        harness.get_by_label("Signal").click();
+        harness.run();
+        assert_eq!(column_ticks(&harness, 0), vec![false, true, true]);
+        assert!(harness.state().state.origin_import_include_reads());
+        // Off: the column is free again.
+        harness.get_by_label(&label).click();
+        harness.run();
+        assert_eq!(column_ticks(&harness, 0), vec![false, false, true]);
+        assert_eq!(disabled_boxes(&harness), 0);
+    }
+
+    /// With no formula in the files the box is there but greyed out.
+    #[test]
+    fn the_include_reads_box_is_greyed_out_without_a_formula() {
+        let (bench, _) = start_project(synthetic::Project {
+            books: books(),
+            ..synthetic::Project::default()
+        });
+        let mut harness = harness(bench);
+        assert_eq!(disabled_boxes(&harness), 1, "the box itself");
+        harness
+            .get_by_label(&tr!("origin-import-include-reads"))
+            .click();
+        harness.run();
+        assert!(!harness.state().state.origin_import_include_reads());
+    }
+
     /// A Show button with nothing to list says so, with the file name when
     /// several files are open.
     #[test]
@@ -1472,6 +1607,7 @@ mod tests {
         let labels = [
             tr!("origin-import-check-all"),
             tr!("origin-import-check-none"),
+            tr!("origin-import-include-reads"),
             tr!("dialog-cancel"),
             tr!("origin-import-accept"),
         ];

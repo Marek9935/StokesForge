@@ -2741,6 +2741,12 @@ origin-import-show = Afficher :
 origin-import-show-all = Tout
 origin-import-show-workbooks = Classeurs
 origin-import-show-graphs = Graphiques
+origin-import-include-reads =
+    Inclure les colonnes lues par les formules
+    .hint = Importe aussi les colonnes que lisent les formules des colonnes cochées, pour que ces formules restent actives
+disabled-origin-include-reads-no-formula = Aucune colonne de ces fichiers n'a de formule qui lise d'autres colonnes
+disabled-origin-column-read-by-formula = Lue par la formule de { $column }
+disabled-origin-all-read-by-formulas = Toutes les colonnes d'ici sont importées parce qu'une formule les lit
 origin-import-no-graph = Aucun graphique dans ce fichier
 origin-import-no-graph-in = Aucun graphique dans { $file }
 origin-import-no-workbook = Aucun classeur dans ce fichier
