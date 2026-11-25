@@ -19974,7 +19974,7 @@ mod origin_import {
     /// = X2, Y3 (5, 6); `Kin`: `T`, `S` (7, 8). Graphs: `G1` (Y1 vs X, its error
     /// column stands next to it), `G2` (Y2 vs X, Y3 vs X2: shares the X of
     /// G1), `Empty` (a layer with no curve), `Lost` (a curve that resolves to
-    /// nothing), `Half` (S vs a missing X).
+    /// nothing), `Half` (S vs a missing X), `G1b` (the same curve as G1).
     fn graph_project() -> synthetic::Project {
         use OriginDesignation::{YError, X, Y};
         let window = |short: &str, curves: Vec<synthetic::GraphCurve>| synthetic::GraphWindow {
@@ -20025,6 +20025,7 @@ mod origin_import {
                 window("Empty", vec![]),
                 window("Lost", vec![synthetic::GraphCurve::new(99, 98)]),
                 window("Half", vec![synthetic::GraphCurve::new(8, 99)]),
+                window("G1b", vec![synthetic::GraphCurve::new(2, 1)]),
             ],
             ..synthetic::Project::default()
         }
@@ -20090,7 +20091,11 @@ mod origin_import {
             ]
         );
         assert_eq!(graph_tick(&state, 0), OriginTick::All);
-        assert_eq!(graph_tick(&state, 1), OriginTick::Some, "shares the X");
+        assert_eq!(
+            graph_tick(&state, 1),
+            OriginTick::None,
+            "G2 shares the X but is not picked"
+        );
         assert_eq!(state.origin_import_blocker(), None);
         // The columns are shared with the books.
         assert_eq!(
@@ -20121,38 +20126,61 @@ mod origin_import {
     }
 
     #[test]
-    fn a_column_ticked_by_hand_survives_unticking_a_graph() {
+    fn a_graph_click_always_changes_its_box_and_touches_only_its_columns() {
         let _recipes = isolate_recipe_store();
         let dir = tempfile::tempdir().unwrap();
         let (_session, mut state) = open_graphs(dir.path());
-        // Y1 ticked by hand, then G1 ticked and unticked.
-        state.dispatch(Action::ToggleOriginColumn {
-            file: 0,
-            book: 0,
-            sheet: 0,
-            column: 1,
-        });
+        let hand = |state: &mut AppState, column| {
+            state.dispatch(Action::ToggleOriginColumn {
+                file: 0,
+                book: 0,
+                sheet: 0,
+                column,
+            });
+        };
+        // Y1 (plotted by G1) and Y2 (plotted by no picked graph) by hand.
+        hand(&mut state, 1);
+        hand(&mut state, 3);
         toggle_graph(&mut state, 0);
         toggle_graph(&mut state, 0);
         assert_eq!(
             all_column_ticks(&state)[0],
-            vec![false, true, false, false],
-            "only the hand-ticked Y1 stays"
+            vec![false, false, false, true],
+            "what G1 plots goes, a hand tick of another column stays"
         );
-        // A column unticked by hand while its graph is ticked: the graph
-        // ticks it again (it is not wholly ticked), and owns it again.
-        toggle_graph(&mut state, 1);
-        state.dispatch(Action::ToggleOriginColumn {
-            file: 0,
-            book: 0,
-            sheet: 0,
-            column: 3,
-        });
-        assert_eq!(graph_tick(&state, 1), OriginTick::Some);
-        toggle_graph(&mut state, 1);
-        assert!(all_column_ticks(&state)[0][3]);
-        toggle_graph(&mut state, 1);
-        assert!(!all_column_ticks(&state)[0][3]);
+        // Not picked: the box is empty even when every column of G1 is ticked.
+        for column in 0..3 {
+            hand(&mut state, column);
+        }
+        assert_eq!(graph_tick(&state, 0), OriginTick::None);
+        toggle_graph(&mut state, 0);
+        assert_eq!(
+            graph_tick(&state, 0),
+            OriginTick::All,
+            "the click picked it"
+        );
+        // A picked graph whose column was unticked by hand shows "some"; a
+        // click ticks the missing column.
+        hand(&mut state, 1);
+        assert_eq!(graph_tick(&state, 0), OriginTick::Some);
+        toggle_graph(&mut state, 0);
+        assert_eq!(graph_tick(&state, 0), OriginTick::All);
+        assert!(all_column_ticks(&state)[0][1]);
+    }
+
+    #[test]
+    fn unpicking_one_of_two_identical_graphs_empties_its_box_and_keeps_the_columns() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = open_graphs(dir.path());
+        toggle_graph(&mut state, 0);
+        toggle_graph(&mut state, 5);
+        let ticked = all_column_ticks(&state);
+        toggle_graph(&mut state, 5);
+        // No dead click: the box of G1b changed, G1 keeps the columns.
+        assert_eq!(graph_tick(&state, 5), OriginTick::None);
+        assert_eq!(graph_tick(&state, 0), OriginTick::All);
+        assert_eq!(all_column_ticks(&state), ticked);
     }
 
     #[test]
@@ -20206,13 +20234,18 @@ mod origin_import {
         state.dispatch(Action::CheckAllOriginSheets);
         assert_eq!(graph_tick(&state, 0), OriginTick::All);
         assert_eq!(graph_tick(&state, 1), OriginTick::All);
-        // Unticking a graph takes nothing away from what Check All ticked.
+        assert_eq!(graph_tick(&state, 2), OriginTick::None, "no curve");
+        assert_eq!(graph_tick(&state, 3), OriginTick::None, "unresolved");
+        // G1b plots the same columns: unpicking G1 leaves them, then G1b
+        // unticks what only it plots (G2 keeps the X).
         toggle_graph(&mut state, 0);
-        assert!(all_column_ticks(&state).iter().flatten().all(|t| *t));
+        assert_eq!(all_column_ticks(&state)[0], vec![true, true, true, true]);
+        toggle_graph(&mut state, 5);
+        assert_eq!(all_column_ticks(&state)[0], vec![true, false, false, true]);
         state.dispatch(Action::CheckNoOriginSheets);
         assert!(all_column_ticks(&state).iter().flatten().all(|t| !t));
-        assert_eq!(graph_tick(&state, 0), OriginTick::None);
-        // After Check None, ticking then unticking a graph leaves nothing.
+        assert_eq!(graph_tick(&state, 1), OriginTick::None);
+        // Check None picked nothing: ticking then unticking leaves nothing.
         toggle_graph(&mut state, 0);
         toggle_graph(&mut state, 0);
         assert!(all_column_ticks(&state).iter().flatten().all(|t| !t));

@@ -231,8 +231,8 @@ In a shared-X layout, only the first X is kept. A later X with the same values i
 - Right-click a column and choose **Check “Name” in All Sheets** or **Uncheck “Name” in All Sheets** to act on the columns that have the same long name in every sheet of the file.
 - A check box on a sheet or a workbook checks or unchecks all its columns; it shows a dash when only some are checked.
 - Nothing is checked when the window opens. **Import** stays greyed out until you check something.
-- A check box on a graph checks the columns the graph plots: the X and Y of each curve, and the error columns that stand right after a plotted Y. Checking a graph always adds to what is checked; the columns also show checked in their sheet. Click the arrow of a graph to see its curves (`Y vs X · Book / Sheet`); a curve has no check box. The box shows a dash when only some of the columns of the graph are checked. A column used by two graphs is imported once.
-- Unchecking a graph unchecks only the columns that no other checked graph uses and that you did not check or uncheck yourself since. A column you checked by hand stays checked.
+- A check box on a graph checks the columns the graph plots: the X and Y of each curve, and the error columns that stand right after a plotted Y. Checking a graph always adds to what is checked; the columns also show checked in their sheet. Click the arrow of a graph to see its curves (`Y vs X · Book / Sheet`); a curve has no check box. The box shows a dash when you unchecked one of its columns since you checked the graph; click it to check the missing columns. A graph you did not check shows an empty box, even if its columns are checked. A column used by two graphs is imported once.
+- Unchecking a graph unchecks its columns, except those another checked graph uses. Columns that no checked graph plots are never touched by a click on a graph.
 - A graph that plots no curve, or none whose data StokesForge can find, is greyed out, and its tooltip says why.
 - A sheet with no column is greyed out: there is nothing to import.
 - **Check All** checks every column of every sheet and every graph. **Check None** unchecks everything.

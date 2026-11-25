@@ -30,7 +30,7 @@
 //! automatic name, silently. The columns carry no import source, so "Refresh
 //! from Source" does not apply to them.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -163,11 +163,9 @@ pub(super) struct OriginFile {
     project: Arc<OriginProject>,
     selection: OriginSelection,
     graphs: Vec<GraphInfo>,
-    /// The graphs the user ticked and did not untick since.
+    /// The graphs picked by their box (Check All picks every graph that
+    /// plots something). A graph that is not picked shows an empty box.
     graph_picked: Vec<bool>,
-    /// The columns the user ticked or unticked by hand since their graph
-    /// ticked them: unticking a graph leaves them alone.
-    by_hand: BTreeSet<ColumnPos>,
 }
 
 impl OriginFile {
@@ -194,39 +192,42 @@ impl OriginFile {
             selection,
             graph_picked: vec![false; graphs.len()],
             graphs,
-            by_hand: BTreeSet::new(),
         }
     }
 
+    /// The box of a graph: empty while it is not picked; picked, ticked when
+    /// all its columns are, "some" when the user unticked one since.
     fn graph_tick(&self, graph: usize) -> OriginTick {
         let Some(info) = self.graphs.get(graph) else {
             return OriginTick::None;
         };
-        let ticked = info
+        if !self.graph_picked[graph] {
+            return OriginTick::None;
+        }
+        let all = info
             .columns
             .iter()
-            .filter(|&&(b, s, c)| self.column_ticked(b, s, c))
-            .count();
-        tick_of(ticked, info.columns.len())
+            .all(|&(b, s, c)| self.column_ticked(b, s, c));
+        if all {
+            OriginTick::All
+        } else {
+            OriginTick::Some
+        }
     }
 
-    /// Ticking a graph adds its columns; a column already ticked stays as it
-    /// is (and stays "by hand" when it was).
+    /// Picks a graph (or completes a "some" one): its columns are ticked.
     fn pick_graph(&mut self, graph: usize) {
         let Some(columns) = self.graphs.get(graph).map(|g| g.columns.clone()) else {
             return;
         };
         self.graph_picked[graph] = true;
         for (b, s, c) in columns {
-            if !self.column_ticked(b, s, c) {
-                self.write_column(b, s, c, true);
-                self.by_hand.remove(&(b, s, c));
-            }
+            self.write_column(b, s, c, true);
         }
     }
 
-    /// Unticking a graph unticks the columns it ticked, except those another
-    /// ticked graph uses and those the user touched by hand since.
+    /// Unpicks a graph: its columns are unticked, except those another picked
+    /// graph uses.
     fn unpick_graph(&mut self, graph: usize) {
         let Some(columns) = self.graphs.get(graph).map(|g| g.columns.clone()) else {
             return;
@@ -236,7 +237,7 @@ impl OriginFile {
             let used_elsewhere = self.graphs.iter().enumerate().any(|(other, info)| {
                 other != graph && self.graph_picked[other] && info.columns.contains(&at)
             });
-            if !used_elsewhere && !self.by_hand.contains(&at) {
+            if !used_elsewhere {
                 self.write_column(at.0, at.1, at.2, false);
             }
         }
@@ -280,12 +281,9 @@ impl OriginFile {
         tick_of(ticked, count)
     }
 
-    /// Sets one column by hand (nothing happens for a column that does not
-    /// exist); no graph owns it from now on.
+    /// Sets one column (nothing happens for a column that does not exist).
     fn set_column(&mut self, book: usize, sheet: usize, column: usize, ticked: bool) {
-        if self.write_column(book, sheet, column, ticked) {
-            self.by_hand.insert((book, sheet, column));
-        }
+        self.write_column(book, sheet, column, ticked);
     }
 
     /// Writes the tick; `false` for a column that does not exist.
@@ -691,15 +689,15 @@ impl AppState {
                     entry.set_sheet(book_index, sheet, ticked);
                 }
             }
-            entry.graph_picked.fill(ticked);
-            if !ticked {
-                entry.by_hand.clear();
+            for (picked, info) in entry.graph_picked.iter_mut().zip(&entry.graphs) {
+                *picked = ticked && !info.columns.is_empty();
             }
         }
     }
 
-    /// A graph that is wholly ticked is unticked (what it ticked, see
-    /// [`OriginFile::unpick_graph`]); otherwise its columns are added.
+    /// A click on a graph box always changes it: an empty box picks the graph
+    /// (its columns are ticked), "some" ticks the missing columns, a ticked box
+    /// unpicks it ([`OriginFile::unpick_graph`]).
     pub(super) fn toggle_origin_graph(&mut self, file: usize, graph: usize) {
         if let Some(entry) = self.origin_file_mut(file) {
             if entry.graphs.get(graph).is_none_or(|g| g.columns.is_empty()) {

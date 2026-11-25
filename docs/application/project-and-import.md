@@ -144,11 +144,13 @@ graphs (`OriginFileView::graphs`, resolved once in `GraphInfo` when the file is 
 columns a graph plots are the X and Y of each resolvable curve, plus the `YError` and
 `XError` columns standing right after a plotted Y; a curve with no resolvable Y is
 ignored, one with no resolvable X ticks its Y alone; two layers are one line). `ToggleOriginGraph`
-ticks a graph that is not wholly ticked (its columns are added to the same ticks the
-books show) and unticks one that is, except the columns another ticked graph uses and
-the columns the user ticked or unticked by hand since (`OriginFile::by_hand`; a
-graph that ticks a column takes it off that set). The box of a graph is three-state over
-its columns; a graph with no curve, or none that resolves, is greyed with a reason.
+works on a picked state of the graph (`OriginFile::graph_picked`): a click on an empty box
+picks it and ticks its columns (the same ticks the books show), on "some" ticks its missing
+columns, on a ticked box unpicks it and unticks its columns except those another picked
+graph uses, so a click always changes the box. A graph that is not picked shows an empty
+box whatever its columns; a picked one shows ticked, or "some" when a column was unticked
+by hand since. Columns no picked graph plots are never touched by a graph click. The box is
+three-state; a graph with no curve, or none that resolves, is greyed with a reason.
 `SetOriginShow` (`OriginShow`: All, Workbooks, Graphs) only hides rows and is reset on
 Reopen Last Import, which restores the ticks and the graph picks. Check All / Check None
 cover the graphs. The chooser also holds the classic layouts

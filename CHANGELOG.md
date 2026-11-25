@@ -26,7 +26,7 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
-- Import from Origin lists the graphs of each file under its workbooks (#557): ticking a graph checks the columns it plots (X, Y and the error columns next to a plotted Y), shared with the workbook rows; unticking it unchecks only the columns no other checked graph uses and that you did not check or uncheck by hand. The window now opens with nothing checked, and **Show: All / Workbooks / Graphs** hides one kind of row without unchecking. The command line and `pyst` keep importing the `Data` sheets.
+- Import from Origin lists the graphs of each file under its workbooks (#557): ticking a graph checks the columns it plots (X, Y and the error columns next to a plotted Y), shared with the workbook rows; unticking it unchecks only the columns no other checked graph uses. The window now opens with nothing checked, and **Show: All / Workbooks / Graphs** hides one kind of row without unchecking. The command line and `pyst` keep importing the `Data` sheets.
 - Script Settings (#548): a new project object that holds a raw TOML text for scripts, created and edited only through two undoable commands and saved in the `.stf` file as an additive node kind (format version unchanged; an older version keeps the node as an unrecognised kind and writes it back unchanged). The window (a Form tab with one field per kind of value and hints read from comments, and a Text tab), File ▸ New ▸ Script Settings, File ▸ Import ▸ Script Settings…, dropping a `.toml` file, and Export… in the Project Manager are added in the third lot; scripts read and write the values by name with `pyst.settings(target)` and `pyst.set_settings(target, values)` (pyst API 0.12).
 
 ## [1.2.0] - 2026-11-17
