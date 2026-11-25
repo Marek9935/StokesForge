@@ -189,6 +189,12 @@ Source: `app/tab_strip.rs`.
 | Right-click | tab | tab menu |
 | Right-click | empty strip or add button | add menu |
 
+## Dropping files on a window (#552)
+
+| Gesture | On | Effect |
+|---|---|---|
+| Drop a `.py` or `.pyst` file (any case) | the main window, a detached window, a workbook, the Project Manager | opens the confirmation « Run Script » (`[Cancel] [Run]`, Cancel default, centred on the window) that names the file and its folder; Run runs that file like File ▸ Run Script File… (console shown, one Ctrl+Z), Cancel, Escape and the cross do nothing. The file never goes to data import. Several scripts in one drop: refused with one message. While a script runs, without Python, or with the import window or the Origin chooser open: a message, no dialog. The other files of the drop follow their usual path. Opening a project never runs a script |
+
 ## Windows
 
 Sources: `app/window_chrome.rs`, `app/dialogs.rs`, `app/window_detach.rs`,

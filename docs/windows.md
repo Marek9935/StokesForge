@@ -135,7 +135,7 @@ literals (`BUILT_IDENTIFIERS` in `tests/guards.rs`).
 
 `confirmations::show` (`app/confirmations.rs`) paints them after everything else;
 `AppState::blocking_dialog` (unsaved project, row drop, alert,
-overwrite, overwrite of a file read with discrepancies) makes the other actions of the frame be
+overwrite, overwrite of a file read with discrepancies, dropped script) makes the other actions of the frame be
 emptied (`blocking_confirmations`). All of Small class (480 x 170).
 
 | Window | Nature | Identifier | Opened from |
@@ -147,6 +147,7 @@ emptied (`blocking_confirmations`). All of Small class (480 x 170).
 | Overwrite a file | `Confirm` | `stokesforge_overwrite` | export whose added extension targets an existing file (`pending_overwrite`) |
 | Overwrite a file read with discrepancies | `Confirm` | `stokesforge_discarded_save` | Save that would overwrite the source file of a load that discarded calculations or traces not yet saved (`pending_discarded_save`, #309); not for Save As elsewhere |
 | Delete a backup copy | `Confirm` | `stokesforge_recovery_delete` | Delete on a row of the recovery window (`pending_recovery_delete`, #317); the recovery window stays underneath |
+| Run a dropped script (#552) | `Confirm` | `stokesforge_script_drop` | a `.py` or `.pyst` file dropped on a window (`pending_script_drop`); `[Cancel] [Run]`, Cancel default; names the file and its folder and says a script can change the project and write files. **S-F3 justification**: what a script writes outside the project (files on the disk) is not undone by Ctrl+Z. Refused with a message, no dialog, when several scripts come together, while a script runs, without Python, with the import window or the Origin chooser open (Graph Properties open already refuses every drop) |
 | Axis of a row drop | `Choice` | `stokesforge_row_drop` | dragging rows onto a graph that already has an X axis (`pending_row_drop`) |
 
 The alerts (failure, low R², lost session) share the identifier

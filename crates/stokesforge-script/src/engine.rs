@@ -58,7 +58,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
-use pyo3::exceptions::{PyKeyboardInterrupt, PyRuntimeError};
+use pyo3::exceptions::{PyKeyboardInterrupt, PyRuntimeError, PySystemExit};
 use pyo3::ffi;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTracebackMethods};
@@ -69,6 +69,7 @@ use stokesforge_session::SessionHandle;
 
 use crate::error::ScriptError;
 use crate::outcome::ScriptOutcome;
+use crate::script_file::FileRun;
 use crate::themes::ThemeLibrary;
 use crate::{bridge::HostError, capture, surface};
 
@@ -139,6 +140,23 @@ impl ScriptContext {
             .lock()
             .ok()
             .and_then(|table| table.get(&(id, epoch)).copied())
+    }
+
+    /// Takes the retained versions away, leaving an empty table (#552: a file
+    /// run starts from nothing).
+    pub(crate) fn take_versions(&self) -> HashMap<(NodeId, u64), u64> {
+        self.read_versions
+            .lock()
+            .map(|mut table| std::mem::take(&mut *table))
+            .unwrap_or_default()
+    }
+
+    /// Puts back the versions taken by [`ScriptContext::take_versions`],
+    /// dropping those of the file run.
+    pub(crate) fn restore_versions(&self, versions: HashMap<(NodeId, u64), u64>) {
+        if let Ok(mut table) = self.read_versions.lock() {
+            *table = versions;
+        }
     }
 
     /// Forgets all the retained versions (after an `undo`).
@@ -270,10 +288,19 @@ pub(crate) fn current_context() -> PyResult<Arc<ScriptContext>> {
 /// A job to run and the single-use reply channel that is
 /// its own.
 struct Job {
-    /// Python source to run.
-    source: String,
+    /// What to run.
+    source: Source,
     /// Channel on which to return the result.
-    reply: mpsc::Sender<ScriptOutcome>,
+    reply: mpsc::Sender<Result<ScriptOutcome, ScriptError>>,
+}
+
+/// What a job runs.
+enum Source {
+    /// Python text, in the console's persistent namespace.
+    Text(String),
+    /// A Python file (#552), read on the script thread and run in a fresh
+    /// namespace with its folder importable.
+    File(PathBuf),
 }
 
 /// Message sent to the script thread.
@@ -451,6 +478,35 @@ impl ScriptEngine {
     /// An exception **of the script** is not an error here: it is returned
     /// in [`ScriptOutcome::error`], with its traceback.
     pub fn run(&self, source: &str) -> Result<ScriptOutcome, ScriptError> {
+        self.submit(Source::Text(source.to_owned()))
+    }
+
+    /// Runs a Python **file** like `python file.py` and **blocks** until it
+    /// ends (#552).
+    ///
+    /// The file is read on the script thread and compiled from its bytes, so a
+    /// byte order mark, CRLF line ends, an encoding declaration and
+    /// `from __future__` are accepted. It runs in a **fresh namespace**,
+    /// discarded at the end (the console's variables do not move and do not see
+    /// it), with `__name__ == "__main__"`, an absolute `__file__`,
+    /// `sys.argv == [path]`, and the folder of `path` first in `sys.path`
+    /// (symlinks are not resolved). Nothing is written next to the file (no
+    /// `__pycache__`). After the run, `sys.path`, `sys.argv`,
+    /// `sys.modules["__main__"]` are as before and the modules imported from the
+    /// script's folder are forgotten, so an edited helper is read again by
+    /// the next run. The working directory does not change.
+    ///
+    /// # Errors
+    ///
+    /// [`ScriptError::ReadFile`] if the file cannot be read, plus the errors of
+    /// [`ScriptEngine::run`]. An exception of the script is returned in
+    /// [`ScriptOutcome::error`].
+    pub fn run_file(&self, path: &std::path::Path) -> Result<ScriptOutcome, ScriptError> {
+        self.submit(Source::File(path.to_path_buf()))
+    }
+
+    /// Sends a job to the script thread and waits for its reply.
+    fn submit(&self, source: Source) -> Result<ScriptOutcome, ScriptError> {
         if self
             .shared
             .busy
@@ -461,17 +517,20 @@ impl ScriptEngine {
         }
         let (reply_tx, reply_rx) = mpsc::channel();
         let job = Job {
-            source: source.to_owned(),
+            source,
             reply: reply_tx,
         };
         if self.jobs.send(Message::Run(job)).is_err() {
             self.shared.busy.store(false, Ordering::Release);
             return Err(ScriptError::Stopped);
         }
-        reply_rx.recv().map_err(|_| {
-            self.shared.busy.store(false, Ordering::Release);
-            ScriptError::Stopped
-        })
+        reply_rx
+            .recv()
+            .map_err(|_| {
+                self.shared.busy.store(false, Ordering::Release);
+                ScriptError::Stopped
+            })
+            .and_then(|reply| reply)
     }
 
     /// Requests the running script to stop. No effect if there is none.
@@ -622,24 +681,82 @@ fn start(
     .map_err(|error| ScriptError::Install(Python::attach(|py| format_exception(py, &error))))
 }
 
+/// True if the exception is a `SystemExit` that means a normal end: `exit()`,
+/// `exit(0)`, `sys.exit(None)` (#552, decision V2). Any other code is an error.
+fn is_clean_exit(py: Python<'_>, error: &PyErr) -> bool {
+    if !error.is_instance_of::<PySystemExit>(py) {
+        return false;
+    }
+    let code = error.value(py).getattr("code");
+    match code {
+        Ok(code) => code.is_none() || code.extract::<i64>().is_ok_and(|value| value == 0),
+        Err(_) => false,
+    }
+}
+
 /// Runs a source, captures its outputs, formats its possible exception.
-fn execute(source: &str, globals: &Py<PyDict>, shared: &Shared) -> ScriptOutcome {
+///
+/// A file (#552) is read first, on this thread. Its environment is set up
+/// **before** `running` becomes true and put back **after** it dropped and the
+/// pending asynchronous exception was cleared: an interruption must never fire
+/// inside the import machinery.
+fn execute(
+    source: &Source,
+    globals: &Py<PyDict>,
+    shared: &Shared,
+) -> Result<ScriptOutcome, ScriptError> {
+    let file = match source {
+        Source::Text(_) => None,
+        Source::File(path) => {
+            let bytes = std::fs::read(path).map_err(|error| ScriptError::ReadFile {
+                path: path.clone(),
+                source: error,
+            })?;
+            Some((path, bytes))
+        }
+    };
+
     // Reset BEFORE `running` becomes true: an interruption
     // requested while `is_running()` is already true can no longer be
     // erased by this line.
     shared.interrupt_requested.store(false, Ordering::Release);
     shared.generation.fetch_add(1, Ordering::AcqRel);
 
-    Python::attach(|py| {
+    Ok(Python::attach(|py| {
         clear_pending_async_exception(py, shared);
+
+        // File environment, before `running`.
+        let mut environment = None;
+        let mut console_versions = None;
+        if let Some((path, _)) = &file {
+            match FileRun::enter(py, path) {
+                Ok(run) => environment = Some(run),
+                Err(error) => {
+                    return ScriptOutcome {
+                        error: Some(format_exception(py, &error)),
+                        ..ScriptOutcome::default()
+                    };
+                }
+            }
+            // A file run is its own run: the versions read by the console do
+            // not protect it, and it does not protect the console.
+            if let Ok(context) = current_context() {
+                console_versions = Some(context.take_versions());
+            }
+        }
+
         capture::begin();
         shared.running.store(true, Ordering::Release);
 
-        let mut result = match CString::new(source) {
-            Ok(code) => py.run(&code, Some(globals.bind(py)), None),
-            Err(_) => Err(pyo3::exceptions::PyValueError::new_err(
-                "the script source contains a null byte",
-            )),
+        let mut result = match (&environment, &file, source) {
+            (Some(run), Some((_, bytes)), _) => run.run(py, bytes),
+            (_, _, Source::Text(text)) => match CString::new(text.as_str()) {
+                Ok(code) => py.run(&code, Some(globals.bind(py)), None),
+                Err(_) => Err(pyo3::exceptions::PyValueError::new_err(
+                    "the script source contains a null byte",
+                )),
+            },
+            _ => Ok(()),
         };
 
         // These two lines form a whole, and their order is the core of the
@@ -658,6 +775,14 @@ fn execute(source: &str, globals: &Py<PyDict>, shared: &Shared) -> ScriptOutcome
         clear_pending_async_exception(py, shared);
 
         let interrupted = shared.interrupt_requested.load(Ordering::Acquire);
+        // `exit()` and `exit(0)` are a normal end; any other exit is an error.
+        if result
+            .as_ref()
+            .err()
+            .is_some_and(|error| is_clean_exit(py, error))
+        {
+            result = Ok(());
+        }
         // No Python call during closing: the asynchronous exception
         // is disarmed and the actor receives only Rust data.
         if let Ok(context) = current_context() {
@@ -665,15 +790,27 @@ fn execute(source: &str, globals: &Py<PyDict>, shared: &Shared) -> ScriptOutcome
                 result = Err(surface::to_py_error(error));
             }
         }
-        let (stdout, stderr) = capture::end();
+        let (stdout, mut stderr) = capture::end();
+        let error = result.err().map(|error| format_exception(py, &error));
+
+        if let Some(run) = environment {
+            if let Err(failure) = run.leave(py) {
+                stderr.push_str(&format_exception(py, &failure));
+            }
+        }
+        if let Some(versions) = console_versions {
+            if let Ok(context) = current_context() {
+                context.restore_versions(versions);
+            }
+        }
 
         ScriptOutcome {
             stdout,
             stderr,
-            error: result.err().map(|error| format_exception(py, &error)),
+            error,
             interrupted,
         }
-    })
+    }))
 }
 
 /// Formats a Python exception with its full traceback, chaining

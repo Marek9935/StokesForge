@@ -37,6 +37,17 @@ setting `isolated`, `use_environment`, `user_site_directory`,
 `install_signal_handlers` and above all `module_search_paths` **explicitly**. No
 environment variable, no deprecated setter.
 
+**UTF-8 mode, Linux only (#552).** The isolated config does not read the
+locale, so the file system encoding would be ASCII: a folder with accents could
+not be imported and `open()` without `encoding=` would fail on UTF-8 text.
+On Linux the start therefore runs `PyPreConfig_InitIsolatedConfig` with
+`utf8_mode = 1` and `Py_PreInitialize` **before** any `Py_DecodeLocale` or
+`PyConfig` string call (`utf8_mode` is a `PyPreConfig` field in 3.12, not a
+`PyConfig` one). Every isolation guarantee is kept (`sys.flags.isolated == 1`).
+Windows and other systems are unchanged. Contract: `tests/script_files.rs`
+(`a_folder_with_accents_is_importable`, `open_without_encoding_reads_utf8`,
+`the_interpreter_runs_in_utf8_mode_and_isolated`).
+
 PyO3 offers **no** safe API for a custom initialization configuration —
 `Python::initialize()` calls `Py_InitializeEx(0)`, which reads the environment.
 Going through `pyo3::ffi` is therefore mandatory, and it is the only `unsafe` of
@@ -633,6 +644,79 @@ before and after reservation). Contract:
 `tests/graphs.rs` (groups in one call, reading, gestures and undo with a single
 `undo`, refusal without mutation, stale handles).
 
+### Running a script file (#552)
+
+`ScriptEngine::run_file(path)` runs a Python file in the embedded interpreter
+like `python file.py`. The file is read **on the script thread**, never by the
+caller, and compiled from its **bytes** (byte order mark, CRLF, an encoding
+declaration and `from __future__` are Python's own business) under its real,
+absolute name, so the traceback of the file and of every helper shows path and
+line. An unreadable file is `ScriptError::ReadFile { path, source }` (a host
+error, not a script error).
+
+While it runs:
+
+- the namespace is **fresh** and discarded at the end: the console's variables
+  do not move and do not see it, and its variables are not seen by the console.
+  `__name__ == "__main__"`, `__file__` is absolute, `sys.argv == [path]` and
+  `sys.modules["__main__"].__dict__` is that namespace (dataclasses and pickle
+  work);
+- the **folder of the chosen path** is first in `sys.path` (a symbolic link is
+  not resolved, no `\\?\` form is built); the three embedded search paths
+  stay as they are (invariant of the isolation). The working directory does
+  not change: relative paths keep meaning the process folder, and a script
+  uses `Path(__file__).parent`;
+- `sys.dont_write_bytecode` is set: no `__pycache__` appears next to the
+  user's files.
+
+After the run, whatever its end (success, error, Stop), `sys.path` (same list
+object), `sys.argv`, `sys.modules["__main__"]` and `sys.dont_write_bytecode`
+are as before, and the modules imported from the script's folder are removed
+from `sys.modules` (those whose file or `__path__` is under the folder, **not**
+under the embedded prefix, and not native extensions with their packages). An
+edited helper is therefore read again at the next run, and a new sibling is
+found. The set-up (`script_file.rs`, a small Python helper) happens **before**
+`running` becomes true and the restoration **after** it dropped and the pending
+asynchronous exception was cleared: otherwise Stop could fire inside
+`importlib` (see "Interruption, in two halves").
+
+A file run is **its own run** for the read versions (#312): what the console
+read does not protect it, and what it read does not protect the next run; the
+console's table is put back at the end. One run is one `Script` group, so one
+undo.
+
+`exit()` and `exit(0)` (`SystemExit` with no code or 0) are a **normal end**,
+the writes are committed. Any other code (`exit(2)`, `exit("message")`) is an
+error: the group is rolled back like after any uncaught exception. The rule
+is the same for console text and for files.
+
+**From the window (#552).** File ▸ Run Script File…, the console's **Run File…**
+(both open the picker, `.py` and `.pyst`) and the confirmed drop of a script
+call `run_file`; **Run Again** reruns the last file of the session (kept in
+`AppState`, never in the project or the preferences). The output, the status
+messages, the single undo step and Stop are those of a console run, and the
+console text is left alone. Opening a project never runs a script.
+
+**Stop reaches the first run (#552).** `AppState` holds the engine in a shared
+slot that the detached run thread fills the moment the engine exists (it used
+to be stored only when the first run ended, so Stop did nothing then). A Stop
+clicked before the script has entered Python (Python still starting) is kept
+as a pending request, applied by `poll_script` as soon as the engine is
+running, and cleared at the start and at the end of every run: it never leaks
+into the next run.
+
+Limits, stated in the manual:
+
+- `pyst` is refused in a thread the script creates (only the script thread
+  holds the context);
+- the output comes at the end of the run only, never streamed;
+- `multiprocessing` does not work;
+- `input()` is unsupported (there is no terminal to read from);
+- there is no `pip` and no package outside the embedded prefix;
+- run only scripts you trust: a script is a program with the user's rights.
+ Contract:
+`stokesforge-script/tests/script_files.rs`, `stokesforge-cli/tests/run.rs`.
+
 ### CLI without a window (#71)
 
 ```sh
@@ -642,7 +726,8 @@ stokesforge-cli run --project resultat.stf --out suite.stf suite.pyst
 
 The `python` feature is required; without it, `run` explains how to enable it.
 Without `--project`, the script receives an empty project; without `--out`,
-there is no final save. The Python file is read as UTF-8. stdout and stderr
+there is no final save. The Python file is run by `ScriptEngine::run_file`
+(next section), so its folder is importable. stdout and stderr
 are preserved; an exception prints its full trace and returns a non-zero
 code. `--out` is written only after success. Scripts go through the
 same `ScriptEngine`, actor and commands as the console.

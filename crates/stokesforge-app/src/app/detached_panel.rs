@@ -984,6 +984,51 @@ mod tests {
         bench.finish();
     }
 
+    /// #552: **Run File…** in the detached console opens the picker, the answer
+    /// runs the file and the output shows in that console, which also asks for
+    /// the console to be shown. Run Again then reruns it. Python feature.
+    /// Witness: drop the picker's poll from the window's own pass and nothing runs.
+    #[cfg(feature = "python")]
+    #[test]
+    fn run_file_from_the_detached_console_runs_the_file_and_shows_its_output() {
+        use stokesforge_app_state::file_picker::FilePicker;
+        use stokesforge_python::interpreter::{self, EmbeddedPython};
+        let mut bench = started(true);
+        let home = std::env::var_os(interpreter::HOME_ENV)
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../vendor/python/extracted/python")
+            });
+        bench.app.state.set_python(EmbeddedPython::with_home(home));
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("detached_run.py");
+        std::fs::write(&file, "print('file_out')\n").unwrap();
+        let console = bench.id_of(Window::Console);
+        bench.app.state.set_script_source("keep = 1".into());
+        bench.child_in(console, Pass::child());
+        let output = bench.child_in(console, Pass::child());
+        let run_file = text_exact(&texts(&output.shapes), &tr!("script-run-file")).center;
+        FilePicker::script_next_answer(Some(vec![file.clone()]));
+        click(&mut bench, Window::Console, run_file);
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while bench.app.state.last_script_file().is_none() || bench.app.state.script_running() {
+            assert!(Instant::now() < deadline, "the file must run and finish");
+            std::thread::sleep(Duration::from_millis(5));
+            bench.child_in(console, Pass::child());
+            bench.root(Pass::root());
+        }
+        bench.root(Pass::root());
+        let output = bench.child_in(console, Pass::child());
+        assert!(
+            super::super::test_support::painted(&output, "file_out"),
+            "the output shows in the detached console"
+        );
+        assert_eq!(bench.app.state.script_source(), "keep = 1");
+        assert_eq!(bench.app.state.last_script_file(), Some(file.as_path()));
+        bench.finish();
+    }
+
     /// Dragging a node from the tree or opening a window from the detached
     /// Project Manager opens it in the main window in the same pass of the
     /// panel: the tab is open for the root and the other windows. Witness: queue

@@ -22,6 +22,10 @@
 //! the only `unsafe` of the initialization; the crate carries just one other,
 //! the zero-copy borrow of `array.rs` (`PyArray1::borrow_from_array`).
 //!
+//! On Linux only, the interpreter also runs in UTF-8 mode (`PyPreConfig.utf8_mode`,
+//! set through `Py_PreInitialize` before any string of the `PyConfig`), so that
+//! accented folders are importable and `open()` reads UTF-8 by default (#552).
+//!
 //! # End of life (pitfall no. 7)
 //!
 //! `Py_Finalize` is **never** called. Accepted consequence: Python `atexit`
@@ -187,6 +191,19 @@ impl EmbeddedPython {
 unsafe fn start_interpreter(embedded: &EmbeddedPython) -> Result<(), String> {
     let home = to_cstring(&embedded.home)?;
     let paths = embedded.search_paths();
+
+    // Linux only (#552): the isolated config does not read the locale, so the
+    // file system encoding would be ASCII (accented folders not importable,
+    // `open()` without `encoding=` failing on UTF-8 text). `utf8_mode` is a
+    // `PyPreConfig` field, so the pre-initialization must run before any
+    // `Py_DecodeLocale` / `PyConfig` string call below. Windows is unchanged.
+    #[cfg(target_os = "linux")]
+    {
+        let mut preconfig: ffi::PyPreConfig = std::mem::zeroed();
+        ffi::PyPreConfig_InitIsolatedConfig(&mut preconfig);
+        preconfig.utf8_mode = 1;
+        check_status(ffi::Py_PreInitialize(&preconfig), "Py_PreInitialize")?;
+    }
 
     let mut config: ffi::PyConfig = std::mem::zeroed();
     let config_ptr: *mut ffi::PyConfig = &mut config;
@@ -404,6 +421,18 @@ pub fn sys_flags_isolated() -> Result<bool, PythonError> {
             .import("sys")?
             .getattr("flags")?
             .getattr("isolated")?
+            .extract::<i64>()?;
+        Ok(flag != 0)
+    })
+}
+
+/// `sys.flags.utf8_mode` — 1 on Linux (#552), the CPython default elsewhere.
+pub fn sys_flags_utf8_mode() -> Result<bool, PythonError> {
+    attached(|py| {
+        let flag = py
+            .import("sys")?
+            .getattr("flags")?
+            .getattr("utf8_mode")?
             .extract::<i64>()?;
         Ok(flag != 0)
     })

@@ -46,6 +46,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::Arc;
+#[cfg(feature = "python")]
+use std::sync::{Mutex, PoisonError};
 use std::thread;
 
 use stokesforge_commands::{Command, HistoryLabel, MacroKind, PlotEditKind};
@@ -481,6 +483,20 @@ pub enum Action {
     /// this module. Without the `python` feature, produces an explicit
     /// [`StatusMessage`] and sends no command.
     RunScript,
+    /// Runs a Python file with its own folder importable (#552): File ▸ Run
+    /// Script File…, the console's Run File… and a confirmed drop. Does not
+    /// block, like [`Action::RunScript`]; the console text is untouched. The
+    /// file is read on the detached thread, never in `dispatch`.
+    RunScriptFile {
+        /// The `.py` or `.pyst` file to run.
+        path: PathBuf,
+    },
+    /// Runs the last file of the session again ("Run Again", #552). Refused
+    /// with a reason until a file has been run.
+    RunScriptAgain,
+    /// The answer of the confirmation a dropped script asks (#552): `true`
+    /// runs it, `false` (Cancel, Escape, cross) does nothing.
+    ConfirmScriptDrop(bool),
     /// Asks to stop the running script. No effect if there is none.
     /// Does not block.
     InterruptScript,
@@ -3449,6 +3465,8 @@ pub struct DropPlan {
     pub projects: Vec<PathBuf>,
     /// `.toml` files: each becomes a Script Settings object (#548).
     pub settings: Vec<PathBuf>,
+    /// `.py` and `.pyst` files: a script to run, after a confirmation (#552).
+    pub scripts: Vec<PathBuf>,
     /// Data files to import.
     pub data: Vec<PathBuf>,
     /// Destination of the data files.
@@ -3458,7 +3476,8 @@ pub struct DropPlan {
 /// Pure decision of a drop: the drop location sets the destination (a
 /// workbook under the cursor receives one sheet per file, anywhere
 /// else a shared new workbook), the `.stf` extension makes a
-/// file a project to open rather than data to import.
+/// file a project to open rather than data to import, and `.py` / `.pyst`
+/// make it a script to run (never data, #552).
 pub fn file_drop_plan(paths: &[PathBuf], target_book: Option<NodeId>) -> DropPlan {
     let has_extension = |path: &PathBuf, wanted: &str| {
         path.extension()
@@ -3467,12 +3486,14 @@ pub fn file_drop_plan(paths: &[PathBuf], target_book: Option<NodeId>) -> DropPla
     };
     let is_project = |path: &PathBuf| has_extension(path, "stf");
     let is_settings = |path: &PathBuf| has_extension(path, "toml");
+    let is_script = |path: &PathBuf| has_extension(path, "py") || has_extension(path, "pyst");
     DropPlan {
         projects: paths.iter().filter(|p| is_project(p)).cloned().collect(),
         settings: paths.iter().filter(|p| is_settings(p)).cloned().collect(),
+        scripts: paths.iter().filter(|p| is_script(p)).cloned().collect(),
         data: paths
             .iter()
-            .filter(|p| !is_project(p) && !is_settings(p))
+            .filter(|p| !is_project(p) && !is_settings(p) && !is_script(p))
             .cloned()
             .collect(),
         destination: target_book.map_or(
@@ -4030,6 +4051,14 @@ pub struct AppState {
     recent_to_record: Vec<PathBuf>,
     /// Text of the script area.
     script_source: String,
+    /// The last file run in this session (#552): "Run Again" and the picker's
+    /// starting folder. Never in the project, never in the preferences.
+    last_script_file: Option<PathBuf>,
+    /// A dropped script waiting for its confirmation (#552).
+    pending_script_drop: Option<PathBuf>,
+    /// A file run asks the console to show itself (un-collapse); read once by
+    /// the shell ([`AppState::take_script_reveal`]).
+    script_reveal: bool,
     /// Output of the last script run, if there has been one.
     script_output: Option<ScriptOutput>,
     /// Descriptor of the embedded interpreter, set by [`AppState::
@@ -4037,15 +4066,33 @@ pub struct AppState {
     /// itself is started neither here nor there, only at the first script.
     #[cfg(feature = "python")]
     python: Option<EmbeddedPython>,
-    /// The script engine, once started (at the first successful [`Action::
-    /// RunScript`]). Shared by `Arc` with the detached thread that
-    /// runs the current script, if there is one.
+    /// The script engine, once started (lazily, at the first run). A **shared
+    /// slot**: the detached run thread fills it the moment the engine exists,
+    /// so Stop reaches it during the very first run too (#552). One engine
+    /// for the whole session, shared by `Arc` with the run thread.
     #[cfg(feature = "python")]
-    engine: Option<Arc<ScriptEngine>>,
+    engine: EngineSlot,
+    /// Stop clicked while the run had not yet entered the script (Python
+    /// still starting): applied by [`AppState::poll_script`] as soon as the
+    /// script runs, cleared at the start and at the end of every run, so it
+    /// never leaks into the next one.
+    #[cfg(feature = "python")]
+    script_stop_pending: bool,
     /// Reply channel of a run in progress on a detached thread.
     /// `Some` until [`AppState::poll_script`] has received a reply.
     #[cfg(feature = "python")]
     pending_script: Option<mpsc::Receiver<PendingScriptResult>>,
+}
+
+/// Shared slot holding the script engine once the run thread has created it.
+#[cfg(feature = "python")]
+type EngineSlot = Arc<Mutex<Option<Arc<ScriptEngine>>>>;
+
+/// What a script run executes (#552): the console's text, or a file.
+#[cfg(feature = "python")]
+enum ScriptJob {
+    Text(String),
+    File(PathBuf),
 }
 
 /// What the detached run thread hands back to [`AppState::poll_script`]: the
@@ -4204,11 +4251,16 @@ impl AppState {
             origin_formulas: None,
             recent_to_record: Vec::new(),
             script_source: String::new(),
+            last_script_file: None,
+            pending_script_drop: None,
+            script_reveal: false,
             script_output: None,
             #[cfg(feature = "python")]
             python: None,
             #[cfg(feature = "python")]
-            engine: None,
+            engine: EngineSlot::default(),
+            #[cfg(feature = "python")]
+            script_stop_pending: false,
             #[cfg(feature = "python")]
             pending_script: None,
         };
@@ -4567,6 +4619,19 @@ impl AppState {
     #[must_use]
     pub fn script_available(&self) -> bool {
         cfg!(feature = "python")
+    }
+
+    /// Why a script cannot start now (#552): the reason shown on a greyed-out
+    /// Run, Run File… or Run Again; `None` when one can.
+    #[must_use]
+    pub fn script_blocked_reason(&self) -> Option<String> {
+        if self.script_running() {
+            Some(tr!("disabled-script-running"))
+        } else if !self.script_available() {
+            Some(tr!("disabled-script-unavailable"))
+        } else {
+            None
+        }
     }
 
     /// Calls the waker, if one is set: wakes the server thread now.
@@ -6975,6 +7040,18 @@ impl AppState {
                 self.change_script_settings(settings, &change);
             }
             Action::RunScript => self.run_script(),
+            Action::RunScriptFile { path } => self.run_script_file(path),
+            Action::RunScriptAgain => match self.last_script_file.clone() {
+                Some(path) => self.run_script_file(path),
+                None => self.notice(tr!("disabled-script-no-file")),
+            },
+            Action::ConfirmScriptDrop(accept) => {
+                if let Some(path) = self.pending_script_drop.take() {
+                    if accept {
+                        self.run_script_file(path);
+                    }
+                }
+            }
             Action::InterruptScript => self.interrupt_script(),
             Action::CommitCellAndAdvance {
                 column,
@@ -7988,6 +8065,7 @@ impl AppState {
     fn poll_script_pass(&mut self) {
         #[cfg(feature = "python")]
         {
+            self.apply_pending_script_stop();
             let received = match &self.pending_script {
                 Some(receiver) => match receiver.try_recv() {
                     Ok(reply) => Some(reply),
@@ -8004,6 +8082,7 @@ impl AppState {
                 return;
             };
             self.pending_script = None;
+            self.script_stop_pending = false;
             if let Some(engine) = engine {
                 // `pyst.save_as(path)` may have changed the project path: the
                 // window adopts it, as after a "Save as".
@@ -8018,7 +8097,6 @@ impl AppState {
                     self.saved_revision = Some(saved);
                     self.autosave_mark_clean();
                 }
-                self.engine = Some(engine);
             }
             match result {
                 Ok(outcome) => self.finish_script_run(outcome),
@@ -8102,6 +8180,7 @@ impl AppState {
             return;
         }
         let plan = file_drop_plan(&paths, target_book);
+        self.ask_script_drop(plan.scripts);
         self.projects_to_open.extend(plan.projects);
         for path in &plan.settings {
             self.import_script_settings(path);
@@ -8134,6 +8213,43 @@ impl AppState {
             ImportSource::Drop { target_book },
             plan.data,
         );
+    }
+
+    /// A dropped script (#552): asks the user to run it, through the
+    /// confirmation of [`AppState::pending_script_drop`]. Nothing is asked, and
+    /// a message says why, when several scripts came together, while a script
+    /// runs, without Python, or while the import window or the Origin chooser
+    /// is open (Graph Properties is refused earlier, for every file).
+    fn ask_script_drop(&mut self, scripts: Vec<PathBuf>) {
+        let mut scripts = scripts.into_iter();
+        let Some(script) = scripts.next() else {
+            return;
+        };
+        if scripts.next().is_some() {
+            self.fail(tr!("error-script-drop-several"));
+        } else if !self.script_available() {
+            self.fail(tr!("error-script-unavailable"));
+        } else if self.script_running() {
+            self.fail(tr!("error-script-running"));
+        } else if !self.python_found() {
+            self.fail(tr!("error-script-no-python"));
+        } else if self.origin_import_open() || self.import_state.is_some() {
+            self.fail(tr!("error-script-drop-import-open"));
+        } else {
+            self.pending_script_drop = Some(script);
+        }
+    }
+
+    /// Was the embedded interpreter located ([`AppState::set_python`])?
+    fn python_found(&self) -> bool {
+        #[cfg(feature = "python")]
+        {
+            self.python.is_some()
+        }
+        #[cfg(not(feature = "python"))]
+        {
+            false
+        }
     }
 
     /// Starts the reading and analysis of the files on a background thread: single
@@ -9843,16 +9959,25 @@ impl AppState {
             }
             // Choosing a default is not using one: start in the current default.
             PickRequest::ChooseDefaultFolder { .. } => session_last = None,
+            // #552: the folder of the last script run, never the import memory.
+            PickRequest::RunScriptFile => {
+                session_last = self
+                    .last_script_file
+                    .as_deref()
+                    .and_then(Path::parent)
+                    .map(Path::to_path_buf);
+            }
             _ => {}
         }
-        let fallback = (kind == FolderKind::Import)
-            .then(|| {
-                self.import_state
-                    .as_ref()
-                    .and_then(|import| import.recent.last_dir())
-                    .map(Path::to_path_buf)
-            })
-            .flatten();
+        let fallback = (kind == FolderKind::Import
+            && !matches!(request, PickRequest::RunScriptFile))
+        .then(|| {
+            self.import_state
+                .as_ref()
+                .and_then(|import| import.recent.last_dir())
+                .map(Path::to_path_buf)
+        })
+        .flatten();
         crate::default_folders::FolderCandidates {
             session_last,
             default,
@@ -10197,6 +10322,21 @@ impl AppState {
         self.alert.as_ref()
     }
 
+    /// The dropped script waiting for its confirmation (#552).
+    pub fn pending_script_drop(&self) -> Option<&Path> {
+        self.pending_script_drop.as_deref()
+    }
+
+    /// The last file run in this session, for "Run Again" (#552).
+    pub fn last_script_file(&self) -> Option<&Path> {
+        self.last_script_file.as_deref()
+    }
+
+    /// A file run asks the console to show itself: true once per run.
+    pub fn take_script_reveal(&mut self) -> bool {
+        std::mem::take(&mut self.script_reveal)
+    }
+
     /// The file an export would overwrite, waiting for confirmation (S-F3).
     pub fn pending_overwrite(&self) -> Option<&std::path::Path> {
         self.pending_overwrite
@@ -10212,6 +10352,7 @@ impl AppState {
             || self.alert.is_some()
             || self.pending_overwrite.is_some()
             || self.pending_discarded_save.is_some()
+            || self.pending_script_drop.is_some()
             || self.recovery_delete_pending()
     }
 
@@ -13732,26 +13873,51 @@ impl AppState {
         self.fail(tr!("error-script-unavailable"));
     }
 
+    /// Same refusal for a file run (#552).
+    #[cfg(not(feature = "python"))]
+    fn run_script_file(&mut self, _path: PathBuf) {
+        self.fail(tr!("error-script-unavailable"));
+    }
+
+    /// Runs the text of the console (see [`AppState::start_script`]).
+    #[cfg(feature = "python")]
+    fn run_script(&mut self) {
+        let source = self.script_source.clone();
+        self.start_script(ScriptJob::Text(source));
+    }
+
+    /// Runs a file with its folder importable (#552). The session remembers
+    /// it for "Run Again" and the console shows itself, once the run is
+    /// accepted; the file itself is read by the detached thread.
+    #[cfg(feature = "python")]
+    fn run_script_file(&mut self, path: PathBuf) {
+        if self.start_script(ScriptJob::File(path.clone())) {
+            self.last_script_file = Some(path);
+            self.script_reveal = true;
+        }
+    }
+
     /// Starts a script run on a detached thread, reusing the engine if it
     /// already exists or creating it lazily otherwise: both the creation and
     /// the run happen **off the calling thread**, so that even the very first
     /// script (interpreter startup cost included) never freezes the window.
-    /// The result is only collected by [`AppState::poll_script`].
+    /// The result is only collected by [`AppState::poll_script`]. Returns
+    /// whether the run started.
     #[cfg(feature = "python")]
-    fn run_script(&mut self) {
+    fn start_script(&mut self, job: ScriptJob) -> bool {
         if self.pending_script.is_some() {
             self.fail(tr!("error-script-running"));
-            return;
+            return false;
         }
         let Some(python) = self.python.clone() else {
             self.fail(tr!("error-script-no-python"));
-            return;
+            return false;
         };
-        let existing_engine = self.engine.clone();
+        let slot = Arc::clone(&self.engine);
+        self.script_stop_pending = false;
         // Identity of the script's own: a macro opened by the interface
         // (graph properties) does not absorb it and does not undo it (#21).
         let handle = self.handle.with_new_identity();
-        let source = self.script_source.clone();
         // The path that `pyst.save()` will write: the project's, if it has one.
         let project_path = (!self.path.is_empty()).then(|| PathBuf::from(&self.path));
         // Guard #309: `pyst.save()` does not overwrite the source of a read that
@@ -13769,16 +13935,26 @@ impl AppState {
         let spawned = thread::Builder::new()
             .name("stokesforge-app-script".to_owned())
             .spawn(move || {
-                let engine = match existing_engine {
+                let existing = slot.lock().unwrap_or_else(PoisonError::into_inner).clone();
+                let engine = match existing {
                     Some(engine) => Ok(engine),
-                    None => ScriptEngine::spawn(handle, python).map(Arc::new),
+                    None => ScriptEngine::spawn(handle, python)
+                        .map(Arc::new)
+                        .inspect(|engine| {
+                            // Reachable by Stop from now on, not at the end of the run.
+                            *slot.lock().unwrap_or_else(PoisonError::into_inner) =
+                                Some(Arc::clone(engine));
+                        }),
                 };
                 let reply = match engine {
                     Ok(engine) => {
                         engine.set_project_path(project_path);
                         engine.set_protected_path(protected_path);
                         engine.set_theme_library(Some(theme_library));
-                        let outcome = engine.run(&source);
+                        let outcome = match &job {
+                            ScriptJob::Text(source) => engine.run(source),
+                            ScriptJob::File(path) => engine.run_file(path),
+                        };
                         (Some(engine), outcome)
                     }
                     Err(message) => (None, Err(message)),
@@ -13797,11 +13973,15 @@ impl AppState {
             Ok(_detached) => {
                 self.pending_script = Some(reply_rx);
                 self.notice(tr!("status-script-running"));
+                true
             }
-            Err(err) => self.fail(tr!(
-                "error-script-start",
-                cause = errors::io::error_message(&err)
-            )),
+            Err(err) => {
+                self.fail(tr!(
+                    "error-script-start",
+                    cause = errors::io::error_message(&err)
+                ));
+                false
+            }
         }
     }
 
@@ -13848,13 +14028,33 @@ impl AppState {
         // The `Arc` is cloned then the borrow released before `notice`: the two
         // fields of `self` cannot be borrowed at the same time as
         // `self.notice` needs an exclusive borrow.
-        let engine = self.engine.clone();
-        match engine {
-            Some(engine) if self.pending_script.is_some() => {
-                engine.interrupt();
-                self.notice(tr!("status-script-interrupt-requested"));
-            }
-            _ => self.notice(tr!("status-script-none-running")),
+        if self.pending_script.is_none() {
+            self.notice(tr!("status-script-none-running"));
+            return;
+        }
+        // The run may not have entered the script yet (engine or Python still
+        // starting): the request is kept and applied by `poll_script` as soon
+        // as it does, since an interruption sent earlier is erased by the
+        // start-of-run reset of the engine.
+        self.script_stop_pending = true;
+        self.apply_pending_script_stop();
+        self.notice(tr!("status-script-interrupt-requested"));
+    }
+
+    /// Forwards a pending Stop to the engine once its script is running.
+    #[cfg(feature = "python")]
+    fn apply_pending_script_stop(&mut self) {
+        if !self.script_stop_pending || self.pending_script.is_none() {
+            return;
+        }
+        let engine = self
+            .engine
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if let Some(engine) = engine.filter(|engine| engine.is_running()) {
+            engine.interrupt();
+            self.script_stop_pending = false;
         }
     }
 }

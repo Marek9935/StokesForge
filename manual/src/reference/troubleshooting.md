@@ -280,6 +280,9 @@ If the project engine stops, the alert **Session Stopped** says "The project eng
 | Message | What to do |
 |---|---|
 | "A script is already running" | Wait for it to end, or click **Stop**. |
+| "Could not read the script file …" | The file moved, was deleted or cannot be opened. Check the path in the message, or pick the file again with **Run File…**. |
+| "Drop one script at a time. None was run" | You dropped several `.py` files together. Drop them one by one. |
+| "Close the import window before dropping a script" | Finish or cancel the import, then drop the script again. |
 | "Wait for the script to finish before saving" | **Save** is not available while a script runs. |
 | "The column changed while it was being edited. Try again" | You edited the column by hand between the read and the write of the script. Run it again. |
 | "The script engine has stopped. Run the script again" | Run the script again. If it repeats, restart StokesForge. |

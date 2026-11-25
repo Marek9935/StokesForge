@@ -1829,6 +1829,11 @@ pub mod script {
             }
             ScriptError::Interpreter(error) => python_error_message(error),
             ScriptError::Install(detail) => tr!("error-script-install", detail = detail.as_str()),
+            ScriptError::ReadFile { path, source } => tr!(
+                "error-script-read-file",
+                path = path.display().to_string(),
+                cause = crate::errors::io::error_message(source)
+            ),
             ScriptError::Busy => tr!("error-script-busy"),
             ScriptError::Stopped => tr!("error-script-stopped"),
         }
@@ -1862,17 +1867,22 @@ pub mod script {
                 ScriptError::Thread(std::io::Error::other("out of threads")),
                 ScriptError::Interpreter(PythonError::InitFailed("bad config".into())),
                 ScriptError::Install("pyst missing".into()),
+                ScriptError::ReadFile {
+                    path: "/scripts/run.py".into(),
+                    source: std::io::Error::from(std::io::ErrorKind::NotFound),
+                },
                 ScriptError::Busy,
                 ScriptError::Stopped,
             ];
-            let mut seen = [false; 5];
+            let mut seen = [false; 6];
             for sample in &samples {
                 let index = match sample {
                     ScriptError::Thread(_) => 0,
                     ScriptError::Interpreter(_) => 1,
                     ScriptError::Install(_) => 2,
-                    ScriptError::Busy => 3,
-                    ScriptError::Stopped => 4,
+                    ScriptError::ReadFile { .. } => 3,
+                    ScriptError::Busy => 4,
+                    ScriptError::Stopped => 5,
                 };
                 seen[index] = true;
             }
