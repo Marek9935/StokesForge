@@ -124,6 +124,31 @@ fn refuses_arguments_and_missing_files_before_execution() {
     }
 }
 
+/// #552: a module next to the script imports whatever the working directory.
+#[cfg(feature = "python")]
+#[test]
+fn imports_a_sibling_module_whatever_the_working_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("helper.py"), "VALUE = 'from helper'\n").unwrap();
+    let script = dir.path().join("main.pyst");
+    std::fs::write(&script, "import helper\nprint(helper.VALUE)\n").unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_stokesforge-cli"))
+        .args(["run", script.to_str().unwrap()])
+        .current_dir(elsewhere.path())
+        .env("PYTHONPATH", "/tmp/stokesforge-trap")
+        .env("PYTHONHOME", "/tmp/stokesforge-trap")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("from helper"));
+    assert!(!dir.path().join("__pycache__").exists());
+}
+
 /// A `.stf` whose only correction calculation is made unreadable in the
 /// bytes: the read discards it.
 #[cfg(feature = "python")]

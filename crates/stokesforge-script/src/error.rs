@@ -19,6 +19,15 @@ pub enum ScriptError {
     /// The interpreter started but the `pyst` surface could not be installed.
     #[error("could not install the pyst surface:\n{0}")]
     Install(String),
+    /// The script file could not be read (#552). Raw English; the application
+    /// puts it into a sentence.
+    #[error("could not read the script file {}: {source}", .path.display())]
+    ReadFile {
+        /// The file that was asked for.
+        path: std::path::PathBuf,
+        /// Why it could not be read.
+        source: std::io::Error,
+    },
     /// A script is already running: the foundation allows **one at a
     /// time**.
     #[error("a script is already running")]

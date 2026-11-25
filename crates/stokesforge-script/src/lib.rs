@@ -83,6 +83,8 @@ mod groups;
 #[cfg(feature = "python")]
 mod outcome;
 #[cfg(feature = "python")]
+mod script_file;
+#[cfg(feature = "python")]
 mod selftest;
 #[cfg(feature = "python")]
 mod set_graph;

@@ -24,8 +24,14 @@ without a message, see `docs/persistence.md`).
 
 ## [Unreleased]
 
+### Fixed
+
+- Stop works during the very first script run of a session, console or file (#552); a Stop clicked while Python is still starting takes effect as soon as the script runs and does not carry over to the next run.
+- On Linux the embedded Python runs in UTF-8 mode (#552): a script in a folder with accents can import its sibling modules, and `open()` without `encoding=` reads UTF-8 text. Windows is unchanged.
+
 ### Added
 
+- Running a Python file with its folder importable (#552, engine and CLI): `ScriptEngine::run_file` runs a file like `python file.py` in a fresh namespace; modules next to the script import, an edited module is read again at each run, no `__pycache__` is written, and the tracebacks show the real file and line. `stokesforge-cli run` uses it. `exit()` and `exit(0)` now end a script normally (writes kept), any other exit is an error that rolls back, in files and in the console. From the window: File ▸ Run Script File…, a **Run File…** and a **Run Again** button in the console, and dropping a `.py` or `.pyst` file, which asks for a confirmation (`[Cancel] [Run]`) because a script can write files that Ctrl+Z does not undo; the console shows the output and its text is left alone.
 - Script Settings (#548): a new project object that holds a raw TOML text for scripts, created and edited only through two undoable commands and saved in the `.stf` file as an additive node kind (format version unchanged; an older version keeps the node as an unrecognised kind and writes it back unchanged). The window (a Form tab with one field per kind of value and hints read from comments, and a Text tab), File ▸ New ▸ Script Settings, File ▸ Import ▸ Script Settings…, dropping a `.toml` file, and Export… in the Project Manager are added in the third lot; scripts read and write the values by name with `pyst.settings(target)` and `pyst.set_settings(target, values)` (pyst API 0.12).
 
 ## [1.2.0] - 2026-11-17

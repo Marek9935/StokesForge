@@ -759,6 +759,7 @@ error-export-png-encode = Impossible d'encoder le PNG : { $detail }
 # Scripts
 error-script-thread = Impossible de démarrer le moteur de script : { $detail }
 error-script-install = Impossible de configurer le module pyst : { $detail }
+error-script-read-file = Impossible de lire le fichier de script { $path } : { $cause }
 error-script-busy = Un script est déjà en cours
 error-script-stopped = Le moteur de script s'est arrêté. Relancer le script
 error-python-home = Python est introuvable dans { $path }
@@ -3087,3 +3088,20 @@ error-settings-no-element = Le réglage { $key } n'a pas cette valeur
 error-settings-empty-list = Le réglage { $key } est vide : ajoutez la première valeur dans l'onglet Texte
 error-settings-bad-date = Le réglage { $key } n'est pas une date ou une heure valide
 error-settings-unsupported = Le réglage { $key } ne peut pas contenir cette valeur
+
+# Exécution d'un fichier de script (#552)
+action-run-script-file = Exécuter un fichier de script…
+    .hint = Exécute un fichier Python en rendant son dossier importable
+script-run-file = Exécuter un fichier…
+    .hint = Exécute un fichier Python en rendant son dossier importable. Le texte ci-dessus n'est pas modifié
+script-run-again = Exécuter à nouveau
+disabled-script-no-file = Exécuter d'abord un fichier
+script-run-file-title = Exécuter un fichier de script
+script-file-filter = Script Python
+script-drop-title = Exécuter le script
+script-drop-run = Exécuter
+    .hint = Exécute le script maintenant
+script-drop-body = Exécuter « { $name } » depuis le dossier { $folder } ?
+script-drop-warning = Un script peut modifier le projet et écrire des fichiers sur votre disque. Ce qu'il écrit en dehors du projet ne s'annule pas avec Ctrl+Z. N'exécutez que des scripts de confiance.
+error-script-drop-several = Déposez un seul script à la fois. Aucun n'a été exécuté
+error-script-drop-import-open = Fermez la fenêtre d'import avant de déposer un script

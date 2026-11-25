@@ -82,6 +82,16 @@ An empty section disappears with its separators.
 - **Detached windows**: same paints, same targets; the actions
   go up to the root like the others.
 
+## Run Script File (#552)
+
+- **File ▸ Run Script File…** sits at the end of the section of Open · Save ·
+  Save As (the main actions on the project's files; the canonical order has no
+  section for running, and a section of one entry would only add a line). It
+  opens the file picker (filters `.py` and `.pyst`, starting in the folder of
+  the last file run of the session, else the Import default), then runs the file
+  like the console's **Run File…** and shows the console. Greyed out with the
+  reason of the console's Run while a script runs or without Python.
+
 ## Script Settings (#548)
 
 - **File ▸ New ▸ Add Script Settings** adds the object in the creation folder (like

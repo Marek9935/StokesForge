@@ -760,6 +760,7 @@ error-export-png-encode = Could not encode the PNG: { $detail }
 # Scripts
 error-script-thread = Could not start the script engine: { $detail }
 error-script-install = Could not set up the pyst module: { $detail }
+error-script-read-file = Could not read the script file { $path }: { $cause }
 error-script-busy = A script is already running
 error-script-stopped = The script engine has stopped. Run the script again
 error-python-home = Python was not found in { $path }
@@ -3088,3 +3089,20 @@ error-settings-no-element = Setting { $key } has no such value
 error-settings-empty-list = Setting { $key } is empty: add the first value in the Text tab
 error-settings-bad-date = Setting { $key } is not a valid date or time
 error-settings-unsupported = Setting { $key } cannot hold that value
+
+# Running a script file (#552)
+action-run-script-file = Run Script File…
+    .hint = Runs a Python file with its own folder importable
+script-run-file = Run File…
+    .hint = Runs a Python file with its own folder importable. The text above is left alone
+script-run-again = Run Again
+disabled-script-no-file = Run a file first
+script-run-file-title = Run Script File
+script-file-filter = Python script
+script-drop-title = Run Script
+script-drop-run = Run
+    .hint = Runs the script now
+script-drop-body = Run “{ $name }” from the folder { $folder }?
+script-drop-warning = A script can change the project and write files on your disk. What it writes outside the project cannot be undone with Ctrl+Z. Run only scripts you trust.
+error-script-drop-several = Drop one script at a time. None was run
+error-script-drop-import-open = Close the import window before dropping a script

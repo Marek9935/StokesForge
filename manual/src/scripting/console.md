@@ -7,7 +7,7 @@ The script console lets you drive StokesForge with Python. You write a script, r
 The console is a panel at the bottom of the main window, titled **Python Script**. It contains:
 
 - a text box where you type or paste your script;
-- the buttons **Run** and **Stop**;
+- the buttons **Run**, **Run File…**, **Run Again** and **Stop**;
 - an output area under the buttons.
 
 It is not a line-by-line prompt. You write a whole script, then you run it. The script text stays in the box after the run, so you can edit it and run it again.
@@ -105,6 +105,32 @@ If your script catches the error itself (with `try` and `except`), it continues,
 
 A script that is interrupted with **Stop** is rolled back in the same way.
 
+## Run a script file
+
+A script can live in a file, with the modules it imports next to it. To run it:
+
+- choose **File ▸ Run Script File…**, or click **Run File…** in the console, then pick a `.py` or `.pyst` file;
+- or drop the file on a StokesForge window. A window asks you to confirm, naming the file and its folder, with **Cancel** selected: click **Run** to run it.
+
+The folder of the file is searched first when the script imports a module, so `import helpers` finds `helpers.py` next to it. A module you edit is read again at the next run. StokesForge writes nothing next to your files (no `__pycache__` folder), and an error in a module shows that module's file and line in the **Traceback**.
+
+The console opens to show the output, and the text in its box is left alone. The file runs as a separate program: it does not see the variables of the console, and the console does not see its variables. It is one undo step, like a run from the box, and **Stop** works.
+
+**Run Again** runs the last file of this session once more, for example after you edit it in your editor. Its tooltip shows the full path. It stays grey until a file has run, and StokesForge forgets the file when you quit. Opening a project never runs a script.
+
+Relative paths keep meaning the folder StokesForge was started from. To read a file next to the script, build its path from the script's own location:
+
+```python
+from pathlib import Path
+here = Path(__file__).parent
+```
+
+On Linux, text files opened without an explicit encoding are read as UTF-8, and a script folder may contain accents.
+
+There is no `pip`: only the modules of the embedded Python, numpy, scipy and the files next to your script can be imported.
+
+**Run only scripts you trust.** A script is a program that runs with your rights: it can change the project and write or delete files on your disk. Ctrl+Z undoes what it did in the project, not what it wrote elsewhere.
+
 ## How scripts change the project
 
 Scripts use the same operations as the menus. Every change a script makes is part of your project history.
@@ -121,7 +147,7 @@ If a script has read a column and you edit that column by hand before the script
 
 The title bar of the console has two buttons:
 
-- **Collapse the panel** shrinks the console to its title bar. The button then reads **Expand the panel**. Running a script expands the console again.
+- **Collapse the panel** shrinks the console to its title bar. The button then reads **Expand the panel**. Running a script, or a file, expands the console again.
 - **Detach into a separate window** moves the console into its own window. The button then reads **Reattach to the main window**.
 
 Drag the top edge of the panel to change its height.
@@ -138,11 +164,13 @@ stokesforge-cli run --project data.stf --out result.stf process.pyst
 
 | Argument | Meaning |
 |---|---|
-| `process.pyst` | The script file, read as UTF-8 text. Required. The extension does not matter. |
+| `process.pyst` | The script file. Required. The extension does not matter. |
 | `--project data.stf` | A project to start from. Without it, the script starts with an empty project. |
 | `--out result.stf` | Where to save the project when the script succeeds. Without it, nothing is saved. |
 
-The script runs the same way as in the console, with `pyst` already loaded.
+The script runs the same way as in the console, with `pyst` already loaded, except that it starts from a fresh set of variables and that the folder of the script file is importable: a module placed next to the script (`helper.py`) can be imported with `import helper`, whatever the folder you ran the command from. Relative paths still start from the folder you ran the command in; use `Path(__file__).parent` to find files next to the script.
+
+`exit()` or `exit(0)` ends the script normally and keeps its changes. `exit(2)` or `exit("message")` is an error, like an exception: the changes are undone and the `--out` file is not written. The same holds in the console.
 
 - What the script prints goes to the terminal, on the standard output and the error output.
 - If the script fails, the full Python trace is printed and the program ends with a non-zero code. The `--out` file is not written.

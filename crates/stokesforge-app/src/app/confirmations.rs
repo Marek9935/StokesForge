@@ -240,8 +240,45 @@ pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Acti
             ConfirmOutcome::Cancel => actions.push(Action::ConfirmRecoveryDelete(false)),
         }
     }
+    if let Some(path) = state.pending_script_drop() {
+        script_drop_dialog(ctx, path, actions);
+    }
     if state.pending_row_drop().is_some() {
         row_drop_dialog(ctx, actions);
+    }
+}
+
+/// A script dropped on a window (#552): what it writes outside the project
+/// is not undone by Ctrl+Z, which is why this is a confirmation (S-F3). Cancel
+/// is the default; Run runs that file.
+fn script_drop_dialog(ctx: &egui::Context, path: &std::path::Path, actions: &mut Vec<Action>) {
+    let name = path.file_name().map_or_else(
+        || path.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    let folder = path
+        .parent()
+        .map(|folder| folder.display().to_string())
+        .unwrap_or_default();
+    match modal_confirm(
+        ctx,
+        egui::Id::new("stokesforge_script_drop"),
+        &tr!("script-drop-title"),
+        PlainSize::Default,
+        &tr!("script-drop-run"),
+        &tr!("script-drop-run", "hint"),
+        |ui| {
+            ui.label(tr!(
+                "script-drop-body",
+                name = name.as_str(),
+                folder = folder.as_str()
+            ));
+            ui.label(crate::theme::secondary_text(tr!("script-drop-warning")));
+        },
+    ) {
+        ConfirmOutcome::Open => {}
+        ConfirmOutcome::Confirm => actions.push(Action::ConfirmScriptDrop(true)),
+        ConfirmOutcome::Cancel => actions.push(Action::ConfirmScriptDrop(false)),
     }
 }
 
@@ -299,5 +336,131 @@ fn row_drop_dialog(ctx: &egui::Context, actions: &mut Vec<Action>) {
         DialogOutcome::Accept => actions.push(Action::ConfirmRowDrop(Some(RowAxis::New))),
         DialogOutcome::Cancel => actions.push(Action::ConfirmRowDrop(None)),
         DialogOutcome::Open => {}
+    }
+}
+
+#[cfg(all(test, feature = "python"))]
+mod tests {
+    use super::{show, Action, AppState};
+    use eframe::egui;
+    use egui_kittest::kittest::Queryable;
+    use std::path::PathBuf;
+    use stokesforge_app_state::tr;
+    use stokesforge_python::interpreter::{self, EmbeddedPython};
+
+    struct Bench {
+        _session: stokesforge_session::Session,
+        _dir: tempfile::TempDir,
+        script: PathBuf,
+        state: AppState,
+    }
+
+    /// A state with a dropped script waiting for its answer (#552).
+    fn bench() -> egui_kittest::Harness<'static, Bench> {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("drop_run.py");
+        std::fs::write(&script, "print('dropped')\n").unwrap();
+        let session = stokesforge_session::Session::spawn(
+            stokesforge_core::Project::new("Drop").unwrap(),
+            None,
+        )
+        .unwrap();
+        let mut state = AppState::new_with_preferences(
+            session.handle(),
+            String::new(),
+            stokesforge_app_state::preferences::Preferences::load_from(None),
+        )
+        .unwrap();
+        let home = std::env::var_os(interpreter::HOME_ENV)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../vendor/python/extracted/python")
+            });
+        state.set_python(EmbeddedPython::with_home(home));
+        state.dispatch(Action::DropFiles {
+            paths: vec![
+                PathBuf::from(script.to_string_lossy().to_uppercase()),
+                script.clone(),
+            ],
+            target_book: None,
+        });
+        assert!(
+            state.pending_script_drop().is_none(),
+            "two scripts: refused, no dialog"
+        );
+        state.dispatch(Action::DropFiles {
+            paths: vec![script.clone()],
+            target_book: None,
+        });
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(800.0, 600.0))
+            .build_ui_state(
+                |ui, bench: &mut Bench| {
+                    let mut actions = Vec::new();
+                    show(ui.ctx(), &bench.state, &mut actions);
+                    for action in actions {
+                        bench.state.dispatch(action);
+                    }
+                },
+                Bench {
+                    _session: session,
+                    _dir: dir,
+                    script,
+                    state,
+                },
+            );
+        harness
+            .ctx
+            .set_fonts(stokesforge_render_egui::font_definitions());
+        crate::theme::install(&harness.ctx);
+        harness.run();
+        harness
+    }
+
+    /// The dialog names the file and its folder, says a script can change files,
+    /// and offers Cancel and Run. Witness: paint no dialog for the pending file.
+    #[test]
+    fn the_dialog_names_the_file_and_its_folder_and_warns() {
+        let harness = bench();
+        let script = harness.state().script.clone();
+        let name = script.file_name().unwrap().to_string_lossy().into_owned();
+        let folder = script.parent().unwrap().display().to_string();
+        harness.get_by_label(&tr!(
+            "script-drop-body",
+            name = name.as_str(),
+            folder = folder.as_str()
+        ));
+        harness.get_by_label(&tr!("script-drop-warning"));
+        harness.get_by_label(&tr!("script-drop-run"));
+        harness.get_by_label(&tr!("dialog-cancel"));
+    }
+
+    /// Cancel and Escape run nothing; Run runs that file (once the answer is
+    /// given). Witness: run on Cancel.
+    #[test]
+    fn cancel_and_escape_run_nothing_and_run_runs_the_file() {
+        let mut harness = bench();
+        harness.get_by_label(&tr!("dialog-cancel")).click();
+        harness.run();
+        let state = &harness.state().state;
+        assert!(state.pending_script_drop().is_none());
+        assert!(state.last_script_file().is_none() && !state.script_running());
+
+        let mut harness = bench();
+        harness.key_press(egui::Key::Escape);
+        harness.run();
+        let state = &harness.state().state;
+        assert!(state.pending_script_drop().is_none());
+        assert!(state.last_script_file().is_none() && !state.script_running());
+
+        let mut harness = bench();
+        harness.get_by_label(&tr!("script-drop-run")).click();
+        harness.run();
+        let script = harness.state().script.clone();
+        let state = &harness.state().state;
+        assert!(state.pending_script_drop().is_none());
+        assert_eq!(state.last_script_file(), Some(script.as_path()));
+        assert!(state.script_running() || state.script_output().is_some());
     }
 }
