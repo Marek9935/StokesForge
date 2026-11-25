@@ -269,14 +269,15 @@ fn a_traceback_names_both_files_and_the_file_environment_is_exact() {
 
     let probe = bench.write(
         "env.py",
-        b"import sys, dataclasses\nprint(__name__, __file__)\nprint(sys.argv)\n\
+        b"import sys, dataclasses\nprint(__name__, __file__)\nprint(len(sys.argv), sys.argv[0])\n\
           print(sys.modules['__main__'].__dict__ is globals())\n\
           @dataclasses.dataclass\nclass P:\n    x: int = 1\nprint(P().x)\n\
           print(sys.path[0])\n",
     );
     let lines = out(&bench.file_ok(&probe));
     assert_eq!(lines[0], format!("__main__ {}", probe.display()));
-    assert_eq!(lines[1], format!("['{}']", probe.display()));
+    // Not the list itself: its `repr` doubles the backslashes of a Windows path (#581).
+    assert_eq!(lines[1], format!("1 {}", probe.display()));
     assert_eq!(lines[2], "True");
     assert_eq!(lines[3], "1");
     assert_eq!(lines[4], bench.dir.path().to_str().unwrap());
