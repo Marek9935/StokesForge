@@ -437,6 +437,34 @@ fn designation_text(designation: OriginDesignation) -> String {
     }
 }
 
+/// The width of the role badge: 64 points at least, and enough for the longest
+/// role name in the language in use, so that none is ever cut (#556).
+fn badge_width(ui: &egui::Ui) -> f32 {
+    let font = egui::FontId::proportional(theme::SECONDARY_TEXT_SIZE);
+    [
+        OriginDesignation::X,
+        OriginDesignation::Y,
+        OriginDesignation::Z,
+        OriginDesignation::XError,
+        OriginDesignation::YError,
+        OriginDesignation::Label,
+        OriginDesignation::Disregard,
+    ]
+    .into_iter()
+    .map(|designation| {
+        ui.painter()
+            .layout_no_wrap(
+                designation_text(designation),
+                font.clone(),
+                egui::Color32::PLACEHOLDER,
+            )
+            .size()
+            .x
+    })
+    .fold(64.0_f32, f32::max)
+        + 4.0
+}
+
 /// The columns of an open sheet. Only the rows on screen are painted: the
 /// others only take their height, so a thousand columns cost a few dozen
 /// widgets, and nothing is cut off.
@@ -486,7 +514,7 @@ fn column_row(
                 let boxed = ui.add(egui::Checkbox::without_text(&mut ticked));
                 let badge = ui
                     .add_sized(
-                        egui::vec2(64.0, ui.spacing().interact_size.y),
+                        egui::vec2(badge_width(ui), ui.spacing().interact_size.y),
                         egui::Label::new(theme::secondary_text(designation_text(
                             column.designation,
                         )))
@@ -1363,6 +1391,30 @@ mod tests {
         );
         assert!(window.contains_rect(to) && window.contains_rect(folder));
         assert!(!to.intersects(folder), "{to:?} {folder:?}");
+        // The role badge of a column is wide enough for the longest role name.
+        let designations = [
+            OriginDesignation::X,
+            OriginDesignation::Y,
+            OriginDesignation::Z,
+            OriginDesignation::XError,
+            OriginDesignation::YError,
+            OriginDesignation::Label,
+            OriginDesignation::Disregard,
+        ];
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let width = badge_width(ui);
+            for designation in designations {
+                let text = designation_text(designation);
+                let galley = ui.painter().layout_no_wrap(
+                    text.clone(),
+                    egui::FontId::proportional(theme::SECONDARY_TEXT_SIZE),
+                    egui::Color32::PLACEHOLDER,
+                );
+                assert!(galley.size().x <= width, "{text} is cut: {width}");
+            }
+        });
+        output.textures_delta.clear();
     }
 
     /// The pseudo-language check above, run in a child process whose language
