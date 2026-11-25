@@ -75,8 +75,6 @@ pub enum UntranslatableReason {
     ColumnFunctionArgument,
     /// The two columns of a `table(...)` are not read in the same sheet.
     TableSheetMismatch,
-    /// A reserved name (`t0`).
-    ReservedName,
 }
 
 /// The verdict on a formula.
@@ -381,9 +379,6 @@ impl Parser {
     }
 
     fn reference(sheet: Option<String>, book: Option<String>, name: String) -> R<FormulaReference> {
-        if name.eq_ignore_ascii_case("t0") {
-            return Err(U::ReservedName);
-        }
         Ok(FormulaReference {
             sheet,
             book,
@@ -505,14 +500,33 @@ impl Parser {
                 }
             }
         }
-        match self.try_reference(self.pos)? {
-            Some((r, np, _)) if matches!(self.kind(np), Some(Kind::Comma | Kind::RParen)) => {
+        if let Some((r, np, _)) = self.try_reference(self.pos)? {
+            if matches!(self.kind(np), Some(Kind::RParen)) {
                 self.text(&format!("{l}{name}("));
                 self.out.push(FormulaPiece::Reference(r));
                 self.pos = np;
-                self.rest_args(depth, call)
+                return self.close();
             }
-            _ => Err(U::ColumnFunctionArgument),
+        }
+        // Two arguments of max/min are the row-wise form in both languages;
+        // one non-column argument, three or more (a range in StokesForge, a
+        // row-wise maximum in Origin) and `mean` of several are refused.
+        if name == "mean" {
+            return Err(U::ColumnFunctionArgument);
+        }
+        self.text(&format!("{l}{name}("));
+        self.expr(depth + 1, call + 1)?;
+        if !matches!(self.kind(self.pos), Some(Kind::Comma)) {
+            return Err(U::ColumnFunctionArgument);
+        }
+        let cl = self.lead(self.pos);
+        self.text(&format!("{cl},"));
+        self.pos += 1;
+        self.expr(depth + 1, call + 1)?;
+        match self.kind(self.pos) {
+            Some(Kind::RParen) => self.close(),
+            Some(Kind::Comma) => Err(U::ColumnFunctionArgument),
+            _ => Err(U::Syntax),
         }
     }
 
@@ -668,7 +682,7 @@ mod tests {
     fn decimal_comma_at_depth_zero_only() {
         assert_eq!(ok("B/0,37783*23000"), "{B}/0.37783*23000");
         assert_eq!(ok("(B)*(0,5)"), "({B})*(0.5)");
-        assert_eq!(ok("max(B, 1,5)"), "max({B}, 1,5)");
+        assert_eq!(ok("max(B, C)"), "max({B}, {C})");
         assert_eq!(ok("round(B, 2)"), "round({B}, 2)");
         // not between digits / with a space: a stray comma
         assert_eq!(no("B*0, 5"), U::Syntax);
@@ -695,6 +709,11 @@ mod tests {
         assert_eq!(no("min(B+1)"), U::ColumnFunctionArgument);
         assert_eq!(no("mean(2*B)"), U::ColumnFunctionArgument);
         assert_eq!(no("max(B-C)/2"), U::ColumnFunctionArgument);
+        // three or more arguments: a range in StokesForge, a row-wise maximum in Origin
+        assert_eq!(no("max(B, 1,5)"), U::ColumnFunctionArgument);
+        assert_eq!(no("max(B, C, D)"), U::ColumnFunctionArgument);
+        assert_eq!(no("min(B, 1, 2)"), U::ColumnFunctionArgument);
+        assert_eq!(no("mean(B, C)"), U::ColumnFunctionArgument);
     }
 
     #[test]
@@ -726,7 +745,7 @@ mod tests {
 
     #[test]
     fn not_formulas() {
-        assert_eq!(no("t0"), U::ReservedName);
+        assert_eq!(ok("t0"), "{t0}");
         assert_eq!(no(""), U::Blank);
         assert_eq!(no("  \0\0 "), U::Blank);
         assert_eq!(no("B=C"), U::Assignment);
@@ -740,7 +759,7 @@ mod tests {
         assert_eq!(no("(B"), U::Syntax);
         assert_eq!(no("B)"), U::Syntax);
         assert_eq!(no("B+"), U::Syntax);
-        assert_eq!(no("max("), U::ColumnFunctionArgument);
+        assert_eq!(no("max("), U::Syntax);
     }
 
     #[test]
