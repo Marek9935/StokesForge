@@ -15,12 +15,17 @@
 //! reading, default choice of sheets, plan and column construction.
 
 pub mod origin;
+pub mod origin_formula;
 pub mod planner;
 pub use origin::{
     default_origin_selection, is_origin_bytes, is_origin_file, is_origin_path, make_origin_column,
     make_origin_column_in, origin_book_name, origin_column_key, plan_origin_import,
     plan_origin_layout, read_origin_file, OriginBookPlan, OriginColumnRef, OriginLayoutPlan,
     OriginSelection, OriginSheetPlan, OriginSheetRef, OriginSource, OriginWhere,
+};
+
+pub use origin_formula::{
+    translate_origin_formula, FormulaPiece, FormulaReference, OriginFormula, UntranslatableReason,
 };
 
 use std::path::{Path, PathBuf};
