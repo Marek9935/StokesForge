@@ -27,6 +27,7 @@
 //! automatic name, silently. The columns carry no import source, so "Refresh
 //! from Source" does not apply to them.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -37,8 +38,8 @@ use stokesforge_import::origin::OriginProject;
 use stokesforge_import::FilesLayout;
 use stokesforge_importer::{
     default_origin_selection, make_origin_column_in, origin_book_name, origin_column_key,
-    plan_origin_layout, ImportFailure, OriginColumnRef, OriginLayoutPlan, OriginSelection,
-    OriginSource, OriginWhere,
+    plan_origin_layout, ImportFailure, OriginColumnKey, OriginColumnRef, OriginLayoutPlan,
+    OriginSelection, OriginSource, OriginWhere,
 };
 
 use super::import_plans::{BookApply, BookTarget, Naming, SheetApply};
@@ -555,6 +556,13 @@ impl AppState {
         }
     }
 
+    /// The columns the last Origin import created, keyed by the Origin column
+    /// they come from (file rank, book, sheet, column; see
+    /// [`OriginColumnKey`]). `None`: planned but not created. Emptied by the call.
+    pub fn take_origin_created_columns(&mut self) -> BTreeMap<OriginColumnKey, Option<NodeId>> {
+        std::mem::take(&mut self.origin_created_columns)
+    }
+
     /// [`Action::ImportOrigin`](super::Action::ImportOrigin).
     pub(super) fn import_origin(&mut self) {
         if self.origin_import_blocker().is_some() {
@@ -576,6 +584,7 @@ impl AppState {
         let mut folder_gone = false;
         let mut used_files: Vec<usize> = Vec::new();
         let (mut book_count, mut sheet_count) = (0, 0);
+        let mut created_columns = BTreeMap::new();
         let parent = self.import_parent(&chooser.folder, &mut folder_gone);
         for book_plan in &plan.books {
             let failed_name = if book_plan.name.is_empty() {
@@ -620,6 +629,11 @@ impl AppState {
                 },
             );
             for outcome in outcomes {
+                for (planned, ids) in book_plan.sheets.iter().zip(&outcome.columns) {
+                    for (at, id) in planned.columns.iter().zip(ids) {
+                        created_columns.insert((at.file, at.book, at.sheet, at.column), *id);
+                    }
+                }
                 if outcome.book.is_none() {
                     continue;
                 }
@@ -637,6 +651,7 @@ impl AppState {
                 }
             }
         }
+        self.origin_created_columns = created_columns;
         used_files.sort_unstable();
         let done_paths: Vec<PathBuf> = used_files
             .iter()

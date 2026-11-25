@@ -135,7 +135,7 @@ pub use import_apply::ImportRun;
 pub use origin_import::{
     OriginBookView, OriginColumnView, OriginFileView, OriginSheetView, OriginTick,
 };
-pub use stokesforge_importer::OriginWhere;
+pub use stokesforge_importer::{OriginColumnKey, OriginWhere};
 
 /// How long a command waits for the formula recalculation it started to
 /// finish before handing control back to the interface (#239): a recalculation
@@ -3964,6 +3964,9 @@ pub struct AppState {
     /// `take_created_books`, in order (#537): imports find their workbooks
     /// here, never by counting the children of a folder.
     created_books: Vec<NodeId>,
+    /// Columns the last Origin import created, by Origin column (#556); read
+    /// with `take_origin_created_columns`.
+    origin_created_columns: std::collections::BTreeMap<OriginColumnKey, Option<NodeId>>,
     /// Start of a formula recalculation the interface did not wait for (#239);
     /// `None` when none is running. As long as it is set, the snapshot is
     /// not refreshed (the actor would answer only at the end) and the status bar
@@ -4158,6 +4161,7 @@ impl AppState {
             waker: None,
             books_to_open: Vec::new(),
             created_books: Vec::new(),
+            origin_created_columns: std::collections::BTreeMap::new(),
             recalc_since: None,
             garbage: autosave::Garbage::default(),
             defer_garbage: false,

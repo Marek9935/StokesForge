@@ -59,6 +59,12 @@ pub(super) struct BookOutcome {
     pub book: Option<NodeId>,
     /// One flag per planned sheet: was it created?
     pub sheets: Vec<bool>,
+    /// For each planned sheet, one entry per planned column, in plan order: the
+    /// column created, `None` when the sheet was not created, the column was
+    /// skipped by `build` or the command was refused. Each id is read from the
+    /// sheet's children around its own command, so a refused column never shifts
+    /// the others (no positional zip, no lookup by name).
+    pub columns: Vec<Vec<Option<NodeId>>>,
 }
 
 impl AppState {
@@ -99,6 +105,11 @@ impl AppState {
                 }
             };
             let mut created = vec![false; book_plan.sheets.len()];
+            let mut column_ids: Vec<Vec<Option<NodeId>>> = book_plan
+                .sheets
+                .iter()
+                .map(|sheet| vec![None; sheet.columns.len()])
+                .collect();
             if let Some(book) = book {
                 for (index, sheet_plan) in book_plan.sheets.iter().enumerate() {
                     let Some(sheet) = self.add_planned_sheet(book, naming, sheet_plan, failures)
@@ -106,14 +117,19 @@ impl AppState {
                         continue;
                     };
                     created[index] = true;
-                    for planned in &sheet_plan.columns {
+                    for (rank, planned) in sheet_plan.columns.iter().enumerate() {
                         if let Some(column) = build(planned) {
+                            let before = self.children_of(sheet);
                             self.execute(Command::AddColumn {
                                 sheet,
                                 index: None,
                                 name: None,
                                 column,
                             });
+                            column_ids[index][rank] = self
+                                .children_of(sheet)
+                                .into_iter()
+                                .find(|child| !before.contains(child));
                         }
                     }
                     if sheet_plan.raw {
@@ -129,9 +145,19 @@ impl AppState {
             outcomes.push(BookOutcome {
                 book,
                 sheets: created,
+                columns: column_ids,
             });
         }
         outcomes
+    }
+
+    /// The children of `id` in the current snapshot (empty when it is gone).
+    fn children_of(&self, id: NodeId) -> Vec<NodeId> {
+        self.snapshot
+            .tree
+            .node(id)
+            .map(|node| node.children().to_vec())
+            .unwrap_or_default()
     }
 
     /// Adds the empty sheet of `plan` to `book` and names it.
@@ -187,5 +213,43 @@ impl AppState {
         assert!(failures.is_empty(), "{failures:?}");
         assert!(self.handle.end_macro().is_ok(), "end the import macro");
         self.refresh();
+    }
+
+    /// Test seam (#556): one new workbook with one sheet whose columns come
+    /// from `columns` (`Some(value)` builds a column of that single value,
+    /// `None` is skipped by the builder), in one "Import" history entry.
+    /// Returns the ids `apply_book_plans` reports, in plan order.
+    pub fn import_sheet_columns_for_test(
+        &mut self,
+        parent: NodeId,
+        columns: Vec<Option<f64>>,
+    ) -> Vec<Option<NodeId>> {
+        let begun = self
+            .handle
+            .begin_macro(stokesforge_commands::MacroKind::Import);
+        assert!(begun.is_ok(), "begin the import macro");
+        let books = vec![BookApply {
+            target: BookTarget::New {
+                name: None,
+                failed_names: vec!["Book".to_string()],
+            },
+            sheets: vec![SheetApply {
+                name: "Data".to_string(),
+                columns,
+                raw: false,
+            }],
+        }];
+        let mut failures = Vec::new();
+        let mut outcomes = self.apply_book_plans(
+            parent,
+            Naming::Silent,
+            books,
+            &mut failures,
+            &mut |value: &Option<f64>| value.map(|v| Column::from_f64(&[v])),
+        );
+        assert!(failures.is_empty(), "{failures:?}");
+        assert!(self.handle.end_macro().is_ok(), "end the import macro");
+        self.refresh();
+        outcomes.remove(0).columns.remove(0)
     }
 }

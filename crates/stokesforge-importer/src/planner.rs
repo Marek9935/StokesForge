@@ -52,7 +52,8 @@ pub struct PlanTable {
 /// Shared X (#537): only the first kept X stays; any later X (of another table
 /// or a second X of the same table) for which `same_x(first, later)` holds is
 /// dropped, any other stays where it is, and its table is listed in the plan's
-/// `own_x`.
+/// `own_x`. The plan's `x_map` records, for every X met, the X that holds its
+/// values (itself, or the first X when it was dropped).
 pub fn plan_tables(
     tables: &[PlanTable],
     layout: FilesLayout,
@@ -79,6 +80,7 @@ pub fn plan_tables(
                     .collect(),
                 items: vec![item],
                 own_x: Vec::new(),
+                x_map: Vec::new(),
             })
             .collect(),
         FilesLayout::SideBySide | FilesLayout::SharedX => {
@@ -88,14 +90,22 @@ pub fn plan_tables(
             let mut columns = Vec::new();
             let mut first_x: Option<PlannedColumn> = None;
             let mut own_x = Vec::new();
+            let mut x_map = Vec::new();
             for &item in &readable {
                 for column in kept(item) {
                     let planned = PlannedColumn { item, column };
                     if layout == FilesLayout::SharedX && tables[item].columns[column].is_x {
                         match first_x {
-                            None => first_x = Some(planned),
-                            Some(kept_x) if same_x(kept_x, planned) => continue,
+                            None => {
+                                first_x = Some(planned);
+                                x_map.push((planned, planned));
+                            }
+                            Some(kept_x) if same_x(kept_x, planned) => {
+                                x_map.push((planned, kept_x));
+                                continue;
+                            }
                             Some(_) => {
+                                x_map.push((planned, planned));
                                 if !own_x.contains(&item) {
                                     own_x.push(item);
                                 }
@@ -110,6 +120,7 @@ pub fn plan_tables(
                 columns,
                 items: readable,
                 own_x,
+                x_map,
             }]
         }
     }
@@ -203,6 +214,24 @@ mod tests {
         let plans = plan_tables(&[xy("a"), xy("b"), xy("c")], FilesLayout::SharedX, &same);
         assert_eq!(cols(&plans[0]), [(0, 0), (0, 1), (1, 1), (2, 0), (2, 1)]);
         assert_eq!(plans[0].own_x, [2]);
+        let at = |item, column| PlannedColumn { item, column };
+        assert_eq!(
+            plans[0].x_map,
+            [
+                (at(0, 0), at(0, 0)),
+                (at(1, 0), at(0, 0)),
+                (at(2, 0), at(2, 0))
+            ],
+            "dropped X to the kept X, different X to itself"
+        );
+    }
+
+    #[test]
+    fn only_the_shared_x_layout_maps_x_columns() {
+        for layout in [FilesLayout::SheetPerFile, FilesLayout::SideBySide] {
+            let plans = plan_tables(&[xy("a"), xy("b")], layout, &|_, _| true);
+            assert!(plans.iter().all(|p| p.x_map.is_empty()), "{layout:?}");
+        }
     }
 
     #[test]

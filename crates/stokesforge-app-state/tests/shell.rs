@@ -19506,6 +19506,100 @@ mod origin_import {
         state.dispatch(Action::Undo);
     }
 
+    /// Value of the first cell of a created column.
+    fn first_cell(state: &AppState, id: Option<NodeId>) -> f64 {
+        cell_f64(state, id.expect("a created column"), 0)
+    }
+
+    #[test]
+    fn created_columns_are_reported_per_origin_column_even_with_equal_sheet_names() {
+        use OriginDesignation::{X, Y};
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let opj = dir.path().join("same.opj");
+        // Two sheets whose names collide (case aside): the second one is
+        // renamed by the model, so a lookup by name cannot find it.
+        write_opj(
+            &opj,
+            vec![book(
+                "A",
+                "Same",
+                vec![
+                    sheet(
+                        "Data",
+                        vec![column("X", X, &[11.0]), column("Y", Y, &[12.0])],
+                    ),
+                    sheet(
+                        "data",
+                        vec![column("X", X, &[21.0]), column("Y", Y, &[22.0])],
+                    ),
+                ],
+            )],
+        );
+        drop_paths(&mut state, vec![opj]);
+        state.dispatch(Action::CheckAllOriginSheets);
+        state.dispatch(Action::ImportOrigin);
+
+        let ids = state.take_origin_created_columns();
+        assert_eq!(ids.len(), 4);
+        assert_eq!(first_cell(&state, ids[&(0, 0, 0, 0)]), 11.0);
+        assert_eq!(first_cell(&state, ids[&(0, 0, 0, 1)]), 12.0);
+        assert_eq!(first_cell(&state, ids[&(0, 0, 1, 0)]), 21.0);
+        assert_eq!(first_cell(&state, ids[&(0, 0, 1, 1)]), 22.0);
+        assert!(state.take_origin_created_columns().is_empty(), "taken once");
+    }
+
+    #[test]
+    fn created_columns_of_two_files_do_not_share_keys() {
+        use OriginDesignation::{X, Y};
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let one = dir.path().join("one.opj");
+        let two = dir.path().join("two.opj");
+        for (path, base) in [(&one, 1.0), (&two, 2.0)] {
+            write_opj(
+                path,
+                vec![book(
+                    "A",
+                    "Same",
+                    vec![sheet(
+                        "Data",
+                        vec![column("X", X, &[base]), column("Y", Y, &[base + 0.5])],
+                    )],
+                )],
+            );
+        }
+        drop_paths(&mut state, vec![one, two]);
+        state.dispatch(Action::CheckAllOriginSheets);
+        state.dispatch(Action::SetOriginWhere(OriginWhere::NewWorkbook));
+        state.dispatch(Action::SetOriginLayout(FilesLayout::SideBySide));
+        state.dispatch(Action::ImportOrigin);
+
+        let ids = state.take_origin_created_columns();
+        assert_eq!(ids.len(), 4, "{ids:?}");
+        for file in 0..2 {
+            let base = 1.0 + file as f64;
+            assert_eq!(first_cell(&state, ids[&(file, 0, 0, 0)]), base);
+            assert_eq!(first_cell(&state, ids[&(file, 0, 0, 1)]), base + 0.5);
+        }
+    }
+
+    #[test]
+    fn a_column_the_import_skips_in_the_middle_does_not_shift_the_next_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let root = state.tree().root();
+
+        let ids = state.import_sheet_columns_for_test(root, vec![Some(1.0), None, Some(3.0)]);
+
+        assert_eq!(ids.len(), 3);
+        assert_eq!(ids[1], None);
+        assert_eq!(first_cell(&state, ids[0]), 1.0);
+        assert_eq!(first_cell(&state, ids[2]), 3.0);
+    }
+
     #[test]
     fn the_default_origin_import_is_unchanged_and_marks_no_raw_data_sheet() {
         let _recipes = isolate_recipe_store();

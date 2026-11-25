@@ -8,6 +8,7 @@
 //! ([`make_origin_column`]). Columns built here carry **no** import source:
 //! an Origin column cannot be refreshed from its file.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use stokesforge_core::{Column, ColumnMeta, ColumnRole, MetaLine, MixedCell};
@@ -16,6 +17,7 @@ use stokesforge_import::origin::{
 };
 
 use crate::planner::{plan_tables, same_x_values, PlanColumn, PlanTable};
+use crate::PlannedColumn;
 use crate::{ImportFailure, ImportFailureCause};
 use stokesforge_import::FilesLayout;
 
@@ -142,6 +144,17 @@ pub struct OriginColumnRef {
     pub tag_sheet: bool,
 }
 
+/// An Origin column by rank: (file rank among the sources, book, sheet,
+/// column). The file is part of the key, two files hold the same ranks.
+pub type OriginColumnKey = (usize, usize, usize, usize);
+
+impl OriginColumnRef {
+    /// The rank key of this column.
+    pub fn key(&self) -> OriginColumnKey {
+        (self.file, self.book, self.sheet, self.column)
+    }
+}
+
 /// An Origin sheet, as the plan names it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OriginSheetRef {
@@ -179,6 +192,11 @@ pub struct OriginLayoutPlan {
     /// Shared X only: the Origin sheets that keep an X of their own because its
     /// values differ from the first X (data: the window phrases it).
     pub own_x: Vec<OriginSheetRef>,
+    /// Shared X only: for every ticked X column, the ticked X column whose
+    /// values the new sheet keeps. A kept X (the first, or one of different
+    /// values) maps to itself; a dropped X (same values) maps to the first X.
+    /// Empty in the other layouts: no X is dropped there.
+    pub x_map: BTreeMap<OriginColumnKey, OriginColumnKey>,
 }
 
 /// One Origin project and its ticks, for [`plan_origin_layout`].
@@ -339,6 +357,13 @@ pub fn plan_origin_layout(
             })
             .collect();
         for plan in &plans {
+            for &(column, kept) in &plan.x_map {
+                let key = |c: PlannedColumn| {
+                    let from = at(c.item);
+                    (from.file, from.book, from.sheet, c.column)
+                };
+                out.x_map.insert(key(column), key(kept));
+            }
             for &item in &plan.own_x {
                 let sheet = at(item);
                 if !out.own_x.contains(&sheet) {
@@ -883,6 +908,96 @@ mod tests {
                 sheet: 2
             }]
         );
+    }
+
+    #[test]
+    fn shared_x_maps_a_dropped_x_to_the_kept_one_and_a_different_x_to_itself() {
+        let project = read(vec![book(
+            "A",
+            "",
+            vec![
+                xy_sheet("One", &[1.0, 2.0], "a"),
+                xy_sheet("Two", &[1.0, 2.0], "b"),
+                xy_sheet("Three", &[1.0, 3.0], "c"),
+            ],
+        )]);
+        let selection = all_ticked(&project);
+        let source = OriginSource {
+            project: &project,
+            selection: &selection,
+            file_stem: "f",
+        };
+        let plan = plan_origin_layout(
+            &[source],
+            OriginWhere::PerOriginWorkbook,
+            FilesLayout::SharedX,
+        );
+        let expected: BTreeMap<OriginColumnKey, OriginColumnKey> = BTreeMap::from([
+            ((0, 0, 0, 0), (0, 0, 0, 0)),
+            ((0, 0, 1, 0), (0, 0, 0, 0)),
+            ((0, 0, 2, 0), (0, 0, 2, 0)),
+        ]);
+        assert_eq!(plan.x_map, expected);
+        let kept: Vec<OriginColumnKey> = plan.books[0].sheets[0]
+            .columns
+            .iter()
+            .map(OriginColumnRef::key)
+            .collect();
+        assert!(
+            !kept.contains(&(0, 0, 1, 0)),
+            "the dropped X is not created"
+        );
+    }
+
+    #[test]
+    fn side_by_side_and_one_sheet_per_file_drop_no_x() {
+        let project = read(vec![book(
+            "A",
+            "",
+            vec![
+                xy_sheet("One", &[1.0, 2.0], "a"),
+                xy_sheet("Two", &[1.0, 2.0], "b"),
+            ],
+        )]);
+        let selection = all_ticked(&project);
+        for layout in [FilesLayout::SideBySide, FilesLayout::SheetPerFile] {
+            let plan = plan_origin_layout(
+                &[OriginSource {
+                    project: &project,
+                    selection: &selection,
+                    file_stem: "f",
+                }],
+                OriginWhere::PerOriginWorkbook,
+                layout,
+            );
+            assert!(plan.x_map.is_empty(), "{layout:?}");
+        }
+    }
+
+    #[test]
+    fn shared_x_keys_of_two_files_carry_the_file() {
+        let one = read(vec![book("A", "", vec![xy_sheet("S", &[1.0, 2.0], "a")])]);
+        let two = read(vec![book("A", "", vec![xy_sheet("S", &[1.0, 2.0], "b")])]);
+        let (sel_one, sel_two) = (all_ticked(&one), all_ticked(&two));
+        let plan = plan_origin_layout(
+            &[
+                OriginSource {
+                    project: &one,
+                    selection: &sel_one,
+                    file_stem: "one",
+                },
+                OriginSource {
+                    project: &two,
+                    selection: &sel_two,
+                    file_stem: "two",
+                },
+            ],
+            OriginWhere::NewWorkbook,
+            FilesLayout::SharedX,
+        );
+        let expected: BTreeMap<OriginColumnKey, OriginColumnKey> =
+            BTreeMap::from([((0, 0, 0, 0), (0, 0, 0, 0)), ((1, 0, 0, 0), (0, 0, 0, 0))]);
+        assert_eq!(plan.x_map, expected);
     }
 
     #[test]
