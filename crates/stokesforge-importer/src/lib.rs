@@ -16,12 +16,22 @@
 
 pub mod origin;
 pub mod origin_formula;
+pub mod origin_formula_plan;
 pub mod planner;
 pub use origin::{
     default_origin_selection, is_origin_bytes, is_origin_file, is_origin_path, make_origin_column,
     make_origin_column_in, origin_book_name, origin_column_key, plan_origin_import,
-    plan_origin_layout, read_origin_file, OriginBookPlan, OriginColumnKey, OriginColumnRef,
-    OriginLayoutPlan, OriginSelection, OriginSheetPlan, OriginSheetRef, OriginSource, OriginWhere,
+    plan_origin_import_layout, plan_origin_layout, read_origin_file, OriginBookPlan,
+    OriginColumnKey, OriginColumnRef, OriginLayoutPlan, OriginSelection, OriginSheetPlan,
+    OriginSheetRef, OriginSource, OriginWhere,
+};
+
+pub use origin_formula_plan::{
+    build_column_formula, decide_origin_formulas, judge_origin_formulas, make_origin_import_column,
+    plan_origin_formulas, plan_origin_import_formulas, resolve_origin_formula, stale_formulas,
+    with_formula_note, ExampleCell, FormulaDecision, FormulaVerdict, Judgement, OriginColumnPos,
+    OriginImportFormulas, PlannedFormula, PlannedPiece, ResolvedFormula, ResolvedPiece,
+    StaleExample, FORMULA_NOTE_PREFIX,
 };
 
 pub use origin_formula::{

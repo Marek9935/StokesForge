@@ -244,7 +244,10 @@ fn an_origin_project_keeps_books_names_units_roles_and_horiba_metadata() {
         ("Wavelength", "nm")
     );
     assert_eq!((y.long_name.as_str(), y.unit.as_str()), ("Signal", "CPS"));
-    assert_eq!(y.comment, "first run");
+    // The fixture's Y column holds a formula whose recomputed values differ
+    // from the stored ones (#556): it keeps its values and the note.
+    assert_eq!(y.comment, "first run; Origin formula: col(A)*0.5+1");
+    assert!(y.formula.is_none());
     assert!(y.import_source.is_none());
     assert!(
         y.file_metadata
@@ -384,4 +387,80 @@ fn an_opju_project_gives_the_same_workbooks_as_its_opj_twin() {
             .collect::<Vec<_>>()
     };
     assert_eq!(values(&projects[0]), values(&projects[1]));
+}
+
+/// #556: the CLI sets the column formulas that give Origin's values, keeps the
+/// values of the others with a note in their Comments, and never asks. The saved
+/// `.stf` reloads with the same cells.
+#[test]
+fn an_origin_import_sets_the_formulas_that_match_and_keeps_the_values_of_the_others() {
+    use stokesforge_import::origin::{synthetic, OriginDesignation::Y};
+    let dir = isolated();
+    let column = |name: &str, values: &[f64], formula: Option<&str>| {
+        let mut column = synthetic::Column::numbers(name, Y, values);
+        column.formula = formula.map(str::to_string);
+        column
+    };
+    let bytes = synthetic::write_project(&synthetic::Project {
+        books: vec![synthetic::Book {
+            short_name: "A".into(),
+            long_name: "Run".into(),
+            sheets: vec![synthetic::Sheet {
+                name: "Data".into(),
+                columns: vec![
+                    column("B", &[10.0, 20.0], None),
+                    column("C", &[20.0, 40.0], Some("col(B)*2")),
+                    // Stale: Origin's values differ from the formula's.
+                    column("D", &[1.5, 1.5], Some("col(B)*3")),
+                    // Not translatable.
+                    column("E", &[10.0, 30.0], Some("sum(B)")),
+                ],
+            }],
+            horiba_xml: None,
+        }],
+        ..Default::default()
+    });
+    let path = dir.path().join("run.opj");
+    std::fs::write(&path, bytes).unwrap();
+    let out_path = dir.path().join("out.stf");
+    let (result, output) = run(&[
+        "import",
+        "--out",
+        out_path.to_str().unwrap(),
+        path.to_str().unwrap(),
+    ]);
+    result.unwrap();
+    assert!(
+        output.contains("formulas: 1 set, 2 kept as values"),
+        "{output}"
+    );
+    let project = load(&out_path);
+    let sheet = project.resolve_path("[Run]Data").unwrap();
+    let columns = project.tree().node(sheet).unwrap().children().to_vec();
+    let meta = |index: usize| {
+        project
+            .tree()
+            .node(columns[index])
+            .unwrap()
+            .as_column()
+            .unwrap()
+            .meta()
+            .clone()
+    };
+    assert!(meta(1).formula.is_some(), "the matching formula is set");
+    assert!(meta(2).formula.is_none() && meta(3).formula.is_none());
+    assert_eq!(meta(2).comment, "Origin formula: col(B)*3");
+    assert_eq!(meta(3).comment, "Origin formula: sum(B)");
+    let number = |index: usize, row: usize| {
+        project
+            .tree()
+            .node(columns[index])
+            .unwrap()
+            .as_column()
+            .unwrap()
+            .values()
+            .number_at(row)
+    };
+    assert_eq!((number(1, 0), number(1, 1)), (20.0, 40.0));
+    assert_eq!((number(2, 0), number(2, 1)), (1.5, 1.5), "Origin's values");
 }

@@ -126,12 +126,14 @@ pub use import_template::{
 };
 pub use import_tocheck::{ShownFileStatus, ToCheckPoint, ToCheckSource};
 pub mod open_dialog;
+mod origin_formulas;
 mod origin_import;
 mod transpose;
 pub use analysis::{CalculationDelete, StaleExport};
 pub use autosave::{AutosaveJob, Garbage, RecoveryRow, ServerTick, AUTOSAVE_RETRY};
 pub use column_use::FullColumnsCopy;
 pub use import_apply::ImportRun;
+pub use origin_formulas::OriginFormulaRow;
 pub use origin_import::{
     OriginBookView, OriginColumnView, OriginFileView, OriginGraphView, OriginSheetView, OriginShow,
     OriginTick,
@@ -766,6 +768,18 @@ pub enum Action {
     ImportOrigin,
     /// Origin chooser: closes it without importing anything.
     CancelOriginImport,
+    /// Window `Formulas with Different Values` (#556): ticks or unticks the
+    /// formula of row `index`.
+    SetOriginFormulaTick {
+        index: usize,
+        ticked: bool,
+    },
+    /// The same window: ticks or unticks every row.
+    CheckAllOriginFormulas(bool),
+    /// The same window, Import: runs the import with the ticked formulas.
+    ImportOriginFormulas,
+    /// The same window, Cancel: nothing is imported, the chooser stays open.
+    CancelOriginFormulas,
     /// Refreshes the imported columns of `sheet` from their source files
     /// (reread with the stored recipe), **in place**: the columns keep
     /// their identity, so the graphs that plot them stay valid.
@@ -4008,6 +4022,9 @@ pub struct AppState {
     /// The Origin chooser (#490), when open. It is painted only while the
     /// import wizard is closed ([`AppState::origin_import_open`]).
     origin_import: Option<origin_import::OriginChooser>,
+    /// The window `Formulas with Different Values` (#556), when open over the
+    /// chooser.
+    origin_formulas: Option<origin_formulas::OriginFormulaForm>,
     /// Files imported successfully, to be added to the recent files by the
     /// window layer ([`AppState::take_imported_paths`]).
     recent_to_record: Vec<PathBuf>,
@@ -4184,6 +4201,7 @@ impl AppState {
             last_import: None,
             last_origin_import: None,
             origin_import: None,
+            origin_formulas: None,
             recent_to_record: Vec::new(),
             script_source: String::new(),
             script_output: None,
@@ -7074,6 +7092,12 @@ impl AppState {
             Action::CheckNoOriginSheets => self.check_all_origin_sheets(false),
             Action::ImportOrigin => self.import_origin(),
             Action::CancelOriginImport => self.origin_import = None,
+            Action::SetOriginFormulaTick { index, ticked } => {
+                self.set_origin_formula_tick(index, ticked);
+            }
+            Action::CheckAllOriginFormulas(ticked) => self.check_all_origin_formulas(ticked),
+            Action::ImportOriginFormulas => self.confirm_origin_formulas(),
+            Action::CancelOriginFormulas => self.cancel_origin_formulas(),
             Action::RefreshFromSource { sheet } => self.refresh_from_source(sheet),
             Action::ViewColumnMetadata { column } => self.metadata_view = Some(column),
             Action::CloseColumnMetadata => self.metadata_view = None,

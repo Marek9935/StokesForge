@@ -241,6 +241,18 @@ In a shared-X layout, only the first X is kept. A later X with the same values i
 
 **Import** creates the workbooks and sheets of the chosen layout in the chosen folder, named after the Origin long names (the short name when there is none). If a name is already used or not allowed, the workbook or sheet keeps its automatic name. The new workbooks open in the workspace, and the whole import is a single step in the history: one **Undo** removes the workbooks and the new folder.
 
+### Column formulas
+
+A column of an Origin workbook can hold a formula (Origin's **Set Column Values**). StokesForge translates it, sets it on the imported column when the translation is certain, and checks that it gives the **same values as Origin** (to a relative 1e-9; an empty cell equals an empty cell, a text cell does not equal a number). The check runs before anything is created.
+
+- **Same values**: the column takes the formula and stays live, like a formula you typed. A formula that reads another formula column is checked on Origin's values for that column.
+- **Different values**: the window **Formulas with Different Values** opens when you click **Import**. It lists each such column with the formula as Origin wrote it and one example row (for example "row 1: Origin 0.1215, formula 45.85"). Nothing is checked at first. Check the columns that must take the formula; the others keep Origin's values. **Cancel** imports nothing and gives you the **Import from Origin** window back. **Reopen Last Import…** remembers your answers.
+- **Anything else** keeps Origin's values: a formula StokesForge cannot translate (for example a script, a string, `sum(B)`), a formula that reads a column you did not check or another workbook you did not import, or a formula that would read itself. The column gets a line at the end of its **Comments**, `Origin formula: ` followed by the text Origin held, so nothing is lost. A column whose formula is set gets no such line.
+
+In the **Import from Origin** window, a checked column whose formula reads an unchecked column shows an orange line under it ("C reads B, not checked"). StokesForge never checks that column for you.
+
+The status bar ends with the count, for example "2 formulas set, 1 kept as values". The whole import, formulas included, is one step of the history.
+
 ### What is kept
 
 - The column names, long names, units and comments, and the X and Y roles.
@@ -258,7 +270,7 @@ Some `.opju` files use a part of the format StokesForge does not read yet. If on
 
 ### From the command line and scripts
 
-`stokesforge-cli import` and `pyst.import_file` read an `.opj` or `.opju` without a window: they import the `Data` sheets of each workbook (graphs are not read there) (all the sheets that have columns when a workbook has no `Data` sheet), one workbook per Origin workbook, at the root of the project, with one sheet per Origin sheet.
+`stokesforge-cli import` and `pyst.import_file` read an `.opj` or `.opju` without a window: they set the formulas that give Origin's values and keep the values (and the `Origin formula:` line in the Comments) of the others, without asking. They import the `Data` sheets of each workbook (graphs are not read there) (all the sheets that have columns when a workbook has no `Data` sheet), one workbook per Origin workbook, at the root of the project, with one sheet per Origin sheet.
 
 ## Common problems
 

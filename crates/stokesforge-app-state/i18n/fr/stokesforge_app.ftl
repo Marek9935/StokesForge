@@ -2085,6 +2085,28 @@ origin-import-check-all =
 origin-import-check-none =
     Ne rien cocher
     .hint = Décoche toutes les colonnes de toutes les feuilles et tous les graphiques
+origin-import-reads-unchecked = { $column } lit { $inputs }, non coché
+status-import-origin-formulas = { $done } ; { $set ->
+    [one] { $set } formule posée
+   *[other] { $set } formules posées
+}, { $kept ->
+    [one] { $kept } gardée en valeurs
+   *[other] { $kept } gardées en valeurs
+}
+origin-formulas-title = Formules aux valeurs différentes
+origin-formulas-intro = Ces formules donnent d'autres valeurs que celles d'Origin. Cochez les colonnes qui doivent prendre la formule. Les autres gardent les valeurs d'Origin
+origin-formulas-row = { $book } · { $sheet } · { $column } = { $formula }
+origin-formulas-example = ligne { $row } : Origin { $origin }, formule { $formula }
+origin-formulas-empty = vide
+origin-formulas-accept =
+    Importer
+    .hint = Importe en posant les formules cochées (Entrée)
+origin-formulas-check-all =
+    Tout cocher
+    .hint = Coche toutes les formules
+origin-formulas-check-none =
+    Ne rien cocher
+    .hint = Décoche toutes les formules
 origin-import-book-hint = Coche ou décoche toutes les colonnes de ce classeur
 origin-import-sheet-size = { $columns ->
     [one] { $columns } colonne

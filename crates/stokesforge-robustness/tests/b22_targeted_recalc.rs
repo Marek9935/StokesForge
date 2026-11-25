@@ -1595,3 +1595,136 @@ fn b22_the_targeted_recalculation_returns_exactly_the_full_recalculation() {
         assert!(n >= 20, "{gesture}: only {n} passes — {total:?}");
     }
 }
+
+/// #556: a project built by the Origin import (translated formulas, one of them
+/// reading another formula column, one reading another sheet row by row) gives
+/// the same trees under the targeted and the full recalculation, at load and
+/// after an edit of a source cell.
+#[test]
+fn b22_an_origin_imported_project_gives_targeted_equal_full() {
+    use stokesforge_import::origin::synthetic::{self, Column as OColumn};
+    use stokesforge_import::origin::OriginDesignation::Y;
+    let column = |name: &str, values: &[f64], formula: Option<&str>| {
+        let mut column = OColumn::numbers(name, Y, values);
+        column.formula = formula.map(str::to_string);
+        column
+    };
+    let bytes = synthetic::write_project(&synthetic::Project {
+        books: vec![synthetic::Book {
+            short_name: "A".into(),
+            long_name: "Run".into(),
+            sheets: vec![
+                synthetic::Sheet {
+                    name: "S1".into(),
+                    columns: vec![
+                        column("B", &[1.0, 2.0, 3.0], None),
+                        column("C", &[2.0, 4.0, 6.0], Some("col(B)*2")),
+                        column("D", &[3.0, 5.0, 7.0], Some("col(C)+1")),
+                    ],
+                },
+                synthetic::Sheet {
+                    name: "S2".into(),
+                    columns: vec![column("F", &[10.0, 20.0, 30.0], Some("S1!B*10"))],
+                },
+            ],
+            horiba_xml: None,
+        }],
+        ..Default::default()
+    });
+    let origin = stokesforge_import::origin::read_project(&bytes).expect("synthetic project");
+    let selection = stokesforge_importer::default_origin_selection(&origin);
+    let import = stokesforge_importer::plan_origin_import_formulas(&origin, &selection);
+    assert_eq!(import.decision.set.len(), 3, "every formula is set");
+    let build = || {
+        let mut project = Project::new("Imported").unwrap();
+        let root = project.root();
+        let mut located = std::collections::BTreeMap::new();
+        for book_plan in &import.plan.books {
+            let book = project
+                .add_empty_workbook(root, Some(&book_plan.name))
+                .unwrap();
+            for sheet_plan in &book_plan.sheets {
+                let sheet = project.add_worksheet(book, Some(&sheet_plan.name)).unwrap();
+                for planned in &sheet_plan.columns {
+                    let column = stokesforge_importer::make_origin_import_column(
+                        &origin,
+                        planned,
+                        &import.decision,
+                    )
+                    .unwrap();
+                    let id = project.add_column(sheet, None, None, column).unwrap();
+                    located.insert(planned.key(), (id, sheet));
+                }
+            }
+        }
+        for key in &import.decision.set {
+            let Some(stokesforge_importer::PlannedFormula {
+                verdict: stokesforge_importer::FormulaVerdict::Translated(pieces),
+                ..
+            }) = import.formulas.get(key)
+            else {
+                panic!("a translated formula");
+            };
+            let (column, sheet) = located[key];
+            let locate = |k| located.get(&k).copied();
+            let formula =
+                stokesforge_importer::build_column_formula(pieces, sheet, &locate).unwrap();
+            let mut meta = project
+                .tree()
+                .node(column)
+                .and_then(|node| node.as_column())
+                .map(|column| column.meta().clone())
+                .unwrap();
+            meta.formula = Some(formula);
+            project.set_column_meta(column, meta).unwrap();
+        }
+        (project, located)
+    };
+    let (first, located) = build();
+    let (second, _) = build();
+    let source = located[&(0, 0, 0, 0)].0;
+    let sessions: Vec<Session> = [
+        (first, FormulaRecalc::Targeted),
+        (second, FormulaRecalc::Full),
+    ]
+    .into_iter()
+    .map(|(project, mode)| Session::spawn_with_recalc(project, None, mode).expect("actor"))
+    .collect();
+    let trees = |sessions: &[Session]| -> Vec<Tree> {
+        sessions
+            .iter()
+            .map(|s| (*s.handle().snapshot().unwrap().tree).clone())
+            .collect()
+    };
+    let at_load = trees(&sessions);
+    assert_eq!(at_load[0], at_load[1], "targeted = full at load");
+    for session in &sessions {
+        session
+            .handle()
+            .execute(Command::SetCells {
+                column: source,
+                start: 1,
+                values: ValueBlock::Float(vec![9.0]),
+                expected_version: None,
+            })
+            .expect("edit");
+    }
+    let edited = trees(&sessions);
+    assert_eq!(edited[0], edited[1], "targeted = full after an edit");
+    let value = |tree: &Tree, key: (usize, usize, usize, usize)| {
+        tree.node(located[&key].0)
+            .and_then(|node| node.as_column())
+            .map(|column| column.values().number_at(1))
+            .unwrap()
+    };
+    assert_eq!(
+        value(&edited[0], (0, 0, 0, 2)),
+        19.0,
+        "formula on formula follows"
+    );
+    assert_eq!(
+        value(&edited[0], (0, 0, 1, 0)),
+        90.0,
+        "the remote one follows"
+    );
+}

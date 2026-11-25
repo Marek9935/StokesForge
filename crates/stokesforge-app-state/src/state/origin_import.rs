@@ -30,7 +30,7 @@
 //! automatic name, silently. The columns carry no import source, so "Refresh
 //! from Source" does not apply to them.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -40,8 +40,11 @@ use stokesforge_import::origin::OriginDesignation;
 use stokesforge_import::origin::{OriginColumnAt, OriginGraph, OriginProject};
 use stokesforge_import::FilesLayout;
 use stokesforge_importer::{
-    make_origin_column_in, origin_book_name, origin_column_key, plan_origin_layout, ImportFailure,
-    OriginColumnKey, OriginColumnRef, OriginLayoutPlan, OriginSelection, OriginSource, OriginWhere,
+    build_column_formula, decide_origin_formulas, judge_origin_formulas, make_origin_column_in,
+    origin_book_name, origin_column_key, plan_origin_formulas, plan_origin_layout,
+    resolve_origin_formula, stale_formulas, with_formula_note, FormulaDecision, ImportFailure,
+    Judgement, OriginColumnKey, OriginColumnRef, OriginLayoutPlan, OriginSelection, OriginSource,
+    OriginWhere, PlannedFormula, ResolvedFormula, ResolvedPiece,
 };
 
 use super::import_plans::{BookApply, BookTarget, Naming, SheetApply};
@@ -123,6 +126,37 @@ impl GraphInfo {
     }
 }
 
+/// The columns each translatable formula column reads, by position.
+fn formula_reads(project: &OriginProject) -> BTreeMap<ColumnPos, Vec<ColumnPos>> {
+    let mut out = BTreeMap::new();
+    for (b, book) in project.books.iter().enumerate() {
+        for (s, sheet) in book.sheets.iter().enumerate() {
+            for (c, column) in sheet.columns.iter().enumerate() {
+                if column.formula.is_none() {
+                    continue;
+                }
+                let Some(ResolvedFormula::Pieces(pieces)) =
+                    resolve_origin_formula(project, (b, s, c))
+                else {
+                    continue;
+                };
+                let mut reads: Vec<ColumnPos> = Vec::new();
+                for piece in pieces {
+                    if let ResolvedPiece::Column { at, .. } = piece {
+                        if at != (b, s, c) && !reads.contains(&at) {
+                            reads.push(at);
+                        }
+                    }
+                }
+                if !reads.is_empty() {
+                    out.insert((b, s, c), reads);
+                }
+            }
+        }
+    }
+    out
+}
+
 /// The position when it names a column that exists.
 fn resolve(project: &OriginProject, at: OriginColumnAt) -> Option<ColumnPos> {
     project
@@ -160,12 +194,16 @@ fn curve_line(project: &OriginProject, y: ColumnPos, x: Option<ColumnPos>) -> St
 #[derive(Debug, Clone)]
 pub(super) struct OriginFile {
     path: PathBuf,
-    project: Arc<OriginProject>,
+    pub(super) project: Arc<OriginProject>,
     selection: OriginSelection,
     graphs: Vec<GraphInfo>,
     /// The graphs picked by their box (Check All picks every graph that
     /// plots something). A graph that is not picked shows an empty box.
     graph_picked: Vec<bool>,
+    /// For each formula column that translates, the columns it reads, resolved
+    /// once when the file is added (#556); the chooser warns when one is not
+    /// ticked.
+    formula_reads: BTreeMap<ColumnPos, Vec<ColumnPos>>,
 }
 
 impl OriginFile {
@@ -186,12 +224,14 @@ impl OriginFile {
             .iter()
             .map(|graph| GraphInfo::new(&project, graph))
             .collect();
+        let formula_reads = formula_reads(&project);
         Self {
             path,
             project,
             selection,
             graph_picked: vec![false; graphs.len()],
             graphs,
+            formula_reads,
         }
     }
 
@@ -250,6 +290,31 @@ impl OriginFile {
             .and_then(|s| s.get(column))
             .copied()
             .unwrap_or(false)
+    }
+
+    /// The short names of the unticked columns that the formula of a ticked
+    /// column reads.
+    fn reads_unticked(&self, book: usize, sheet: usize, column: usize) -> Vec<String> {
+        if !self.column_ticked(book, sheet, column) {
+            return Vec::new();
+        }
+        let Some(reads) = self.formula_reads.get(&(book, sheet, column)) else {
+            return Vec::new();
+        };
+        reads
+            .iter()
+            .filter(|&&(b, s, c)| !self.column_ticked(b, s, c))
+            .filter_map(|&(b, s, c)| {
+                self.project
+                    .books
+                    .get(b)?
+                    .sheets
+                    .get(s)?
+                    .columns
+                    .get(c)
+                    .map(|column| column.short_name.clone())
+            })
+            .collect()
     }
 
     fn columns_in(&self, book: usize, sheet: usize) -> usize {
@@ -326,7 +391,7 @@ fn tick_of(ticked: usize, count: usize) -> OriginTick {
 /// The open chooser: its files, in the order they arrived.
 #[derive(Debug, Clone)]
 pub(super) struct OriginChooser {
-    files: Vec<OriginFile>,
+    pub(super) files: Vec<OriginFile>,
     /// Where the workbooks go.
     where_: OriginWhere,
     /// How the Origin sheets share worksheets.
@@ -335,6 +400,9 @@ pub(super) struct OriginChooser {
     pub(super) folder: ImportFolder,
     /// What the list shows (#557); hides, never unticks.
     show: OriginShow,
+    /// The stale formulas the user ticked in the window of the last Import
+    /// (#556): kept so that Reopen Last Import finds the same answers.
+    pub(super) accepted_formulas: BTreeSet<OriginColumnKey>,
 }
 
 /// What the chooser lists (#557): the three Show buttons.
@@ -362,6 +430,10 @@ pub struct OriginColumnView {
     pub designation: OriginDesignation,
     /// Ticked for the import.
     pub ticked: bool,
+    /// Ticked, with a formula that reads columns that are not ticked (#556):
+    /// their Origin short names. The chooser says so in orange; nothing is
+    /// ticked for the user.
+    pub reads_unticked: Vec<String>,
 }
 
 /// A sheet as the chooser shows it.
@@ -430,7 +502,9 @@ impl AppState {
     /// Import window is not on screen.
     #[must_use]
     pub fn origin_import_open(&self) -> bool {
-        self.origin_import.is_some() && self.import_state.is_none()
+        self.origin_import.is_some()
+            && self.import_state.is_none()
+            && self.origin_formulas.is_none()
     }
 
     /// The files of the chooser, with their books, sheets and ticks. Empty
@@ -500,6 +574,11 @@ impl AppState {
                                         unit: column.unit.clone(),
                                         designation: column.designation,
                                         ticked: file.column_ticked(
+                                            book_index,
+                                            sheet_index,
+                                            column_index,
+                                        ),
+                                        reads_unticked: file.reads_unticked(
                                             book_index,
                                             sheet_index,
                                             column_index,
@@ -808,6 +887,7 @@ impl AppState {
             layout: FilesLayout::SheetPerFile,
             folder,
             show: OriginShow::All,
+            accepted_formulas: BTreeSet::new(),
         });
         for file in files {
             if !chooser.files.iter().any(|known| known.path == file.path) {
@@ -823,7 +903,10 @@ impl AppState {
         std::mem::take(&mut self.origin_created_columns)
     }
 
-    /// [`Action::ImportOrigin`](super::Action::ImportOrigin).
+    /// [`Action::ImportOrigin`](super::Action::ImportOrigin): the formulas are
+    /// judged first, before anything is created (#556). A formula that gives
+    /// other values than Origin's opens the window `Formulas with Different
+    /// Values`; with none, the import runs at once.
     pub(super) fn import_origin(&mut self) {
         if self.origin_import_blocker().is_some() {
             return;
@@ -831,6 +914,25 @@ impl AppState {
         let Some(chooser) = self.origin_import.clone() else {
             return;
         };
+        let prep = prepare_formulas(&chooser);
+        let stale = stale_formulas(&prep.judgements);
+        if stale.is_empty() {
+            self.run_origin_import(chooser, prep, BTreeSet::new());
+            return;
+        }
+        self.origin_formulas = Some(super::origin_formulas::OriginFormulaForm::new(
+            &chooser, prep, stale,
+        ));
+    }
+
+    /// Creates the books, sheets and columns of the plan, then sets the
+    /// formulas `accepted` and the equal ones, all in one `Import` entry.
+    pub(super) fn run_origin_import(
+        &mut self,
+        mut chooser: OriginChooser,
+        prep: FormulaPrep,
+        accepted: BTreeSet<OriginColumnKey>,
+    ) {
         if self.handle.begin_macro(MacroKind::Import).is_err() {
             self.fail(tr!("error-import-group"));
             return;
@@ -838,7 +940,14 @@ impl AppState {
         // Closed before the first command: a failure is then said in the status
         // bar, not in the footer of a chooser that is about to disappear.
         self.origin_import = None;
-        let plan = origin_plan(&chooser);
+        self.origin_formulas = None;
+        let FormulaPrep {
+            plan,
+            formulas,
+            judgements,
+        } = prep;
+        let decision = decide_origin_formulas(&formulas, &judgements, &accepted);
+        chooser.accepted_formulas = accepted;
         let files = &chooser.files;
         let mut failures: Vec<String> = Vec::new();
         let mut folder_gone = false;
@@ -881,11 +990,15 @@ impl AppState {
                     let origin_book = file.project.books.get(at.book)?;
                     let origin_sheet = origin_book.sheets.get(at.sheet)?;
                     let column = origin_sheet.columns.get(at.column)?;
-                    Some(make_origin_column_in(
+                    let built = make_origin_column_in(
                         origin_book,
                         column,
                         at.tag_sheet.then_some(origin_sheet.name.as_str()),
-                    ))
+                    );
+                    Some(match decision.kept.get(&at.key()) {
+                        Some(original) => with_formula_note(built, original),
+                        None => built,
+                    })
                 },
             );
             for outcome in outcomes {
@@ -911,6 +1024,8 @@ impl AppState {
                 }
             }
         }
+        let (formulas_set, formulas_kept) =
+            self.set_origin_formulas(&formulas, &decision, &created_columns);
         self.origin_created_columns = created_columns;
         used_files.sort_unstable();
         let done_paths: Vec<PathBuf> = used_files
@@ -930,18 +1045,80 @@ impl AppState {
         }
         if !failures.is_empty() {
             self.fail(failures.join(" ; "));
-        } else if partial_imported {
-            self.warn(tr!("status-import-origin-partial", books = book_count));
         } else {
-            self.notice(tr!(
-                "status-import-origin-done",
-                books = book_count,
-                sheets = sheet_count
-            ));
+            let mut sentence = if partial_imported {
+                tr!("status-import-origin-partial", books = book_count)
+            } else {
+                tr!(
+                    "status-import-origin-done",
+                    books = book_count,
+                    sheets = sheet_count
+                )
+            };
+            if formulas_set + formulas_kept > 0 {
+                sentence = tr!(
+                    "status-import-origin-formulas",
+                    done = sentence,
+                    set = formulas_set,
+                    kept = formulas_kept
+                );
+            }
+            if partial_imported {
+                self.warn(sentence);
+            } else {
+                self.notice(sentence);
+            }
         }
         if folder_gone {
             self.warn(tr!("status-import-folder-gone"));
         }
+    }
+
+    /// Sets the formulas of `decision` on the columns just created, one
+    /// `SetColumnMeta` each, inside the import entry. Returns how many formulas
+    /// are set and how many columns kept their values (a column that was not
+    /// created counts for neither).
+    fn set_origin_formulas(
+        &mut self,
+        formulas: &BTreeMap<OriginColumnKey, PlannedFormula>,
+        decision: &FormulaDecision,
+        created: &BTreeMap<OriginColumnKey, Option<NodeId>>,
+    ) -> (usize, usize) {
+        let created_id = |key: &OriginColumnKey| created.get(key).copied().flatten();
+        let mut kept = decision
+            .kept
+            .keys()
+            .filter(|key| created_id(key).is_some())
+            .count();
+        let mut set = 0;
+        for key in &decision.set {
+            let Some(column) = created_id(key) else {
+                continue;
+            };
+            let Some(stokesforge_importer::PlannedFormula {
+                verdict: stokesforge_importer::FormulaVerdict::Translated(pieces),
+                ..
+            }) = formulas.get(key)
+            else {
+                continue;
+            };
+            let tree = &self.snapshot.tree;
+            let sheet = tree.parent(column).ok().flatten();
+            let locate = |k: OriginColumnKey| -> Option<(NodeId, NodeId)> {
+                let id = created_id(&k)?;
+                Some((id, tree.parent(id).ok().flatten()?))
+            };
+            let formula = sheet.and_then(|sheet| build_column_formula(pieces, sheet, &locate));
+            let Some(formula) = formula else {
+                kept += 1;
+                continue;
+            };
+            let mut meta = self.column_meta(column);
+            meta.formula = Some(formula);
+            self.execute(Command::SetColumnMeta { column, meta });
+            set += 1;
+        }
+        (set, kept)
     }
 
     /// Gives `id` the Origin name `name` when the model would accept it: valid,
@@ -996,9 +1173,30 @@ impl AppState {
     }
 }
 
-/// The plan of a chooser: its ticks, layout and files.
-fn origin_plan(chooser: &OriginChooser) -> OriginLayoutPlan {
-    let stems: Vec<String> = chooser
+/// What the formulas of a chooser come to, computed before anything is created
+/// (#556): the plan, the verdict on each formula column, the comparison with
+/// Origin's values.
+pub(super) struct FormulaPrep {
+    pub(super) plan: OriginLayoutPlan,
+    pub(super) formulas: BTreeMap<OriginColumnKey, PlannedFormula>,
+    pub(super) judgements: BTreeMap<OriginColumnKey, Judgement>,
+}
+
+fn prepare_formulas(chooser: &OriginChooser) -> FormulaPrep {
+    let stems = file_stems(chooser);
+    let sources = origin_sources(chooser, &stems);
+    let plan = plan_origin_layout(&sources, chooser.where_, chooser.layout);
+    let formulas = plan_origin_formulas(&sources, &plan);
+    let judgements = judge_origin_formulas(&sources, &plan, &formulas);
+    FormulaPrep {
+        plan,
+        formulas,
+        judgements,
+    }
+}
+
+fn file_stems(chooser: &OriginChooser) -> Vec<String> {
+    chooser
         .files
         .iter()
         .map(|file| {
@@ -1006,18 +1204,30 @@ fn origin_plan(chooser: &OriginChooser) -> OriginLayoutPlan {
                 .file_stem()
                 .map_or_else(String::new, |stem| stem.to_string_lossy().into_owned())
         })
-        .collect();
-    let sources: Vec<OriginSource<'_>> = chooser
+        .collect()
+}
+
+fn origin_sources<'a>(chooser: &'a OriginChooser, stems: &'a [String]) -> Vec<OriginSource<'a>> {
+    chooser
         .files
         .iter()
-        .zip(&stems)
+        .zip(stems)
         .map(|(file, stem)| OriginSource {
             project: &file.project,
             selection: &file.selection,
             file_stem: stem,
         })
-        .collect();
-    plan_origin_layout(&sources, chooser.where_, chooser.layout)
+        .collect()
+}
+
+/// The plan of a chooser: its ticks, layout and files.
+fn origin_plan(chooser: &OriginChooser) -> OriginLayoutPlan {
+    let stems = file_stems(chooser);
+    plan_origin_layout(
+        &origin_sources(chooser, &stems),
+        chooser.where_,
+        chooser.layout,
+    )
 }
 
 fn file_name(path: &Path) -> String {

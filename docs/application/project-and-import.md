@@ -172,10 +172,44 @@ sheets in one `MacroKind::Import` group (one
 history entry, one undo); a name the model would refuse (invalid, or already a
 sibling's, case aside) is not sent: the object keeps its automatic name and
 nothing is said. Origin columns have no import source, so Refresh from Source
-stays greyed for them. `OriginFileView::partial` (from `OriginProject::partial`, an `.opju` read as far as it goes) makes the chooser print the `origin-import-partial` orange note under that file name (S-R18), and, after the import, an orange status line (`status-import-origin-partial`). Sheets left without a name by a partial read are `Sheet1`, `Sheet2`… (set by `assemble`). Reopen Last Import after an Origin import undoes it (if
+stays greyed for them. A formula column is created with its values first, then given its formula. `OriginFileView::partial` (from `OriginProject::partial`, an `.opju` read as far as it goes) makes the chooser print the `origin-import-partial` orange note under that file name (S-R18), and, after the import, an orange status line (`status-import-origin-partial`). Sheets left without a name by a partial read are `Sheet1`, `Sheet2`… (set by `assemble`). Reopen Last Import after an Origin import undoes it (if
 still on top) and reopens the chooser on the same parsed files, ticks, layouts and
 folder (the Import window gets its folder back the same way); the
 most recent import, text or Origin, decides between wizard and chooser.
+
+**Column formulas of an Origin import (#556).** The reader gives each column's formula text
+(`OriginColumn::formula`); `origin_formula.rs` translates it into pieces of the formula
+language (`col(B)*2`, `col(B)(645)`, `Max`, `table(...)`, a decimal comma) or refuses it, and
+`origin_formula_plan.rs` does the rest, all pure and all **before anything is created**:
+`resolve_origin_formula` resolves each reference **by Origin short name** in the sheet or
+book it names, in the same file (never by position letter); `plan_origin_formulas` maps the
+references onto the planned columns (a dropped shared X goes through `OriginLayoutPlan::x_map`
+to the kept X) and gives each formula column a `FormulaVerdict` (`Translated`,
+`NotImportedInput`, `Untranslatable`); `judge_origin_formulas` builds a **scratch `Project`**
+holding the planned sheets with Origin's values only, sets the translated formulas there
+(loops and self references are refused with `Tree::formula_loop`), computes each one with
+`evaluate_formula_with_x` the way the recalculation does (length of the longest column read
+row by row) and compares with Origin's values: equal within a relative `1e-9`, NaN equals
+NaN, trailing empty cells ignored, a text cell of Origin is a difference. A formula that reads
+another formula column is judged on Origin's values for it. `Import` (`import_origin`) runs
+this first; with no `Stale` column the import runs at once, otherwise the window `Formulas
+with Different Values` opens (`state/origin_formulas.rs`, `origin_formulas_open`; the chooser
+is hidden meanwhile, so one modal at a time): one row per stale column, all unticked, Check
+All / Check None / Import / Cancel (`SetOriginFormulaTick`, `CheckAllOriginFormulas`,
+`ImportOriginFormulas`, `CancelOriginFormulas`). Cancel creates nothing and leaves the chooser
+open. The answers are kept in `OriginChooser::accepted_formulas` and in the copy that Reopen
+Last Import restores. `run_origin_import` then creates the books, sheets and columns with
+Origin's values, and sets each formula with one `SetColumnMeta` on the real `NodeId`s of
+`take_origin_created_columns`, **inside the same `MacroKind::Import` group** (one undo removes
+all, redo restores all). A column whose formula is not set (untranslatable, an input not
+imported, refused, or values kept by the user) keeps Origin's values and gets
+`Origin formula: <text>` appended to its Comments (`; ` after an existing comment); a formula
+that is set leaves no note. The status line says how many formulas were set and kept
+(`status-import-origin-formulas`). The chooser warns in orange under a ticked column whose
+formula reads an unticked one (`OriginColumnView::reads_unticked`, resolved once per file in
+`OriginFile::formula_reads`; nothing is ticked for the user). The CLI and `pyst.import_file` go
+through `plan_origin_import_formulas`: a formula is set only when it gives Origin's values, the
+others keep their values and the note, and they never ask.
 
 Interface (#537): the two windows paint their `To:` and `Folder:` menus with one
 module, `stokesforge-app/src/app/import_to.rs`

@@ -453,6 +453,9 @@ fn column_rows(
         let clip = ui.clip_rect();
         if top + row_height < clip.top() || top > clip.bottom() {
             ui.allocate_space(egui::vec2(1.0, row_height));
+            if !columns[index].reads_unticked.is_empty() {
+                ui.allocate_space(egui::vec2(1.0, row_height));
+            }
             continue;
         }
         column_row(ui, at, index, columns, last_id, requested);
@@ -502,6 +505,25 @@ fn column_row(
             });
         });
     });
+    if !column.reads_unticked.is_empty() {
+        // Orange line under the column (#556): its formula reads columns that
+        // are not checked; they are never checked for the user.
+        ui.horizontal(|ui| {
+            ui.set_height(ui.spacing().interact_size.y);
+            ui.add_space(ui.spacing().icon_width + ui.spacing().icon_spacing);
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(tr!(
+                        "origin-import-reads-unchecked",
+                        column = column.short_name.as_str(),
+                        inputs = column.reads_unticked.join(", ")
+                    ))
+                    .color(theme::warning_color(ui.visuals().dark_mode)),
+                )
+                .truncate(),
+            );
+        });
+    }
     let shift = ui.input(|input| input.modifiers.shift);
     let target = !column.ticked;
     if clicked {

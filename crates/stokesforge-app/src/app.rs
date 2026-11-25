@@ -187,6 +187,7 @@ mod menu_sections;
 mod menus;
 mod object_dnd;
 mod object_manager_ui;
+mod origin_formulas;
 mod origin_import;
 mod os_gesture;
 mod page_layout;
@@ -254,6 +255,7 @@ use grid::keyboard_focus_outside_grid;
 use import_wizard::import_window;
 use keyboard_shortcuts_window::keyboard_shortcuts_window;
 use object_manager_ui::{select_manager_target, selected_manager_target};
+use origin_formulas::origin_formulas_window;
 use origin_import::origin_import_window;
 use plot_settings::{column_metadata_window, plot_settings_window};
 use preferences_window::preferences_window;
@@ -1516,6 +1518,7 @@ impl StokesForgeApp {
         // other action.
         import_window(ctx, &mut self.state, actions);
         origin_import_window(ctx, &self.state, actions);
+        origin_formulas_window(ctx, &self.state, actions);
         // The windows opened from the Theme tab of Graph Properties (#542) are
         // painted **before** it: Escape goes to the first modal painted, and it
         // must close only the one on top (the Apply Theme window, the name

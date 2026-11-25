@@ -2086,6 +2086,28 @@ origin-import-check-all =
 origin-import-check-none =
     Check None
     .hint = Unchecks every column of every sheet and every graph
+origin-import-reads-unchecked = { $column } reads { $inputs }, not checked
+status-import-origin-formulas = { $done }; { $set ->
+    [one] { $set } formula set
+   *[other] { $set } formulas set
+}, { $kept ->
+    [one] { $kept } kept as values
+   *[other] { $kept } kept as values
+}
+origin-formulas-title = Formulas with Different Values
+origin-formulas-intro = These formulas give other values than Origin shows. Check the columns that must take the formula. The others keep Origin’s values
+origin-formulas-row = { $book } · { $sheet } · { $column } = { $formula }
+origin-formulas-example = row { $row }: Origin { $origin }, formula { $formula }
+origin-formulas-empty = empty
+origin-formulas-accept =
+    Import
+    .hint = Imports, setting the checked formulas (Enter)
+origin-formulas-check-all =
+    Check All
+    .hint = Checks every formula
+origin-formulas-check-none =
+    Check None
+    .hint = Unchecks every formula
 origin-import-book-hint = Checks or unchecks all the columns of this workbook
 origin-import-sheet-size = { $columns ->
     [one] { $columns } column

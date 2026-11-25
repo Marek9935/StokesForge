@@ -389,6 +389,15 @@ pub fn plan_origin_import(
     project: &OriginProject,
     selection: &OriginSelection,
 ) -> Vec<OriginBookPlan> {
+    plan_origin_import_layout(project, selection).books
+}
+
+/// [`plan_origin_import`] with the whole layout plan (what the formulas of the
+/// CLI and the scripts need, #556).
+pub fn plan_origin_import_layout(
+    project: &OriginProject,
+    selection: &OriginSelection,
+) -> OriginLayoutPlan {
     plan_origin_layout(
         &[OriginSource {
             project,
@@ -398,7 +407,6 @@ pub fn plan_origin_import(
         OriginWhere::PerOriginWorkbook,
         FilesLayout::SheetPerFile,
     )
-    .books
 }
 
 /// Builds the model column for an Origin column: numeric, or mixed as soon as
