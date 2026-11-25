@@ -1111,15 +1111,13 @@ fn new_target(w: &mut World) -> NodeId {
 fn badly_written_formulas_are_kept_framed_and_say_why_in_a_sentence() {
     let mut w = world();
     let target = new_target(&mut w);
-    let cases: [(&str, &str); 11] = [
+    let cases: [(&str, &str); 9] = [
         ("frob(A)", "frob"),
         ("sin(A, B)", "argument"),
         ("sin()", "argument"),
         ("E + 1", "own column"),
-        ("Sheet3!B", "can only be read by"),
         ("max(Nope!A)", "Nope"),
         ("max([Nobook]Sheet1!A)", "Nobook"),
-        ("max(Sheet3!B, Sheet3!A)", "can only be read by"),
         ("at(Sheet3!B, 1, Sheet3!A)", "without a prefix"),
         ("1e400*A", "too large"),
         ("A*1e-400", "too small"),
@@ -1137,6 +1135,47 @@ fn badly_written_formulas_are_kept_framed_and_say_why_in_a_sentence() {
         assert!(status.contains(hint), "`{text}`: `{status}` lacks `{hint}`");
         let issue = w.state.formula_issue(target).expect("framed");
         assert!(issue.contains(hint), "`{text}`: frame says `{issue}`");
+    }
+}
+
+/// A column of another sheet is read row by row (#556): typed, kept as typed,
+/// computed, and not framed. Witness: restore the refusal of the compile.
+#[test]
+fn a_remote_column_typed_in_a_formula_is_read_row_by_row() {
+    let mut w = world();
+    let target = new_target(&mut w);
+    let sheet3 = w.sheet3;
+    let book2_sheet = w.sheet5;
+    let remote_b = w.columns(sheet3)[1];
+    let remote_5b = w.columns(book2_sheet)[1];
+    let b_values = w.values(remote_b);
+    let cases: [(&str, Vec<Option<f64>>); 5] = [
+        (
+            "Sheet3!B - 1",
+            b_values.iter().map(|v| v.map(|v| v - 1.0)).collect(),
+        ),
+        ("Sheet3!B", b_values.clone()),
+        (
+            "sqrt(Sheet3!B)",
+            b_values.iter().map(|v| v.map(f64::sqrt)).collect(),
+        ),
+        // The own C is 100.., the remote B 3100..: the row-wise maximum is B.
+        ("max(Sheet3!B, C)", b_values.clone()),
+        (
+            "[Book2]Sheet5!B / 2",
+            w.values(remote_5b)
+                .iter()
+                .map(|v| v.map(|v| v / 2.0))
+                .collect(),
+        ),
+    ];
+    for (text, expected) in cases {
+        w.type_formula(target, text);
+        assert_eq!(w.letters(target).as_deref(), Some(text));
+        assert!(w.state.formula_issue(target).is_none(), "`{text}` framed");
+        assert!(!w.status().starts_with("[error]"), "`{text}`");
+        let got = w.values(target);
+        assert_eq!(got, expected, "{text}");
     }
 }
 

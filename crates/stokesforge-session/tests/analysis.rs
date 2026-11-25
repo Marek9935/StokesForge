@@ -1235,11 +1235,15 @@ fn loading_relays_the_dropped_correction_traces() {
 /// sheet (#403): the calculation reads F, F reads the calculation's output in
 /// the other sheet. It would never stabilize: the calculation is flagged
 /// `Manual` and left as it is, in both modes. Mutant: the formula edges of
-/// `calculations_in_a_cycle` keep to the own sheet -> no loop is seen.
+/// `calculations_in_a_cycle` keep to the own sheet -> no loop is seen. Both
+/// with a column function (`max(Sheet1!B)`) and row by row (`Sheet1!B + 1`, #556).
 #[test]
 fn a_loop_through_a_calculation_and_a_remote_formula_waits_for_a_gesture() {
     use stokesforge_core::{ColumnFormula, FormulaPart, RemoteRef};
-    for mode in modes() {
+    for (mode, (head, tail)) in modes()
+        .into_iter()
+        .flat_map(|mode| [(mode, ("max(", ")")), (mode, ("", " + 1"))])
+    {
         let (_session, handle, m) = start(mode);
         let book = handle
             .snapshot()
@@ -1286,7 +1290,7 @@ fn a_loop_through_a_calculation_and_a_remote_formula_waits_for_a_gesture() {
             .snapshot()
             .unwrap()
             .tree
-            .formula_from_letters(f, "max(Sheet1!B)")
+            .formula_from_letters(f, &format!("{head}Sheet1!B{tail}"))
             .unwrap();
         handle
             .execute(Command::SetColumnMeta {
@@ -1326,9 +1330,9 @@ fn a_loop_through_a_calculation_and_a_remote_formula_waits_for_a_gesture() {
             .unwrap();
         let reads_output = ColumnFormula::from_parts_with_remote(
             vec![
-                FormulaPart::Text("max(".to_string()),
+                FormulaPart::Text(head.to_string()),
                 FormulaPart::Column(output),
-                FormulaPart::Text(")".to_string()),
+                FormulaPart::Text(tail.to_string()),
             ],
             std::collections::BTreeMap::from([(
                 1,
@@ -1351,7 +1355,7 @@ fn a_loop_through_a_calculation_and_a_remote_formula_waits_for_a_gesture() {
             .snapshot()
             .unwrap()
             .tree
-            .formula_from_letters(f, "max(Sheet1!C)")
+            .formula_from_letters(f, &format!("{head}Sheet1!C{tail}"))
             .unwrap();
         handle
             .execute(Command::SetColumnMeta {
@@ -1366,8 +1370,109 @@ fn a_loop_through_a_calculation_and_a_remote_formula_waits_for_a_gesture() {
         assert_eq!(
             snapshot.tree.calculation(calc).unwrap().stale,
             Some(Staleness::Manual),
-            "{mode:?}"
+            "{mode:?} {head}{tail}"
         );
+    }
+}
+
+/// A calculation fed by a formula column that reads another sheet row by row
+/// (#556): editing the other sheet changes the formula column, and the
+/// calculation follows (automatic) or is marked out of date (manual). The same
+/// mechanism covers an old file whose kept `Sheet3!B + 1` starts computing at
+/// the first pass after load: the column's version moves, the calculation is
+/// never left wrong without a mark. Witness: leave the remote version out of
+/// the formula's fingerprint -> neither follows.
+#[test]
+fn a_calculation_fed_by_a_row_wise_remote_formula_follows_or_is_marked() {
+    for mode in modes() {
+        for auto in [true, false] {
+            let (_session, handle, m) = start(mode);
+            let book = handle
+                .snapshot()
+                .unwrap()
+                .tree
+                .parent(m.sheet)
+                .unwrap()
+                .unwrap();
+            handle
+                .execute(Command::AddWorksheet {
+                    book,
+                    name: Some("Sheet3".to_string()),
+                })
+                .unwrap();
+            let sheet3 = *handle
+                .snapshot()
+                .unwrap()
+                .tree
+                .children(book)
+                .unwrap()
+                .last()
+                .unwrap();
+            let last_of = |sheet: NodeId| {
+                *handle
+                    .snapshot()
+                    .unwrap()
+                    .tree
+                    .children(sheet)
+                    .unwrap()
+                    .last()
+                    .unwrap()
+            };
+            handle
+                .execute(Command::AddColumn {
+                    sheet: sheet3,
+                    index: None,
+                    name: Some("B".to_string()),
+                    column: Column::from_f64(&[1.0, 2.0, 3.0, 4.0]),
+                })
+                .unwrap();
+            let remote_b = last_of(sheet3);
+            handle
+                .execute(Command::AddColumn {
+                    sheet: m.sheet,
+                    index: None,
+                    name: Some("F".to_string()),
+                    column: Column::from_f64(&[]),
+                })
+                .unwrap();
+            let f = last_of(m.sheet);
+            let formula = handle
+                .snapshot()
+                .unwrap()
+                .tree
+                .formula_from_letters(f, "Sheet3!A * 2")
+                .unwrap();
+            handle
+                .execute(Command::SetColumnMeta {
+                    column: f,
+                    meta: ColumnMeta {
+                        formula: Some(formula),
+                        ..Default::default()
+                    },
+                })
+                .unwrap();
+            let calc = add_fit_on(&handle, m.x, f, auto);
+            let before = slope(&handle.snapshot().unwrap(), calc);
+            assert!((before - 2.0).abs() < 1e-9, "{mode:?}: {before}");
+            handle
+                .execute(enter(remote_b, &[1.0, 4.0, 9.0, 16.0]))
+                .unwrap();
+            let after = handle.snapshot().unwrap();
+            if auto {
+                assert_eq!(after.tree.calculation(calc).unwrap().stale, None);
+                assert!(
+                    (slope(&after, calc) - 10.0).abs() < 1e-9,
+                    "{mode:?}: {}",
+                    slope(&after, calc)
+                );
+            } else {
+                assert_eq!(
+                    after.tree.calculation(calc).unwrap().stale,
+                    Some(Staleness::Manual),
+                    "{mode:?}"
+                );
+            }
+        }
     }
 }
 

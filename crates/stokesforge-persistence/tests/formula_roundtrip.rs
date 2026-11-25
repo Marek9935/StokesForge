@@ -228,6 +228,13 @@ fn every_formula_feature_survives_save_and_load() {
         "sum('Blanc 2'!A)",
         "at(Sheet3!B, 2, A)",
         "A + max([Book2]Sheet5!A)",
+        // Other sheets, read row by row (#556).
+        "Sheet3!B - 1",
+        "Sheet3!B",
+        "max(Sheet3!B, A)",
+        "sqrt(Sheet3!B)",
+        "[Book2]Sheet5!B / 2",
+        "at(Sheet3!B, Sheet3!A)",
     ];
     let mut ids = Vec::new();
     for text in texts {
@@ -255,6 +262,39 @@ fn every_formula_feature_survives_save_and_load() {
         errors.is_empty(),
         "too many formulas that do not compute: {errors:#?}"
     );
+}
+
+/// A file written before #556 may hold `Sheet3!B + 1` (kept, never computed):
+/// it now loads, computes, and the stored parts are untouched. Witness:
+/// restore the refusal in `ColumnFormula::compile`.
+#[test]
+fn a_kept_row_wise_remote_formula_loads_and_computes() {
+    let mut f = fixture();
+    let remote_b = f.project.tree().children(f.sheet3).unwrap()[1];
+    let id = column(&mut f.project, f.sheet1, "F", &[0.0]);
+    set_formula(
+        &mut f.project,
+        id,
+        ColumnFormula::from_parts_with_remote(
+            vec![
+                FormulaPart::Column(remote_b),
+                FormulaPart::Text(" + 1".into()),
+            ],
+            remote(0, f.sheet3),
+        ),
+    );
+    let loaded = round_trip(&f.project);
+    assert_eq!(stored(&f.project, id), stored(&loaded, id));
+    assert_eq!(
+        loaded.tree().formula_letters(id).as_deref(),
+        Some("Sheet3!B + 1")
+    );
+    let values = evaluate_column(&loaded, id).expect("computes");
+    let expected: Vec<u64> = [2.0_f64, 3.0, 4.0, 5.0]
+        .iter()
+        .map(|v| v.to_bits())
+        .collect();
+    assert_eq!(values, expected);
 }
 
 #[test]

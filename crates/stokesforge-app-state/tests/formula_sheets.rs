@@ -200,3 +200,27 @@ fn a_loop_held_by_a_file_frames_the_formula_cell() {
     assert_eq!(s.state.formula_issue(ids.1), None);
     let _ = (s.sheet1, s.sheet3);
 }
+
+/// A loop closed by columns read row by row (#556) is refused at typing like
+/// one closed by a column function, and a row-wise reading with no loop is not.
+/// Witness: the loop check ignores `Expr::Remote` outside a column function.
+#[test]
+fn a_row_wise_loop_across_sheets_is_refused_at_typing() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path(), |_, _, _| {});
+    let (c, a3) = (s.s1[2], s.s3[0]);
+    type_formula(&mut s, c, "Sheet3!A + 1");
+    assert_eq!(s.state.header_edit_issue(), None, "no loop yet");
+    commit(&mut s);
+    assert_eq!(formula_text(&s, c).as_deref(), Some("Sheet3!A + 1"));
+    assert_eq!(
+        s.state.formula_issue(c),
+        None,
+        "a row-wise read is not framed"
+    );
+    type_formula(&mut s, a3, "sqrt(Sheet1!C)");
+    assert_eq!(s.state.header_edit_issue().as_deref(), Some(LOOP_MESSAGE));
+    commit(&mut s);
+    assert_eq!(s.state.formula_issue(a3).as_deref(), Some(LOOP_MESSAGE));
+    assert_eq!(s.state.formula_issue(c).as_deref(), Some(LOOP_MESSAGE));
+}

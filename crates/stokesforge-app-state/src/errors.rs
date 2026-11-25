@@ -978,7 +978,6 @@ pub mod formula {
                 sheet = sheet.as_str(),
                 column = column.as_str()
             ),
-            FormulaError::RemoteOutsideColumnFunction => tr!("error-formula-remote-outside"),
             FormulaError::RemoteXColumn => tr!("error-formula-remote-x"),
         }
     }
@@ -1037,14 +1036,13 @@ pub mod formula {
                     sheet: "Sheet3".into(),
                     column: "Z".into(),
                 },
-                FormulaError::RemoteOutsideColumnFunction,
                 FormulaError::RemoteXColumn,
                 FormulaError::ReadsFollowingSheet {
                     transposed: "Sheet1ᵀ".into(),
                     source: "Sheet1".into(),
                 },
             ];
-            let mut seen = [false; 23];
+            let mut seen = [false; 22];
             let mut ranges = [false; 2];
             let mut suggested = [false; 2];
             for sample in &samples {
@@ -1078,9 +1076,8 @@ pub mod formula {
                     FormulaError::AmbiguousWorkbook(_) => 17,
                     FormulaError::AmbiguousName(_) => 18,
                     FormulaError::UnknownColumnIn { .. } => 19,
-                    FormulaError::RemoteOutsideColumnFunction => 20,
-                    FormulaError::RemoteXColumn => 21,
-                    FormulaError::ReadsFollowingSheet { .. } => 22,
+                    FormulaError::RemoteXColumn => 20,
+                    FormulaError::ReadsFollowingSheet { .. } => 21,
                 };
                 seen[index] = true;
             }

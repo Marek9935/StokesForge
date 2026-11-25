@@ -11596,6 +11596,58 @@ fn import_mode_add_rows_extends_the_existing_columns() {
     assert_eq!(state.row_count(sheet), rows_before);
 }
 
+/// Add rows starts after the last ordinary row, not below the tail of a formula
+/// column that reads a longer column of another sheet (#556). Witness: starting
+/// at `row_count` writes the rows below the tail.
+#[test]
+fn import_mode_add_rows_ignores_the_tail_of_a_row_wise_remote_formula() {
+    use stokesforge_import::{FilesLayout, ImportMode};
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let mut project = Project::new("Demo").unwrap();
+    let root = project.root();
+    let book = project.add_empty_workbook(root, Some("Book1")).unwrap();
+    let sheet = project.add_worksheet(book, Some("Sheet1")).unwrap();
+    let long = project.add_worksheet(book, Some("Long")).unwrap();
+    let a = project
+        .add_column(sheet, None, Some("A"), Column::from_f64(&[1.0, 2.0, 3.0]))
+        .unwrap();
+    let f = project
+        .add_column(sheet, None, Some("F"), Column::from_f64(&[]))
+        .unwrap();
+    project
+        .add_column(long, None, Some("A"), Column::from_f64(&[1.0; 8]))
+        .unwrap();
+    let formula = project
+        .tree()
+        .formula_from_letters(f, "Long!A + 1")
+        .unwrap();
+    project
+        .set_column_meta(
+            f,
+            ColumnMeta {
+                formula: Some(formula),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let (_session, mut state) = start(project, &dir.path().join("projet.stf"));
+    // Any command runs the pass: the formula column now has its eight rows.
+    state.dispatch(Action::AddWorksheet { book });
+    assert_eq!(state.row_count(sheet), 8);
+    let file = write_csv(dir.path(), "suite.csv", "100\n101\n");
+    import_with(
+        &mut state,
+        book,
+        ImportMode::AddRows,
+        FilesLayout::SheetPerFile,
+        vec![file],
+    );
+    let values = column_values(&state, sheet, 0);
+    assert_eq!(values[..5], [1.0, 2.0, 3.0, 100.0, 101.0]);
+    assert!(state.tree().node(a).is_some());
+}
+
 /// Several files, a single sheet: side by side (X Y X Y), or with the X
 /// of the first file shared.
 #[test]

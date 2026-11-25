@@ -88,6 +88,9 @@ cases = [
     ('at(Sheet3!B, 2)', 'at(Sheet3!B, 2)', None),
     ('max(B, 1, 3)', 'max(B, 1, 3)', None),
     ('sum(A) - mean(A)', 'sum(A) - mean(A)', 7.5),
+    ('Sheet3!B - 1', 'Sheet3!B - 1', None),
+    ('sqrt(Sheet3!B)', 'sqrt(Sheet3!B)', None),
+    ('[Book2]Sheet5!B / 2', '[Book2]Sheet5!B / 2', None),
 ]
 for text, expected_text, expected in cases:
     col = formula_column(text)
@@ -96,6 +99,26 @@ for text, expected_text, expected in cases:
     assert got == expected_text, (text, got)
     if expected is not None:
         assert all(v == expected for v in vals), (text, vals)
+"#,
+    );
+}
+
+/// A column of another sheet is read row by row through `pyst` (#556): same
+/// values as the column, one row each, nothing refused. Witness: restore the
+/// refusal in `ColumnFormula::compile`.
+#[test]
+fn a_remote_column_is_read_row_by_row_through_pyst() {
+    let bench = bench();
+    script(
+        &bench,
+        r#"
+S3 = pyst.resolve('[Book1]Sheet3')
+remote_b = [c for c in pyst.children(S3) if pyst.info(c)['name'] == 'B'][0]
+col = formula_column('Sheet3!B')
+assert pyst.info(col)['column']['formula'] == 'Sheet3!B'
+assert pyst.values(col) == pyst.values(remote_b), (pyst.values(col), pyst.values(remote_b))
+shifted = formula_column('Sheet3!B - 1')
+assert pyst.values(shifted) == tuple(v - 1 for v in pyst.values(remote_b))
 "#,
     );
 }

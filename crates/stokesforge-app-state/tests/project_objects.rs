@@ -554,7 +554,8 @@ fn the_copied_graph_is_not_a_user_of_the_original_workbook() {
     assert_eq!(f.state.object_users(&[f.book]), vec!["Graph1"]);
 }
 
-/// `Book1` holds `Sheet1` (A, B = `max(Sheet2!A)`, C = `max([Book2]Sheet1!A)`)
+/// `Book1` holds `Sheet1` (A, B = `Sheet2!A + 1`, C = `[Book2]Sheet1!A * 2`, both
+/// read row by row, #556)
 /// and `Sheet2`; `Book2` holds `Sheet1` (#403). Returns the session, the
 /// state, the root and `Book1`.
 fn remote_formula_fixture() -> (Session, AppState, NodeId, NodeId) {
@@ -573,7 +574,7 @@ fn remote_formula_fixture() -> (Session, AppState, NodeId, NodeId) {
     project
         .add_column(sheet1, None, Some("A"), Column::from_f64(&[1., 2.]))
         .unwrap();
-    for (name, text) in [("B", "max(Sheet2!A)"), ("C", "max([Book2]Sheet1!A)")] {
+    for (name, text) in [("B", "Sheet2!A + 1"), ("C", "[Book2]Sheet1!A * 2")] {
         let id = project
             .add_column(sheet1, None, Some(name), Column::from_f64(&[0., 0.]))
             .unwrap();
@@ -634,9 +635,9 @@ fn object_clipboard_keeps_remote_references_in_its_project_only() {
     let pasted = state.take_copied_objects()[0].1;
     assert_ne!(pasted, book);
     let (inside, outside, read_sheet) = pasted_formulas(&state, pasted);
-    assert_eq!(inside, "max(Sheet2!A)");
+    assert_eq!(inside, "Sheet2!A + 1");
     assert!(read_sheet.is_some(), "B reads the pasted Sheet2");
-    assert_eq!(outside, "max([Book2]Sheet1!A)");
+    assert_eq!(outside, "[Book2]Sheet1!A * 2");
 
     let (_session2, mut other, other_root, _) = remote_formula_fixture();
     other.dispatch(Action::PasteObjects {
@@ -645,8 +646,8 @@ fn object_clipboard_keeps_remote_references_in_its_project_only() {
     });
     let pasted = other.take_copied_objects()[0].1;
     let (inside, outside, _) = pasted_formulas(&other, pasted);
-    assert_eq!(inside, "max(Sheet2!A)", "the copied sheet comes along");
-    assert_eq!(outside, "max(#REF)");
+    assert_eq!(inside, "Sheet2!A + 1", "the copied sheet comes along");
+    assert_eq!(outside, "#REF * 2");
 }
 
 // -- Cut and paste = move (#423) ------------------------------------------

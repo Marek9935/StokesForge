@@ -48,7 +48,7 @@
 //! of the columns read, #321: never letters), for each one the version of its
 //! content — or `None` when it is no longer in the sheet, because membership
 //! of the sheet is read by the calculation —, the length of the result (#194:
-//! the longest of the columns read, failing that the longest of the sheet's
+//! the longest of the columns read row-wise, failing that the longest of the sheet's
 //! ordinary columns, and at least 1 when the formula names no column of its own
 //! sheet, #433), the version of the column itself (a direct input into a
 //! formula column must be overwritten), and the outcome (unreadable formula,
@@ -74,8 +74,13 @@
 //! is **one order for the whole project** (`recalc_project`), not one per sheet:
 //! a formula that reads a column of another sheet comes after the formula that
 //! writes it, and a loop between sheets is a cycle (`NaN` blocks, never a
-//! hang). The length of the result follows the columns read **in the own sheet**
-//! only (a formula that reads other sheets only has at least one row, #433). The displayed prefix (sheet and workbook names) is not read by the
+//! hang). A remote column may also be read **row by row** (`Sheet3!B - 1`,
+//! #556): the length of the result is then the longest of the columns read
+//! row-wise, own or remote (`Formula::row_wise_remotes`, present ones only;
+//! `column_len` is read in the order loop, after the dependencies), while a
+//! remote column read by a column function (`at(Sheet3!B, 340)`,
+//! `max(Sheet3!B)`) does not change it. A formula that names no column of its
+//! own sheet has at least one row (#433). The displayed prefix (sheet and workbook names) is not read by the
 //! calculation, so a rename or a move of the sheet rewrites nothing.
 //!
 //! **The paired X is a hidden input (#402).** `at(B, 340)`, `integral(B)` and
@@ -89,7 +94,7 @@
 //! of the X and its version, `None` when `B` has none — the formula then
 //! shows `---`, and computes the day an X appears), for the loops through a
 //! calculation (`calculations_in_a_cycle`) and for the evaluation. The length
-//! of the result (#194) still follows the columns named only.
+//! of the result (#194) still follows the columns read row-wise only.
 //!
 //! ## The oracle
 //!
@@ -418,9 +423,9 @@ impl Recalculator {
     /// fingerprint: an immediate second pass rewrites nothing.
     fn recalc_project(&mut self, project: &mut Project, seen: &mut HashSet<NodeId>) {
         // The sheets and their columns. Length of a result (#194): that of the
-        // longest of the columns the formula reads **in its own sheet**
-        // (calculated below, column by column; a remote column does not count,
-        // #403). Failing that — unreadable formula, caught in a cycle, or
+        // longest of the columns the formula reads **row by row**, in its own
+        // sheet or in another (calculated below, column by column; a remote
+        // column read by a column function does not count, #403, #556). Failing that — unreadable formula, caught in a cycle, or
         // without any resolved reference — that of the longest **ordinary**
         // column of its sheet, with a floor of 1 when the formula names no
         // column of its own sheet (#433). Never a length that counts the formula columns
@@ -623,17 +628,24 @@ impl Recalculator {
                     (column_id, version)
                 })
                 .collect();
-            // The longest of the columns read in the own sheet, also read
-            // after the formula columns `id` depends on; their length follows
-            // their version, already in the fingerprint.
+            // The longest of the columns read row by row: those of the own
+            // sheet and the remote ones read row-wise (#556), present ones
+            // only; a remote column read as the column of a column function
+            // does not count. Read after the formula columns `id` depends on;
+            // their length follows their version, already in the fingerprint.
+            let row_wise_remotes = formula.row_wise_remotes();
             let target_len = sources
                 .iter()
-                .filter(|(column_id, version)| version.is_some() && !remote.contains_key(column_id))
+                .filter(|(column_id, version)| {
+                    version.is_some()
+                        && (!remote.contains_key(column_id) || row_wise_remotes.contains(column_id))
+                })
                 .filter_map(|(column_id, _)| column_len(project, *column_id))
                 .max()
                 .unwrap_or(ordinary_len);
             // A formula that names no column of its own sheet (constant, or
-            // reading other sheets only) has at least one row (#433): the sheet
+            // reading other sheets only, even row by row) has at least one row
+            // (#433): the sheet
             // would otherwise show nothing. A local reference, even gone to
             // `#REF`, gets no floor. Still a function of `target_len`'s inputs.
             let names_own_column = sources
@@ -749,7 +761,8 @@ struct Fingerprint {
     source: ColumnFormula,
     /// The outcome of the calculation, and the sources it read.
     outcome: Outcome,
-    /// Length of the result: the longest of the columns read, or failing that
+    /// Length of the result: the longest of the columns read row by row (own or
+    /// remote, #556), or failing that
     /// the longest ordinary column of the sheet (#194), at least 1 when the
     /// formula names no column of its own sheet (#433). For a calculated
     /// formula, it follows from the versions of the sources; for the other
