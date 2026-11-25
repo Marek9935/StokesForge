@@ -12783,7 +12783,21 @@ impl AppState {
                 }
             }
             ImportMode::AddRows => {
-                let start = self.row_count(sheet);
+                // After the last **ordinary** row: a formula column that reads
+                // a longer column of another sheet (#556) may reach below it,
+                // and its tail is not data to append to.
+                let tree = self.tree();
+                let start = tree
+                    .children(sheet)
+                    .map(|ids| {
+                        ids.iter()
+                            .filter_map(|id| tree.node(*id).and_then(|node| node.as_column()))
+                            .filter(|column| column.meta().formula.is_none())
+                            .map(Column::len)
+                            .max()
+                            .unwrap_or(0)
+                    })
+                    .unwrap_or(0);
                 let existing: Vec<NodeId> = self
                     .visible_columns(sheet)
                     .into_iter()

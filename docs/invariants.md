@@ -292,7 +292,10 @@ Two consequences that cross the crates:
   sheet and workbook names, which the calculation does not read, are not in it
   (they follow the tree). One order serves the **whole project**: a formula that
   reads a column of another sheet comes after the formula that writes it, and a
-  loop across sheets is a cycle like a local one;
+  loop across sheets is a cycle like a local one. A remote column read **row by
+  row** (#556) also sets the length of the result, present ones only, and that
+  length is in the fingerprint (`target_len`, read in the order loop after the
+  columns it depends on); a remote column read by a column function does not;
 - **every data write by a command draws a fresh version number**, even an
   identical one (`Project::next_column_version`, `stokesforge-core`): pasting
   the value a cell already holds, or changing a value and undoing it, gives the

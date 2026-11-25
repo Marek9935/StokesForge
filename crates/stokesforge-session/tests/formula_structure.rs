@@ -1349,6 +1349,73 @@ fn a_sheet_holding_only_remote_formulas_has_at_least_one_row() {
     }
 }
 
+// -- 11. remote columns read row by row (#556) ---------------------------------
+
+/// A sheet holding only formulas that read `Sheet3!B` row by row has the rows of
+/// that column, whatever its ordinary columns hold; a copy into another sheet
+/// keeps reading the original; a reload (the oracle) gives the same cells.
+#[test]
+fn row_wise_remote_formulas_take_the_length_of_the_remote_column() {
+    for mode in BOTH {
+        let mut p = Project::new("P").expect("project");
+        let root = p.root();
+        let book = add_book(&mut p, root, "Book1");
+        let s1 = first_sheet(&p, book);
+        let s2 = p.add_worksheet(book, Some("Sheet2")).expect("Sheet2");
+        let s3 = p.add_worksheet(book, Some("Sheet3")).expect("Sheet3");
+        add_col(&mut p, s3, "A", &[0.0, 1.0, 2.0]);
+        add_col(&mut p, s3, "B", &[100.0, 200.0, 300.0]);
+        let f1 = add_col(&mut p, s1, "F1", &[]);
+        let f2 = add_col(&mut p, s1, "F2", &[]);
+        set_f(&mut p, f1, "Sheet3!B - 1");
+        set_f(&mut p, f2, "max(Sheet3!B, Sheet3!A)");
+        let (_s, h) = spawn(p, mode);
+        let t = snap(&h).tree;
+        let (f1, f2) = (
+            colat(&t, "[Book1]Sheet1", "F1"),
+            colat(&t, "[Book1]Sheet1", "F2"),
+        );
+        assert_eq!(nums(&t, f1), some(&[99.0, 199.0, 299.0]), "{mode:?}");
+        assert_eq!(nums(&t, f2), some(&[100.0, 200.0, 300.0]), "{mode:?}");
+        // Ordinary columns of nine rows do not count: the formulas read none.
+        h.execute(Command::AddColumn {
+            sheet: node(&t, "[Book1]Sheet1"),
+            index: Some(0),
+            name: Some("Rows".into()),
+            column: Column::from_f64(&[1.0; 9]),
+        })
+        .expect("ordinary column");
+        let t = snap(&h).tree;
+        assert_eq!(nums(&t, f1).len(), 3, "{mode:?}");
+        // The remote column grows: the result follows, and so does a reload.
+        h.execute(enter(colat(&t, "[Book1]Sheet3", "B"), 3, &[400.0, 500.0]))
+            .expect("lengthen");
+        let t = snap(&h).tree;
+        assert_eq!(
+            nums(&t, f1),
+            some(&[99.0, 199.0, 299.0, 399.0, 499.0]),
+            "{mode:?}"
+        );
+        // Copied into Sheet2, it keeps reading Sheet3.
+        h.execute(Command::InsertCopy {
+            parent: s2,
+            copy: NodeCopy::capture(&t, f1).expect("capture"),
+            name: "F1c".into(),
+        })
+        .expect("paste");
+        let t = snap(&h).tree;
+        let copy = colat(&t, "[Book1]Sheet2", "F1c");
+        assert_eq!(
+            t.formula_letters(copy).as_deref(),
+            Some("Sheet3!B - 1"),
+            "{mode:?}"
+        );
+        assert_eq!(nums(&t, copy), nums(&t, f1), "{mode:?}");
+        let oracle = reloaded_full(&h, "row-wise-remote");
+        same_formula_cells(&t, &oracle.tree).expect("coherent with a reload");
+    }
+}
+
 /// `Book1/Sheet1` holding an empty ordinary column `E` and the one formula
 /// `src` (column `F`); `Sheet3` has A (X) and B per `sheet3_b`.
 fn floor_world(src: &str, sheet3_b: &[f64]) -> Project {

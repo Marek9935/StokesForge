@@ -1033,21 +1033,22 @@ mod tests {
     }
 
     #[test]
-    fn a_remote_column_is_read_only_by_a_column_function() {
+    fn a_remote_column_is_read_row_by_row_or_by_a_column_function() {
         let mut fx = Fx::new();
         let at = fx.s1[2];
-        assert_eq!(
-            fx.set(at, "Sheet3!B + 1").unwrap_err(),
-            FormulaError::RemoteOutsideColumnFunction
-        );
-        assert_eq!(
-            fx.set(at, "max(Sheet3!B, A)").unwrap_err(),
-            FormulaError::RemoteOutsideColumnFunction
-        );
-        assert_eq!(
-            fx.set(at, "sqrt(Sheet3!B)").unwrap_err(),
-            FormulaError::RemoteOutsideColumnFunction
-        );
+        // Row-wise forms (#556): accepted, and displayed as typed.
+        for text in [
+            "Sheet3!B + 1",
+            "Sheet3!B",
+            "max(Sheet3!B, A)",
+            "sqrt(Sheet3!B)",
+            "[Book2]Sheet5!B / 2",
+            "-Sheet3!B",
+            "if(Sheet3!B > 1, Sheet3!B, A)",
+        ] {
+            fx.set(at, text).unwrap();
+            assert_eq!(fx.shown(at), text);
+        }
         assert_eq!(
             fx.set(at, "at(B, 1, Sheet3!D)").unwrap_err(),
             FormulaError::RemoteXColumn

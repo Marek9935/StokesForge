@@ -366,20 +366,22 @@ The value is computed once for the whole column, not once per row, so `B / max(B
 
 #### Columns of another sheet or workbook
 
-A whole-column function can read a column of **another sheet**, or of **another workbook**. Write the sheet before the column letter, joined with `!`:
+A formula can read a column of **another sheet**, or of **another workbook**, row by row like a column of its own sheet, or through a whole-column function. Write the sheet before the column letter, joined with `!`:
 
 - `B` is a column of this sheet;
 - `Sheet3!B` is a column of another sheet of the same workbook;
 - `[Book2]Sheet5!B` is a column of a sheet of another workbook. A workbook always comes with its sheet: `[Book2]B` is refused, write `[Book2]Sheet1!B`.
 
-The reference is one value of the function, so the range stays on the right: `at(Sheet3!B, 340)`, `integral(Sheet3!B, 10, 100)`, `max([Book2]Sheet5!B, 330, 350)`, and `B / max(Sheet3!B)` to normalize a column by the maximum of another sheet. The functions that accept it are `at`, `max`, `min`, `mean`, `sum`, `std` and `integral`. `Sheet3!B + 1`, `sqrt(Sheet3!B)` and `max(Sheet3!B, C)` (the row-by-row maximum) are refused: such a reference is read by a whole-column function only.
+The reference is one value of the function, so the range stays on the right: `at(Sheet3!B, 340)`, `integral(Sheet3!B, 10, 100)`, `max([Book2]Sheet5!B, 330, 350)`, and `B / max(Sheet3!B)` to normalize a column by the maximum of another sheet. The functions that read it as a whole column are `at`, `max`, `min`, `mean`, `sum`, `std` and `integral`.
+
+Read row by row, the reference stands for the column of that sheet: `Sheet3!B - 1`, `Sheet3!B` alone, `sqrt(Sheet3!B)`, `max(Sheet3!B, C)` (the row-by-row maximum) and `[Book2]Sheet5!B / 2` all work, and row 5 of the result reads row 5 of `Sheet3!B`.
 
 - **Quotes.** A sheet name that holds anything other than ASCII letters, digits and the transposed mark `ᵀ` (a space, `_`, an accent), or that starts with a digit, is written between single quotes: `'Blanc 2'!B`. A quote inside the name is doubled: `'it''s'!B`. A workbook name between brackets needs no quotes.
 - **Case.** Sheet and workbook names are read without regard to case: `sheet3!b` is `Sheet3!B`, and the field shows the real name. For the same reason, two objects next to each other can no longer differ only by case: `SHEET1` is refused beside `sheet1` (sheets, workbooks, folders, graphs, notes). Column names are not concerned. A project saved earlier that holds such names still opens; a formula that names one of them is refused as ambiguous.
 - **The transposed mark.** A transposed sheet is named `Sheet1ᵀ`, and you can call it with a plain capital `T`: `max(Sheet1T!B)` and `max([Book2]Sheet5T!B)` read `Sheet1ᵀ` and `Sheet5ᵀ`, and the field shows the real name, `max(Sheet1ᵀ!B)`, without quotes (`Sheet1ᵀ!B` typed without quotes works too). Only a capital `T` stands for `ᵀ`, never a small `t`: `Sheet1t!B` does not read `Sheet1ᵀ`. The same holds for workbook and folder names. A name that also holds a space still needs its quotes: `'Sheet1T 2'!B` reads `Sheet1ᵀ 2`. If an exact name exists, it wins: a sheet of your own named `Sheet1T` is read as itself. For this reason, a sheet, a workbook or a folder named `Sheet1T` or `Sheet1t` is refused beside `Sheet1ᵀ`, and the other way round; transposing `Sheet1` while your own `Sheet1T` exists names the new sheet `Sheet1ᵀ 2`.
 - **Which workbook.** `[Book2]` is looked up in the folder of the workbook that holds the formula first, then in the whole project. If several workbooks outside that folder carry the name, StokesForge asks for the path from the project root: `[Mesures/Book2]Sheet5!B` (`[/Book2]Sheet5!B` for a workbook at the root). The field always shows the shortest form that is not ambiguous.
 - **The X column.** The X of a column of another sheet is the one paired with it **in its own sheet**. In `at(Sheet3!B, x, D)`, `D` is a column of `Sheet3` and `x` is calculated in this sheet, row by row; an X column written with its own prefix (`at(B, x, Sheet3!D)`) is refused.
-- **The result.** The result column has the length of its own sheet, whatever the length of the column read. A sheet that holds only formulas of this kind (or constants such as `1+2`) has one row, so the result shows; it takes the length of the sheet as soon as the sheet has data columns.
+- **The result.** The result column is as long as the longest column the formula reads row by row, in its own sheet or in another: `A + Sheet3!B` has the rows of the longer of the two, and a row that the shorter column lacks is an empty cell. A column read by a whole-column function (`max(Sheet3!B)`, `at(Sheet3!B, 340)`) does not change the length. A sheet that holds only formulas that read no column of their own sheet (constants such as `1+2`, or whole-column functions of other sheets) has one row, so the result shows; it takes the length of the sheet as soon as the sheet has data columns. A formula that reads a longer column of another sheet makes its own sheet as long as that column.
 - **Renaming and moving.** The formula follows the sheet: renaming `Sheet3`, or moving it to another workbook (the field then shows `[Book2]Sheet3!B`), changes the text of the field and keeps the values. If the sheet or the column is deleted, or the column is moved to another sheet, the formula shows `#REF` in red and its cells are empty; undoing brings the values back.
 - **Loops.** A formula that would read itself, directly or through other formulas of any sheet, is kept but not calculated: its cells are empty and its **F(x)=** cell is framed in red with "Formulas refer to each other in a loop. Remove one of the references". Every column of the loop is framed, and a formula that reads one of them is empty too.
 - **Copies.** A copied sheet keeps reading the other sheets it did not copy. When you copy a workbook, a formula reads the copy of the sheet that was copied with it. Pasted into another project, the reference becomes `#REF`.
@@ -402,7 +404,7 @@ A formula you type is **always kept**: Enter, Tab or a click elsewhere closes th
 - a letter names no column in the sheet;
 - a sheet or a workbook of a reference does not exist, or the sheet has no such column;
 - a reference to another workbook does not name its sheet, or its workbook name is carried by several workbooks (write the path);
-- a column of another sheet is used outside a whole-column function, or as the X column of `at`;
+- a column of another sheet is used as the X column of `at`;
 - the formula would read itself through other formulas;
 - the formula uses the column that holds it;
 - the text still contains `#REF`;

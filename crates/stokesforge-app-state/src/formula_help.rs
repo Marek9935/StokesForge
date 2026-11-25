@@ -221,13 +221,13 @@ fn operator_rows() -> Vec<HelpRow> {
     ]
 }
 
-/// The reference to a column of another sheet or workbook (#403): not a
+/// The reference to a column of another sheet or workbook (#403, #556): not a
 /// callee either, so a fixed row beside the column functions that read it.
 fn reference_rows() -> Vec<HelpRow> {
     vec![HelpRow {
         callee: None,
         signature: "Sheet3!B",
-        example: "B / max(Sheet3!B)",
+        example: "Sheet3!B - max(Sheet3!B)",
         description: tr!("formula-help-reference"),
     }]
 }

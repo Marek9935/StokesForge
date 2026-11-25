@@ -183,8 +183,8 @@ After each successful `Execute`, `Undo`, `Redo`, `AbortMacro` and after each
 their last computation. For each one it keeps a *fingerprint* — the stored
 formula (text and column identifiers, #321), the version of each column read
 from the sheet it must be in (or its absence: deleted, moved to another sheet,
-or its sheet gone), the length of the result, the version of the column itself,
-the outcome (computed, unreadable, caught in a cycle) — and compares it with the
+or its sheet gone), the length of the result (the longest column read row by row, own or remote),
+the version of the column itself, the outcome (computed, unreadable, caught in a cycle) — and compares it with the
 current state. An unrelated
 command (a curve color, a folder) therefore rewrites no column; modifying A
 rewrites only what reads A, then, through the version of what has just been
@@ -206,10 +206,16 @@ interface field and a paste keep it uncomputed and frames the Formula cell
 (`Tree::formula_keeping`, #433), as does a file that already holds one. An
 unreadable or blocked formula leaves **empty** cells (no `---`, which stays for a
 failed calculation): the frame says why. A remote
-column does not lengthen the result: it keeps the length of its own sheet.
+column read by a column function (`max(Sheet3!B)`, `at(Sheet3!B, 340)`) does
+not lengthen the result; a remote column **read row by row** (`Sheet3!B - 1`,
+`Sheet3!B`, `max(Sheet3!B, C)`, #556) does, like an own column (below).
 
-**Result length (#194).** A formula column has the length of the longest of the
-columns it reads in its own sheet; beyond the length of a shorter column, the row is `NaN`. When
+**Result length (#194, #556).** A formula column has the length of the longest of the
+columns it reads **row by row**, in its own sheet or in another (`Formula::row_wise_remotes`
+names the remote ones: those reached anywhere in the expression, the arguments of a column
+function included, but never the column a column function reads nor its X); beyond the length
+of a shorter column, the row is an empty cell (`---`). A remote column of a followed transposed
+sheet may widen the result, with no cap. When
 it reads no column — constant, unreadable formula, caught in a cycle — it takes
 the length of the longest **ordinary** column (without a formula) of the sheet,
 never that of another formula column. A formula that names no column of its own

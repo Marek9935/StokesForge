@@ -420,6 +420,10 @@ The `Column` record gained `formula_remote` (`Vec<RemoteRefRecord>`, each
 **identifier of the sheet** it is read in (the workbook is read from the tree,
 so moving the sheet keeps the reference), `prefixed` whether the user wrote the
 `Sheet3!` prefix (false for the paired X column of a remote `at`).
+Since #556 the grammar also reads a prefixed column row by row (`Sheet3!B - 1`):
+nothing is stored differently, so a file that holds such a formula, which an
+older version kept uncomputed, now computes at load (a grammar change, not a
+change of stored meaning; `FORMAT_VERSION` stays 1).
 `formula_parts` and `FormulaPartRecord` did not change. **`FORMAT_VERSION` did
 not move**: a file without the field reads no remote reference, and the field
 is **not written** for a formula that reads its own sheet only, so such files

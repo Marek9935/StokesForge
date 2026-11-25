@@ -82,7 +82,7 @@ use tempfile::TempDir;
 /// text. The step converts them to identifiers (`Tree::formula_from_letters`)
 /// as the interface does; a refusal (letter outside the worksheet,
 /// self-reference) gives a step without a command, counted as "rejected".
-const FORMULAS: [&str; 28] = [
+const FORMULAS: [&str; 33] = [
     "A*2",
     "B+1",
     "A+B",
@@ -115,6 +115,13 @@ const FORMULAS: [&str; 28] = [
     "at(Sheet1!B, 2)",
     "B / mean([Book2]Sheet1!B, 1, 3)",
     "integral([Book2]Sheet1!B)",
+    // The same columns read row by row (#556): the length of the result follows
+    // the remote column, and a lengthened or shortened remote column is an input.
+    "Sheet2!A + 1",
+    "Sheet1!B * A",
+    "max([Book2]Sheet1!B, C)",
+    "sqrt(Sheet2!A) - at(Sheet1!B, 1)",
+    "if(Sheet2!B > 1, Sheet2!A, B)",
     // Kept until the thing they name appears (#433): a sheet a duplicate or a
     // paste will create, letters beyond the worksheet. The binder turns them
     // into formulas inside the entry of the gesture that creates it.
@@ -1258,6 +1265,9 @@ struct Coverage {
     follows: usize,
     /// Computed columns whose formula reads another sheet or workbook (#403).
     remote_computed: usize,
+    /// Among them, those that read one **row by row** (#556), counted apart:
+    /// they are the ones whose length follows the remote column.
+    row_wise_computed: usize,
     /// Steps accepted by both sessions, recalculation pass or not.
     accepted: usize,
     /// Kept formulas the binder turned into formulas (#433), counted on the
@@ -1280,6 +1290,7 @@ impl Coverage {
         self.transpose_over_formula += other.transpose_over_formula;
         self.follows += other.follows;
         self.remote_computed += other.remote_computed;
+        self.row_wise_computed += other.row_wise_computed;
         self.accepted += other.accepted;
         self.bindings += other.bindings;
         self.calculations += other.calculations;
@@ -1317,6 +1328,14 @@ impl Coverage {
                     .as_ref()
                     .is_some_and(|formula| !formula.remote_refs().is_empty());
                 self.remote_computed += usize::from(reads_remote);
+                let reads_row_wise = reads_remote
+                    && column
+                        .meta()
+                        .formula
+                        .as_ref()
+                        .and_then(|formula| formula.compile().ok())
+                        .is_some_and(|compiled| !compiled.row_wise_remotes().is_empty());
+                self.row_wise_computed += usize::from(reads_row_wise);
             } else {
                 self.not_computed += 1;
             }
@@ -1558,6 +1577,8 @@ fn b22_the_targeted_recalculation_returns_exactly_the_full_recalculation() {
     assert!(total.follows >= 20, "{total:?}");
     // The formulas that read another sheet or workbook (#403) were reached.
     assert!(total.remote_computed > 100, "{total:?}");
+    // ... and some of them row by row (#556).
+    assert!(total.row_wise_computed > 20, "{total:?}");
     assert!(total.calculations > 200, "{total:?}");
     // The binder (#433) bound kept formulas: without them the fixed point
     // asserted after every step proves nothing.

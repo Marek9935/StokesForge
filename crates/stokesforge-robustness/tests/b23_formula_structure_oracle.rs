@@ -41,7 +41,7 @@ use common::link_states;
 /// Letters, in the sheet the column is in. References to sheets and workbooks
 /// that a rename, a move or a removal may have made unreachable are refused or
 /// read `#REF`; both are fine.
-const FORMULAS: [&str; 16] = [
+const FORMULAS: [&str; 20] = [
     "A*2",
     "B+1",
     "A+B",
@@ -58,6 +58,11 @@ const FORMULAS: [&str; 16] = [
     "max([F1/Book3]Sheet1!A)",
     "max([Book1]Sheet1!A)",
     "B/max(Sheet2!B)",
+    // Read row by row (#556).
+    "Sheet2!B - 1",
+    "max(Sheet2!B, A)",
+    "sqrt([Book2]Sheet1!B)",
+    "'Blanc 2'!A * 2",
 ];
 
 /// Names given by a rename, besides the case-only variants of the current one.
