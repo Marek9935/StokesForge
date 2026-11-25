@@ -209,3 +209,33 @@ fn a_malformed_stored_text_gives_the_object_and_the_line() {
     assert!(message.contains("Broken"), "{message}");
     assert_eq!(stored(&b, "Broken"), "a = \nb = 2\n");
 }
+
+/// #571: an object stored in CRLF (an old `.stf`): the same value written from
+/// a script changes nothing (no undo entry); a changed value stores LF and one
+/// undo restores the exact CRLF bytes.
+/// Witnesses: compare raw text in `set_settings` (the "same value" run makes an
+/// entry); drop the normalisation of `SetScriptSettingsText` (stored text keeps CR).
+#[test]
+fn set_settings_on_a_crlf_object_writes_nothing_for_the_same_value_and_lf_otherwise() {
+    let crlf = "# c\r\nn = 3\r\nnote = \"\"\"\r\nfirst\r\nsecond\"\"\"\r\n";
+    let b = bench_with(crlf);
+    run(
+        &b,
+        "s = pyst.resolve('[Settings1]')\n\
+         pyst.set_settings(s, {'n': 3})\n",
+    );
+    assert_eq!(stored(&b, "Settings1"), crlf);
+    run(&b, "assert pyst.undo() is False\n");
+
+    run(
+        &b,
+        "s = pyst.resolve('[Settings1]')\n\
+         pyst.set_settings(s, {'n': 4})\n",
+    );
+    assert_eq!(
+        stored(&b, "Settings1"),
+        crlf.replace("\r\n", "\n").replace("n = 3", "n = 4")
+    );
+    run(&b, "assert pyst.undo() is True\n");
+    assert_eq!(stored(&b, "Settings1"), crlf);
+}

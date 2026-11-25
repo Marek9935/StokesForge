@@ -41,7 +41,7 @@ jobs:
     steps:
       # Full history and tags: versions-aligned.sh compares the pyst API
       # snapshots with those of the released tags (#356).
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - run: python3 scripts/gitlab-status-test.py
@@ -71,7 +71,7 @@ jobs:
   linux-packages:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: scripts/nfpm-install.sh
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm
       - run: scripts/linux-packages-test.sh --nfpm
@@ -96,7 +96,7 @@ jobs:
   manual:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: mdBook
         run: |
           source scripts/manual-tools.env
@@ -108,7 +108,7 @@ jobs:
   licenses:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
       - name: License tools
         run: |
@@ -118,7 +118,7 @@ jobs:
       - run: cargo deny --locked check licenses
       - run: scripts/licenses-test.sh
       - run: scripts/licenses-rust.sh target/licenses/THIRD-PARTY-LICENSES.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: third-party-licenses
           path: target/licenses/THIRD-PARTY-LICENSES.txt
@@ -126,7 +126,7 @@ jobs:
   clippy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
       - run: rustup component add clippy
       - run: cargo clippy --workspace --all-targets -- -D warnings
@@ -136,7 +136,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
       # The captures (egui_kittest + wgpu) need a Vulkan adapter: the runner
       # has no GPU, lavapipe (Mesa) provides software rendering.
@@ -151,7 +151,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
       # `-p stokesforge-robustness` alone pulls in `wayland-sys`, which links
       # with pkg-config: without this package the job failed at compilation,
@@ -175,9 +175,9 @@ jobs:
   test-python:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             vendor/python/*.tar.gz
@@ -217,7 +217,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: The tagged commit is on main or on a release branch
@@ -227,7 +227,7 @@ jobs:
       - name: Tag and notes
         run: scripts/release-notes.sh "$GITHUB_REF_NAME" > /dev/null
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             vendor/python/*.tar.gz
@@ -297,7 +297,7 @@ jobs:
         run: scripts/release-upload.sh linux "$GITHUB_REF_NAME"
       # The packages are tested in containers (`test-linux-packages`) and only
       # then uploaded (`upload-linux-packages`).
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux-packages
           path: |
@@ -326,8 +326,8 @@ jobs:
           - image: ubuntu:22.04
             format: deb
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: linux-packages
           path: dist
@@ -357,13 +357,13 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Publication switch
         id: switch
         run: |
           source scripts/linux-packages.env
           echo "publish=${PUBLISH_LINUX_PACKAGES}" >> "$GITHUB_OUTPUT"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: steps.switch.outputs.publish == '1'
         with:
           name: linux-packages
@@ -386,7 +386,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: The tagged commit is on main or on a release branch
@@ -421,7 +421,7 @@ jobs:
         shell: bash
     steps:
       - run: git config --system core.longpaths true
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
       - run: |
           set +e
@@ -441,9 +441,9 @@ jobs:
     steps:
       # Long paths: `.cargo/registry` exceeds MAX_PATH (see .windows-job).
       - run: git config --system core.longpaths true
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             vendor/python/*.tar.gz
@@ -473,9 +473,9 @@ jobs:
         shell: bash
     steps:
       - run: git config --system core.longpaths true
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             vendor/python/*.tar.gz
@@ -483,7 +483,7 @@ jobs:
           key: python-windows-${{ hashFiles('vendor/python/lock.env') }}
       # License tools at the versions of scripts/licenses-tools.env, kept in
       # cache: compiling them from scratch is slow.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         id: outils
         with:
           path: |
@@ -514,7 +514,7 @@ jobs:
       - name: Compiler version
         id: rustc
         run: echo "rustc=$(scripts/rustc-note.sh)" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-installeur
           path: dist/StokesForge-*-windows-setup.exe
@@ -537,7 +537,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: The tagged commit is on main or on a release branch

@@ -9,6 +9,10 @@
 //! (which would drop them) is not an option. `toml_edit` keeps the layout;
 //! this module is the only place that knows it, so core stays free of UI and
 //! the two callers cannot disagree on what a value, a help line or a hint is.
+//! Edits change only the edited value in an LF text. A CRLF text would come
+//! back mixed (`toml_edit` writes LF everywhere except inside multi-line
+//! strings, whose source bytes it keeps), so the commands store LF
+//! ([`normalize_newlines`], #571).
 //!
 //! **What it is not.** It does not repair or guess: a text that is not exact
 //! TOML is refused with the parser's message and its 1-based line
@@ -41,6 +45,7 @@
 //! Hints never refuse a write ([`apply_values`]); [`Entry::out_of_hint`]
 //! only reports.
 
+use std::borrow::Cow;
 use std::str::FromStr;
 
 use toml_edit::{Array, ArrayOfTables, DocumentMut, Item, Table, TableLike, Value};
@@ -48,6 +53,38 @@ use toml_edit::{Array, ArrayOfTables, DocumentMut, Item, Table, TableLike, Value
 /// Longest text accepted, in bytes. A settings file is a few kilobytes; the
 /// cap keeps a pasted binary or a pathological file from reaching the parser.
 pub const MAX_TEXT_BYTES: usize = 4 * 1024 * 1024;
+
+/// The text with its CRLF line endings turned into LF (#571). Commands store
+/// this form, so the text of an object written by a command never depends on
+/// the platform that produced it.
+///
+/// A CR is dropped only when it is followed by LF **and** not preceded by
+/// another CR: `\r\r\n` (refused by TOML) must stay refused, and a second
+/// pass must change nothing. A lone CR is untouched. Text without a CRLF is
+/// borrowed, not copied.
+pub fn normalize_newlines(text: &str) -> Cow<'_, str> {
+    if !text.contains("\r\n") {
+        return Cow::Borrowed(text);
+    }
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut start = 0;
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b'\r' && bytes.get(i + 1) == Some(&b'\n') && (i == 0 || bytes[i - 1] != b'\r') {
+            out.push_str(&text[start..i]);
+            start = i + 1;
+        }
+    }
+    out.push_str(&text[start..]);
+    Cow::Owned(out)
+}
+
+/// True when both texts are the same, line endings aside (see
+/// [`normalize_newlines`]). The "nothing to write" test of the form and of
+/// `pyst`: an object kept in CRLF equals its LF twin.
+pub fn same_text(a: &str, b: &str) -> bool {
+    a == b || normalize_newlines(a) == normalize_newlines(b)
+}
 
 /// One step of the path to a key: a table key or the 0-based index of a
 /// block of an array of tables (`[[x]]`).
@@ -772,7 +809,9 @@ pub fn to_values(doc: &SettingsDoc) -> SettingsValue {
 
 /// The edited document as text. `toml_edit` ends every line with a newline;
 /// a source that did not end with one keeps it that way, so the only bytes
-/// that change are the edited ones.
+/// that change are the edited ones. That holds for LF text; in a CRLF source
+/// every line ending outside multi-line strings becomes LF, which is why the
+/// commands store LF ([`normalize_newlines`]).
 fn render(source: &str, doc: &DocumentMut) -> String {
     let mut out = doc.to_string();
     if !source.is_empty() && !source.ends_with('\n') && out.ends_with('\n') {

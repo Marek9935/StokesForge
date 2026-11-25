@@ -53,11 +53,12 @@ MODES = {
 # small_lane: may use the extra slot of the small lane (background mode only, see `small_lane_free`).
 # ages: a waiter of the class counts as rank 1 once it has waited SF_CARGO_QUEUE_AGE seconds (default 300).
 # jobs: None = the mode's jobs. `low` (#523, the template refresh, SF_CARGO_QUEUE_CLASS=low only): rank 3, always
-# behind every other waiter even typed at a tty, never in `background` mode (LOW_NEVER_MODES), -j2.
+# behind every other waiter even typed at a tty, never ages (#573), never in `background` mode (LOW_NEVER_MODES),
+# where it never heads the queue either, -j2.
 CLASSES = {
     "small": {"rank": 1, "small_lane": True, "ages": False, "jobs": None},
     "big": {"rank": 2, "small_lane": False, "ages": True, "jobs": None},
-    "low": {"rank": 3, "small_lane": False, "ages": True, "jobs": 2},
+    "low": {"rank": 3, "small_lane": False, "ages": False, "jobs": 2},
 }
 LOW_NEVER_MODES = ("background",)   # a low build stays queued there, even with a free slot and nobody waiting
 LANE_MODES = ("background",)    # the small lane exists only here: 1 slot + 1 small lane (#476 ruled out a third build)
@@ -630,12 +631,17 @@ def ticket_rank(name):
     return int(name.split("-")[1])
 
 
-def effective_key(name, info, now, age):
-    """Sort key of a waiter: (rank, arrival). A waiter of an ageing class that has waited `age` s counts as rank 1."""
+def low_blocked(cls, mode):
+    """A low ticket cannot start in this mode (#573); it must never sit ahead of a waiter that can."""
+    return cls == "low" and mode in LOW_NEVER_MODES
+
+
+def effective_key(name, info, now, age, mode):
+    """Sort key of a waiter: (blocked here, rank, arrival). A waiter of an ageing class that has waited `age` s counts as rank 1."""
     rank = ticket_rank(name)
     if rank > 1 and CLASSES.get(info.get("class"), {}).get("ages") and now - info.get("start", now) >= age:
         rank = 1
-    return (rank, name.split("-")[2], name)
+    return (low_blocked(info.get("class"), mode), rank, name.split("-")[2], name)
 
 
 class Ticket:
@@ -758,9 +764,9 @@ def wait_turn(ticket):
             items = list_tickets(purge=True, own=ticket.name)
             running = [x for x in items if x[0].startswith("r-")]
             waiting = [x for x in items if x[0].startswith("w-")]
-            order = sorted(waiting, key=lambda x: effective_key(x[0], x[1], now, age))
+            order = sorted(waiting, key=lambda x: effective_key(x[0], x[1], now, age, mode))
             normal_running = [x for x in running if x[1].get("lane") != "extra"]
-            if ticket.cls == "low" and mode in LOW_NEVER_MODES:
+            if low_blocked(ticket.cls, mode):
                 pass
             elif len(normal_running) < slots and order and order[0][0] == ticket.name:
                 lane = "normal"

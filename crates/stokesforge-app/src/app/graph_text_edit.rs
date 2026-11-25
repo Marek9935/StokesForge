@@ -103,6 +103,23 @@ fn apply_pending_zone_font(ctx: &egui::Context, font: &mut String) {
 /// the selection inside the tags.
 fn apply_pending_format(ctx: &egui::Context, field: egui::Id, buffer: &mut String) {
     use egui::text::{CCursor, CCursorRange};
+    // The font list of the bar (#554) hands the focus back after a pick or an
+    // Escape: with the selection the field kept, since egui shrank the one of
+    // a field painted without focus (#242) and a plain focus request would keep
+    // the shrunk one.
+    if crate::font_list::take_return_focus(ctx, field) {
+        let kept = ctx.data(|data| data.get_temp::<SelectionKept>(field.with("selection_kept")));
+        if let Some(SelectionKept(range)) = kept {
+            let length = buffer.chars().count();
+            let mut state = egui::TextEdit::load_state(ctx, field).unwrap_or_default();
+            state.cursor.set_char_range(Some(CCursorRange::two(
+                CCursor::new(range.start.min(length)),
+                CCursor::new(range.end.min(length)),
+            )));
+            state.store(ctx, field);
+        }
+        ctx.memory_mut(|memory| memory.request_focus(field));
+    }
     let Some(format) = ctx
         .data_mut(|data| {
             data.remove_temp::<Option<stokesforge_app_state::text_format::TextFormat>>(

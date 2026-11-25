@@ -1460,6 +1460,7 @@ format-font = Font
 format-font-default = Graph font
 format-font-embedded = Included with StokesForge
 format-font-system = Installed on this computer
+font-list-no-match = No font name contains "{ $text }". Clear the text to see all fonts.
 format-size = Size
     .hint = Sets the size, in points, of the selected text
 format-color = Text color

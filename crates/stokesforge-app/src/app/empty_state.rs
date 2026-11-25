@@ -8,7 +8,7 @@ use eframe::egui;
 use crate::theme;
 
 /// Paints the sentence `text` at the center of the available space.
-pub(super) fn empty_state(ui: &mut egui::Ui, text: impl Into<String>) {
+pub(crate) fn empty_state(ui: &mut egui::Ui, text: impl Into<String>) {
     let text = text.into();
     ui.vertical_centered(|ui| {
         ui.add_space(theme::SPACE_SECTION);

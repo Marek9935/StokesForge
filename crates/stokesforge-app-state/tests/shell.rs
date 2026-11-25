@@ -21447,6 +21447,9 @@ fn a_new_script_settings_holds_the_example_and_opens_its_window() {
         state.script_settings_text(settings).as_deref(),
         Some(stokesforge_app_state::state::SCRIPT_SETTINGS_EXAMPLE)
     );
+    // #571: the template is LF in the binary (`.gitattributes` pins it); this
+    // only bites on a Windows checkout with `core.autocrlf`.
+    assert!(!stokesforge_app_state::state::SCRIPT_SETTINGS_EXAMPLE.contains('\r'));
     assert_eq!(state.take_settings_to_open(), vec![settings]);
     assert!(state.take_settings_to_open().is_empty(), "taken once");
     // The example reads: a bounded number, a choice list, a list, an empty list.
@@ -21656,19 +21659,21 @@ fn a_malformed_toml_import_creates_nothing_and_names_the_line() {
     assert!(status.text.contains("bad.toml"), "{}", status.text);
 }
 
-/// A good `.toml` becomes an object named after the file, text unchanged; a
-/// second one with the same name gets a free name; a dropped `.toml` does the
-/// same as the menu.
+/// A good `.toml` becomes an object named after the file, its text stored with
+/// LF line endings (#571, the content otherwise unchanged); a second one with
+/// the same name gets a free name; a dropped `.toml` does the same as the menu.
 #[test]
-fn importing_a_toml_keeps_its_bytes_and_a_drop_does_the_same() {
+fn importing_a_toml_stores_lf_and_a_drop_does_the_same() {
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let file = dir.path().join("fit.toml");
-    let text = "# my fit\r\nn = 3   # three\r\n";
-    std::fs::write(&file, text).expect("wrote");
+    std::fs::write(&file, "# my fit\r\nn = 3   # three\r\n").expect("wrote");
     state.dispatch(Action::ImportScriptSettings { path: file.clone() });
     let imported = settings_named(&state, "fit");
-    assert_eq!(state.script_settings_text(imported).as_deref(), Some(text));
+    assert_eq!(
+        state.script_settings_text(imported).as_deref(),
+        Some("# my fit\nn = 3   # three\n")
+    );
     assert_eq!(state.take_settings_to_open(), vec![imported]);
     state.dispatch(Action::DropFiles {
         paths: vec![file],
@@ -21882,4 +21887,116 @@ fn a_script_file_is_refused_without_the_python_bridge() {
     assert!(state.status().expect("a message").is_error());
     assert_eq!(state.snapshot().revision, before);
     assert!(state.script_blocked_reason().is_some());
+}
+
+fn text_of_settings(state: &AppState, name: &str) -> String {
+    state
+        .script_settings_text(settings_named(state, name))
+        .expect("text")
+}
+
+/// #571, the issue's witness: a CRLF `.toml` (with a multi-line string) is
+/// stored LF, so the first form edit changes only the edited value, and one
+/// Undo restores the text.
+/// Witness: drop the normalisation of `AddScriptSettings` in `commands`.
+#[test]
+fn a_crlf_toml_imported_then_edited_by_the_form_changes_only_that_value() {
+    use stokesforge_app_state::state::SettingsChange;
+    use stokesforge_core::script_settings::{Scalar, Seg};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let file = dir.path().join("fit.toml");
+    std::fs::write(&file, "n = 3\r\nnote = \"\"\"\r\nfirst\r\nsecond\"\"\"\r\n").expect("wrote");
+    state.dispatch(Action::ImportScriptSettings { path: file });
+    let imported = settings_named(&state, "fit");
+    let before = state.script_settings_text(imported).expect("text");
+    assert!(!before.contains('\r'));
+
+    state.dispatch(Action::ChangeScriptSettings {
+        settings: imported,
+        change: SettingsChange::Scalar {
+            path: vec![Seg::Key("n".into())],
+            value: Scalar::Integer(4),
+        },
+    });
+    let after = state.script_settings_text(imported).expect("text");
+    assert_eq!(after, before.replace("n = 3", "n = 4"));
+    state.dispatch(Action::Undo);
+    assert_eq!(state.script_settings_text(imported), Some(before));
+}
+
+/// #571: an object already stored in CRLF (a `.stf` of an older version)
+/// loads byte for byte and reads; a form edit or a Text commit that changes
+/// nothing writes nothing; a real change stores LF and Undo gives the exact
+/// CRLF bytes back.
+/// Witnesses: compare the raw text in `set_script_settings_text` (the two
+/// "nothing" checks fail); drop the normalisation of `SetScriptSettingsText`
+/// in `commands` (the LF check fails).
+#[test]
+fn an_old_crlf_object_loads_exact_and_only_a_real_change_rewrites_it() {
+    use stokesforge_app_state::state::SettingsChange;
+    use stokesforge_core::script_settings::{Scalar, Seg};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let crlf = "# keep\r\nn = 3\r\nnote = \"\"\"\r\nfirst\r\nsecond\"\"\"\r\n";
+    let mut project = demo_project();
+    let root = project.root();
+    project
+        .add_script_settings(root, Some("old"), crlf)
+        .expect("old object");
+    let file = dir.path().join("old.stf");
+    stokesforge_persistence::save(&project, &file).expect("saved");
+
+    let (_session, mut state) = start_demo(dir.path());
+    state.set_path(file.display().to_string());
+    state.dispatch(Action::Load);
+    let old = settings_named(&state, "old");
+    assert_eq!(state.script_settings_text(old).as_deref(), Some(crlf));
+    let revision = state.snapshot().revision;
+    let view = state.settings_view(old).expect("view");
+    assert!(view.error.is_none() && view.doc.is_some());
+    assert_eq!(
+        state.snapshot().revision,
+        revision,
+        "loading and viewing write nothing"
+    );
+
+    let n = |value| Action::ChangeScriptSettings {
+        settings: old,
+        change: SettingsChange::Scalar {
+            path: vec![Seg::Key("n".into())],
+            value: Scalar::Integer(value),
+        },
+    };
+    state.dispatch(n(3));
+    state.dispatch(Action::SetScriptSettingsText {
+        settings: old,
+        text: crlf.replace("\r\n", "\n"),
+    });
+    assert_eq!(state.snapshot().revision, revision, "same value: no entry");
+    assert_eq!(state.script_settings_text(old).as_deref(), Some(crlf));
+
+    state.dispatch(n(4));
+    assert!(state.snapshot().revision > revision);
+    assert_eq!(
+        text_of_settings(&state, "old"),
+        crlf.replace("\r\n", "\n").replace("n = 3", "n = 4")
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(state.script_settings_text(old).as_deref(), Some(crlf));
+}
+
+/// #571: the Text tab keeps a malformed text, stored with LF, still malformed.
+#[test]
+fn a_malformed_crlf_text_is_kept_with_lf_and_stays_refused() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    state.dispatch(Action::AddScriptSettings);
+    let settings = settings_named(&state, "Settings1");
+    state.dispatch(Action::SetScriptSettingsText {
+        settings,
+        text: "a = 1\r\nb =\r\n".to_string(),
+    });
+    assert_eq!(text_of_settings(&state, "Settings1"), "a = 1\nb =\n");
+    let view = state.settings_view(settings).expect("view");
+    assert_eq!(view.error.expect("refused").line, 2);
 }

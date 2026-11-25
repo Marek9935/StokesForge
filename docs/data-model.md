@@ -493,9 +493,19 @@ The model keeps a Script Settings as raw text and never parses it.
 `stokesforge_core::script_settings` is the one place that reads that text, for
 the form of the window and for `pyst`. It rests on `toml_edit`, so an edit
 changes only the edited value: comments, key order, spacing and end-of-line
-comments stay byte for byte (a text without a final newline keeps none). It has no UI,
+comments stay byte for byte (a text without a final newline keeps none; this holds for LF text, see below). It has no UI,
 no session and no state: every edit returns the **new full text**, which the
 caller sends through `SetScriptSettingsText`.
+
+**Line endings (#571).** The commands (`AddScriptSettings`,
+`SetScriptSettingsText`) store the text with LF: `normalize_newlines` drops a CR
+only when it is followed by LF and not preceded by another CR (so `\r\r\n`,
+refused by TOML, stays refused; a lone CR is untouched; the function is
+idempotent and borrows an LF text). `same_text` is "equal, line endings aside",
+the test of the form and of `pyst` for "nothing to write". An object already
+stored in CRLF (older `.stf`) is read as it is, and only a real change rewrites
+it in LF, the undo giving the exact old bytes back. The core primitives
+themselves never normalise.
 
 - `parse(text)` gives a `SettingsDoc` (ordered sections: the root keys, each
   table, dotted and inline tables as nested sections, each `[[x]]` block as its
