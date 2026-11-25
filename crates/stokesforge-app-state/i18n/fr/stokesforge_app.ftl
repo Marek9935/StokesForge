@@ -2072,7 +2072,7 @@ origin-import-summary = À créer : { $sheets ->
     [one] { $books } classeur
    *[other] { $books } classeurs
     }
-origin-import-partial = Une partie de ce fichier n'a pas pu être lue : certains classeurs gardent leurs données mais perdent noms longs, unités et rôles X/Y
+origin-import-partial = Une partie de ce fichier n'a pas pu être lue : certains classeurs gardent leurs données mais perdent noms longs, unités et rôles X/Y, et certains graphiques peuvent manquer
 origin-import-own-x = Ces feuilles gardent un X propre, ses valeurs diffèrent du premier X : { $names }
 status-import-own-x = Ces fichiers gardent un X propre, ses valeurs diffèrent du premier X : { $names }
 status-import-folder-gone = Le dossier choisi pour l'import n'existe plus : les classeurs ont été créés à la racine du projet
@@ -2082,10 +2082,10 @@ origin-import-accept =
     .hint = Crée les classeurs et les feuilles que demandent les colonnes cochées (Entrée)
 origin-import-check-all =
     Tout cocher
-    .hint = Coche toutes les colonnes de toutes les feuilles
+    .hint = Coche toutes les colonnes de toutes les feuilles et tous les graphiques
 origin-import-check-none =
     Ne rien cocher
-    .hint = Décoche toutes les colonnes de toutes les feuilles
+    .hint = Décoche toutes les colonnes de toutes les feuilles et tous les graphiques
 origin-import-book-hint = Coche ou décoche toutes les colonnes de ce classeur
 origin-import-sheet-size = { $columns ->
     [one] { $columns } colonne
@@ -2702,6 +2702,20 @@ origin-import-column-hint = Clic pour cocher ou décocher, Maj+clic pour une pla
 origin-import-column-check-in-all = Cocher « { $name } » dans toutes les feuilles
 origin-import-column-uncheck-in-all = Décocher « { $name } » dans toutes les feuilles
 origin-import-sheet-hint = Coche ou décoche toutes les colonnes de cette feuille
+origin-import-graphs-heading = Graphiques
+origin-import-graph-hint = Coche ou décoche les colonnes que ce graphique trace (et les colonnes d'erreur à leur suite)
+origin-import-graph-curves = { $count ->
+    [one] { $count } courbe
+   *[other] { $count } courbes
+}
+origin-import-curve = { $y } en fonction de { $x } · { $book } / { $sheet }
+origin-import-curve-no-x = { $y } · { $book } / { $sheet }
+origin-import-show = Afficher :
+origin-import-show-all = Tout
+origin-import-show-workbooks = Classeurs
+origin-import-show-graphs = Graphiques
+disabled-origin-graph-no-curve = Ce graphique ne trace aucune courbe
+disabled-origin-graph-unresolved = Aucune courbe de ce graphique n'a pu être rattachée à une colonne d'un classeur
 disabled-import-folder-active-book = Le dossier n'est pas utilisé quand on importe dans le classeur actif
 import-footer-template = Modèle : { $value }
 import-footer-template-auto = Auto · { $name }

@@ -124,7 +124,7 @@ text wizard. Routing is by extension or by the first bytes, `CPYA`/`CPYUA`
 (`ImportReply::origin`, `read_origin_file`), and `apply_ready_import` hands the
 parsed projects (shared by `Arc`) to `AppState::add_origin_reads`, which opens
 the **chooser** (`state/origin_import.rs`: files, books, sheets with column and
-row counts, ticks from `default_origin_selection`, minus sheets with no column)
+row counts and graphs; nothing ticked at opening since #557, `default_origin_selection` stays for the CLI and `pyst`)
 or extends it (a path already there is not added twice). An unreadable file is
 one red message built by `errors::import::failure_message`. An Origin-only job
 skips the recipe part entirely (no empty "Import" entry, no "0 of 0"); a mixed
@@ -139,7 +139,19 @@ other files with a message. The ticks are per column (#537; sheet and book boxes
 show `OriginTick` all/none/some; actions `ToggleOriginColumn`,
 `SetOriginColumnRange` for Shift+click, `SetOriginColumnInAllSheets` by long name
 else short name, `ToggleOriginSheet`, `SetOriginBookTicked`, Check All/None); a
-sheet with no ticked column is no table. The chooser also holds the classic layouts
+sheet with no ticked column is no table. **Graphs (#557).** Each file also lists its
+graphs (`OriginFileView::graphs`, resolved once in `GraphInfo` when the file is added: the
+columns a graph plots are the X and Y of each resolvable curve, plus the `YError` and
+`XError` columns standing right after a plotted Y; a curve with no resolvable Y is
+ignored, one with no resolvable X ticks its Y alone; two layers are one line). `ToggleOriginGraph`
+ticks a graph that is not wholly ticked (its columns are added to the same ticks the
+books show) and unticks one that is, except the columns another ticked graph uses and
+the columns the user ticked or unticked by hand since (`OriginFile::by_hand`; a
+graph that ticks a column takes it off that set). The box of a graph is three-state over
+its columns; a graph with no curve, or none that resolves, is greyed with a reason.
+`SetOriginShow` (`OriginShow`: All, Workbooks, Graphs) only hides rows and is reset on
+Reopen Last Import, which restores the ticks and the graph picks. Check All / Check None
+cover the graphs. The chooser also holds the classic layouts
 (`SetOriginWhere`: one workbook per Origin workbook, or one new workbook named
 after the file when there is one file; `SetOriginLayout`: one sheet per Origin
 sheet, side by side, shared X) and a **folder**: one Origin sheet is one "file" of

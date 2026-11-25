@@ -13,7 +13,12 @@
 //! thousand columns). A column row is a check box, its X/Y role, its long name
 //! and its unit; click toggles it, Shift+click toggles the range from the last
 //! one clicked in that sheet, right-click offers the same column in all
-//! sheets. A sheet with no column has its box greyed out with its reason. With
+//! sheets. Under the workbooks of each file a **Graphs** heading lists its
+//! graphs (#557): a three-state box over the columns the graph plots, its name
+//! and curve count, and its curves (`Y vs X · Book / Sheet`, no box) once
+//! opened; a graph with no usable curve is greyed with its reason. Three
+//! buttons `Show: All / Workbooks / Graphs` above the list hide one kind or
+//! the other and never untick. Nothing is ticked at opening. A sheet with no column has its box greyed out with its reason. With
 //! a single file the file level is a plain heading line. The state, the ticks
 //! and the reasons live in `AppState` (`origin_import_*`); the window decides
 //! nothing and pushes only actions. A long name (Horiba labels run to 60
@@ -30,10 +35,12 @@ use super::dialogs::{
 use super::import_to::{
     folder_label, folder_menu, menu_button, to_menu, LayoutOptions, ToPick, WhereOption,
 };
+use super::tab_strip::{tab_strip, TabStripSide};
 use crate::icons::Icon;
 use crate::theme;
 use stokesforge_app_state::state::{
-    Action, AppState, OriginBookView, OriginColumnView, OriginSheetView, OriginTick, OriginWhere,
+    Action, AppState, OriginBookView, OriginColumnView, OriginFileView, OriginGraphView,
+    OriginSheetView, OriginShow, OriginTick, OriginWhere,
 };
 use stokesforge_app_state::tr;
 use stokesforge_import::origin::OriginDesignation;
@@ -62,6 +69,7 @@ pub(super) fn origin_import_window(
     let summary = state.origin_import_summary();
     let blocker = state.origin_import_blocker();
     let own_x = state.origin_import_x_warning();
+    let show = state.origin_import_show();
     let accept_label = tr!("origin-import-accept");
     let accept_hint = tr!("origin-import-accept", "hint");
     let reason = blocker.clone().unwrap_or_default();
@@ -93,6 +101,7 @@ pub(super) fn origin_import_window(
             // The two menus of the Import window, above the tree: their labels
             // are too long for the footer.
             ui.horizontal(|ui| to_and_folder(ui, state, &mut requested));
+            ui.horizontal(|ui| show_buttons(ui, show, &mut requested));
             ui.add_space(theme::SPACE_ITEM);
             let reserved = if own_x.is_some() { 70.0 } else { 26.0 };
             let list_height = (ui.available_height() - reserved).max(80.0);
@@ -114,14 +123,14 @@ pub(super) fn origin_import_window(
                             ui.label(theme::bold(&file.file_name))
                                 .on_hover_text(file.path.display().to_string());
                             partial_note(ui);
-                            books(ui, file_index, &file.books, &mut requested);
+                            file_body(ui, file_index, file, show, &mut requested);
                         } else {
                             egui::CollapsingHeader::new(theme::bold(&file.file_name))
                                 .id_salt(("stokesforge_origin_file", file_index))
                                 .default_open(true)
                                 .show(ui, |ui| {
                                     partial_note(ui);
-                                    books(ui, file_index, &file.books, &mut requested);
+                                    file_body(ui, file_index, file, show, &mut requested);
                                 })
                                 .header_response
                                 .on_hover_text(file.path.display().to_string());
@@ -212,10 +221,101 @@ fn to_and_folder(ui: &mut egui::Ui, state: &AppState, requested: &mut Vec<Action
     }
 }
 
-fn books(ui: &mut egui::Ui, file: usize, books: &[OriginBookView], requested: &mut Vec<Action>) {
-    for (book_index, book) in books.iter().enumerate() {
-        book_node(ui, file, book_index, book, requested);
+/// The tabs `Show: All / Workbooks / Graphs` (#557).
+fn show_buttons(ui: &mut egui::Ui, current: OriginShow, requested: &mut Vec<Action>) {
+    ui.label(tr!("origin-import-show"));
+    let tabs = [
+        (OriginShow::All, tr!("origin-import-show-all")),
+        (OriginShow::Workbooks, tr!("origin-import-show-workbooks")),
+        (OriginShow::Graphs, tr!("origin-import-show-graphs")),
+    ];
+    tab_strip(
+        ui,
+        TabStripSide::Top,
+        &tabs,
+        current,
+        |picked| {
+            if picked != current {
+                requested.push(Action::SetOriginShow(picked));
+            }
+        },
+        None,
+        || {},
+    );
+}
+
+/// The books of a file, then its graphs under a heading, as `show` says.
+fn file_body(
+    ui: &mut egui::Ui,
+    file_index: usize,
+    file: &OriginFileView,
+    show: OriginShow,
+    requested: &mut Vec<Action>,
+) {
+    if show != OriginShow::Graphs {
+        for (book_index, book) in file.books.iter().enumerate() {
+            book_node(ui, file_index, book_index, book, requested);
+        }
     }
+    if show != OriginShow::Workbooks && !file.graphs.is_empty() {
+        ui.add_space(theme::SPACE_ITEM);
+        ui.label(theme::bold(tr!("origin-import-graphs-heading")));
+        for (graph_index, graph) in file.graphs.iter().enumerate() {
+            graph_node(ui, file_index, graph_index, graph, requested);
+        }
+    }
+}
+
+/// One graph: its three-state box, name and curve count on the header row, its
+/// curves below once opened (closed by default). A curve row has no box.
+fn graph_node(
+    ui: &mut egui::Ui,
+    file: usize,
+    index: usize,
+    graph: &OriginGraphView,
+    requested: &mut Vec<Action>,
+) {
+    let mut checked = graph.tick == OriginTick::All;
+    let mixed = graph.tick == OriginTick::Some;
+    let id = ui.make_persistent_id(("stokesforge_origin_graph", file, index));
+    egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
+        .show_header(ui, |ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(theme::secondary_text(tr!(
+                    "origin-import-graph-curves",
+                    count = i64::try_from(graph.curves.len()).unwrap_or(i64::MAX)
+                )));
+                if !graph.short_name.is_empty() && graph.short_name != graph.name {
+                    ui.label(theme::secondary_text(&graph.short_name));
+                }
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    // A long name is cut with an ellipsis where the row ends.
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                    let response = ui
+                        .add_enabled(
+                            graph.unavailable.is_none(),
+                            egui::Checkbox::new(&mut checked, graph.name.as_str())
+                                .indeterminate(mixed),
+                        )
+                        .on_disabled_hover_text(graph.unavailable.clone().unwrap_or_default());
+                    let response = if graph.name.chars().count() > LONG_NAME {
+                        response.on_hover_text(&graph.name)
+                    } else {
+                        response.on_hover_text(tr!("origin-import-graph-hint"))
+                    };
+                    if response.changed() {
+                        requested.push(Action::ToggleOriginGraph { file, graph: index });
+                    }
+                });
+            });
+        })
+        .body(|ui| {
+            for curve in &graph.curves {
+                // One line per curve, cut where the row ends; full on hover.
+                ui.add(egui::Label::new(curve.as_str()).truncate())
+                    .on_hover_text(curve);
+            }
+        });
 }
 
 /// One workbook: its three-state box and name on the header row, its sheets
@@ -522,7 +622,43 @@ mod tests {
         ]
     }
 
+    /// The chooser as the tests of #490 and #537 knew it: the `Data` sheets
+    /// ticked (all non-empty sheets of a book with no `Data` sheet). Since
+    /// #557 the chooser opens with nothing ticked, see [`start_unticked`].
     fn start(books: Vec<synthetic::Book>) -> (Bench, PathBuf) {
+        let (mut bench, path) = start_unticked(books);
+        let files = bench.state.origin_import_files();
+        for (book_index, book) in files[0].books.iter().enumerate() {
+            let has_data = book
+                .sheets
+                .iter()
+                .any(|sheet| sheet.name.eq_ignore_ascii_case("Data"));
+            for (sheet_index, sheet) in book.sheets.iter().enumerate() {
+                let ticked = if has_data {
+                    sheet.name.eq_ignore_ascii_case("Data")
+                } else {
+                    sheet.columns > 0
+                };
+                if ticked {
+                    bench.state.dispatch(Action::ToggleOriginSheet {
+                        file: 0,
+                        book: book_index,
+                        sheet: sheet_index,
+                    });
+                }
+            }
+        }
+        (bench, path)
+    }
+
+    fn start_unticked(books: Vec<synthetic::Book>) -> (Bench, PathBuf) {
+        start_project(synthetic::Project {
+            books,
+            ..synthetic::Project::default()
+        })
+    }
+
+    fn start_project(project: synthetic::Project) -> (Bench, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let session = stokesforge_session::Session::spawn(
             stokesforge_core::Project::new("Origin").unwrap(),
@@ -536,10 +672,7 @@ mod tests {
         )
         .unwrap();
         let path = dir.path().join("kinetics.opj");
-        let bytes = synthetic::write_project(&synthetic::Project {
-            books,
-            ..synthetic::Project::default()
-        });
+        let bytes = synthetic::write_project(&project);
         std::fs::write(&path, bytes).unwrap();
         state.dispatch(Action::DropFiles {
             paths: vec![path.clone()],
@@ -1065,6 +1198,85 @@ mod tests {
         harness.get_by_label(&line);
     }
 
+    const LONG_GRAPH: &str = "Graph of the absorbance of the sample number twelve against the wavelength, measured with the second grating and the slow scan, after the night run";
+
+    /// `books()` with two graphs: `G1` (long name, Y of `Data` against its X)
+    /// and `Empty` (a layer with no curve). Ranks: G 1, X 2, Y 3, T 4, S 5.
+    fn with_graphs() -> synthetic::Project {
+        let window =
+            |short: &str, long: &str, curves: Vec<synthetic::GraphCurve>| synthetic::GraphWindow {
+                short_name: short.into(),
+                long_name: long.into(),
+                layers: vec![synthetic::GraphLayer {
+                    name: "Layer1".into(),
+                    curves,
+                }],
+            };
+        synthetic::Project {
+            books: books(),
+            graph_windows: vec![
+                window("G1", LONG_GRAPH, vec![synthetic::GraphCurve::new(3, 2)]),
+                window("Empty", "Nothing plotted", vec![]),
+            ],
+            ..synthetic::Project::default()
+        }
+    }
+
+    /// The graphs are listed under the books with their curve count, a click
+    /// on the box ticks the columns, a Show button hides rows and unticks
+    /// nothing, and a graph with no curve is greyed out.
+    #[test]
+    fn graphs_are_listed_ticked_by_their_box_and_hidden_by_the_show_buttons() {
+        let (bench, _) = start_project(with_graphs());
+        let mut harness = harness(bench);
+        assert!(
+            ticks(&harness).iter().flatten().all(|t| !t),
+            "nothing ticked"
+        );
+        harness.get_by_label(LONG_GRAPH);
+        harness.get_by_label("1 curve");
+        harness.get_by_label("0 curves");
+        assert!(harness
+            .get_by_label("Nothing plotted")
+            .accesskit_node()
+            .is_disabled());
+        harness.get_by_label(LONG_GRAPH).click();
+        harness.run();
+        assert_eq!(ticks(&harness), vec![vec![false, true, false], vec![false]]);
+        assert_eq!(
+            harness.get_by_label(LONG_GRAPH).accesskit_node().toggled(),
+            Some(egui::accesskit::Toggled::True)
+        );
+        harness.get_by_label("To create: 1 sheet in 1 workbook");
+        // Workbooks only: no graph row, the ticks stay.
+        harness.get_by_label("Workbooks").click();
+        harness.run();
+        assert!(harness.query_by_label(LONG_GRAPH).is_none());
+        harness.get_by_label("Book1");
+        assert_eq!(ticks(&harness), vec![vec![false, true, false], vec![false]]);
+        // Back to All: the graph is there, still ticked.
+        harness.get_by_label("All").click();
+        harness.run();
+        assert_eq!(
+            harness.get_by_label(LONG_GRAPH).accesskit_node().toggled(),
+            Some(egui::accesskit::Toggled::True)
+        );
+        // Graphs only: no workbook row.
+        harness.get_all_by_label("Graphs").next().unwrap().click();
+        harness.run();
+        assert!(harness.query_by_label("Book1").is_none());
+        harness.get_by_label(LONG_GRAPH);
+    }
+
+    /// The curves of an open graph read `Y vs X · Book / Sheet`, with no box.
+    #[test]
+    fn an_open_graph_lists_its_curves_without_a_box() {
+        let (bench, _) = start_project(with_graphs());
+        let mut harness = harness(bench);
+        expand(&mut harness, LONG_GRAPH);
+        harness.get_by_label("Y vs X · Book1 / Data");
+    }
+
     /// In the pseudo-language the buttons of the window stay inside it and
     /// apart from each other. Runs in a child process (the language is the
     /// process's), see `long_texts_of_the_footer_and_menus_row_are_never_cut`.
@@ -1074,9 +1286,35 @@ mod tests {
         use stokesforge_app_state::i18n::{self, Language};
         assert_eq!(i18n::language(), Language::PseudoEnglish);
         println!("origin chooser checked in {}", i18n::language().tag());
-        let (bench, _) = start(books());
+        let (bench, _) = start_project(with_graphs());
         let harness = harness(bench);
         let window = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0));
+        // The Show buttons and the graph row stay inside the window.
+        let show = [
+            tr!("origin-import-show-all"),
+            tr!("origin-import-show-workbooks"),
+            tr!("origin-import-show-graphs"),
+        ];
+        let mut show_rects = Vec::new();
+        for label in &show {
+            // The first match: the tab (the heading of the graphs comes later).
+            let rect = harness
+                .get_all_by_label_contains(label)
+                .next()
+                .unwrap()
+                .rect();
+            assert!(window.contains_rect(rect), "{label}: {rect:?}");
+            show_rects.push(rect);
+        }
+        for pair in show_rects.windows(2) {
+            assert!(!pair[0].intersects(pair[1]), "{pair:?}");
+        }
+        // The heading and the Show button have the same text.
+        for graph in harness.get_all_by_label_contains(&tr!("origin-import-graphs-heading")) {
+            assert!(window.contains_rect(graph.rect()), "{:?}", graph.rect());
+        }
+        let row = harness.get_by_label_contains("Graph of the absorbance");
+        assert!(window.contains_rect(row.rect()), "cut: {:?}", row.rect());
         let labels = [
             tr!("origin-import-check-all"),
             tr!("origin-import-check-none"),

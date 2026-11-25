@@ -14,6 +14,9 @@
 //! two modal dialogs never show together, and an Origin project that arrives
 //! while the wizard is open waits for it to close.
 //!
+//! Nothing is ticked at opening (#557): the user picks graphs (their plotted
+//! columns are added to the ticks, shared with the books) or columns.
+//!
 //! The selection is per column (#537): a sheet and a workbook box are
 //! three-state (all, none, some). The chooser also holds the classic layouts
 //! (where the workbooks go, how the Origin sheets share worksheets) and the
@@ -27,19 +30,18 @@
 //! automatic name, silently. The columns carry no import source, so "Refresh
 //! from Source" does not apply to them.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use stokesforge_commands::{Command, MacroKind};
 use stokesforge_core::{check_name, same_name_ignoring_case, Node, NodeId};
 use stokesforge_import::origin::OriginDesignation;
-use stokesforge_import::origin::OriginProject;
+use stokesforge_import::origin::{OriginColumnAt, OriginGraph, OriginProject};
 use stokesforge_import::FilesLayout;
 use stokesforge_importer::{
-    default_origin_selection, make_origin_column_in, origin_book_name, origin_column_key,
-    plan_origin_layout, ImportFailure, OriginColumnKey, OriginColumnRef, OriginLayoutPlan,
-    OriginSelection, OriginSource, OriginWhere,
+    make_origin_column_in, origin_book_name, origin_column_key, plan_origin_layout, ImportFailure,
+    OriginColumnKey, OriginColumnRef, OriginLayoutPlan, OriginSelection, OriginSource, OriginWhere,
 };
 
 use super::import_plans::{BookApply, BookTarget, Naming, SheetApply};
@@ -50,23 +52,193 @@ use crate::tr;
 /// What the background thread returns for one Origin file.
 pub(super) type OriginRead = (PathBuf, Result<Arc<OriginProject>, ImportFailure>);
 
+/// A column of a file by position: book, sheet, column.
+type ColumnPos = (usize, usize, usize);
+
+/// A graph of a file, resolved once when the file is added: the columns it
+/// plots and the lines of its curves (never recomputed per frame).
+#[derive(Debug, Clone)]
+struct GraphInfo {
+    /// The Origin long name, else the short name.
+    name: String,
+    short_name: String,
+    /// One line per resolvable curve: `Y vs X · Book / Sheet`.
+    curves: Vec<String>,
+    /// The graph has no curve at all (not even an unresolved one).
+    without_curve: bool,
+    /// Columns it plots, without duplicates, in plotting order: X and Y of
+    /// each curve, then the error columns standing right after a plotted Y.
+    columns: Vec<ColumnPos>,
+}
+
+impl GraphInfo {
+    fn new(project: &OriginProject, graph: &OriginGraph) -> Self {
+        let mut columns: Vec<ColumnPos> = Vec::new();
+        let mut curves = Vec::new();
+        let mut total = 0;
+        let add = |columns: &mut Vec<ColumnPos>, at: ColumnPos| {
+            if !columns.contains(&at) {
+                columns.push(at);
+            }
+        };
+        for curve in graph.layers.iter().flat_map(|layer| &layer.curves) {
+            total += 1;
+            let Some(y) = curve.y.and_then(|at| resolve(project, at)) else {
+                // Nothing to plot without a Y: the curve is ignored.
+                continue;
+            };
+            let x = curve.x.and_then(|at| resolve(project, at));
+            if let Some(x) = x {
+                add(&mut columns, x);
+            }
+            add(&mut columns, y);
+            let (book, sheet, y_index) = y;
+            if let Some(origin_sheet) = project.books.get(book).and_then(|b| b.sheets.get(sheet)) {
+                let following = origin_sheet.columns.iter().enumerate().skip(y_index + 1);
+                for (error, column) in following {
+                    if !matches!(
+                        column.designation,
+                        OriginDesignation::YError | OriginDesignation::XError
+                    ) {
+                        break;
+                    }
+                    add(&mut columns, (book, sheet, error));
+                }
+            }
+            curves.push(curve_line(project, y, x));
+        }
+        let short_name = graph.short_name.clone();
+        let name = if graph.long_name.trim().is_empty() {
+            short_name.clone()
+        } else {
+            graph.long_name.clone()
+        };
+        Self {
+            name,
+            short_name,
+            curves,
+            without_curve: total == 0,
+            columns,
+        }
+    }
+}
+
+/// The position when it names a column that exists.
+fn resolve(project: &OriginProject, at: OriginColumnAt) -> Option<ColumnPos> {
+    project
+        .books
+        .get(at.book)?
+        .sheets
+        .get(at.sheet)?
+        .columns
+        .get(at.column)?;
+    Some((at.book, at.sheet, at.column))
+}
+
+fn curve_line(project: &OriginProject, y: ColumnPos, x: Option<ColumnPos>) -> String {
+    let column = |(b, s, c): ColumnPos| origin_column_key(&project.books[b].sheets[s].columns[c]);
+    let book = &project.books[y.0];
+    let sheet = book.sheets[y.1].name.as_str();
+    match x {
+        Some(x) => tr!(
+            "origin-import-curve",
+            y = column(y),
+            x = column(x),
+            book = origin_book_name(book),
+            sheet = sheet
+        ),
+        None => tr!(
+            "origin-import-curve-no-x",
+            y = column(y),
+            book = origin_book_name(book),
+            sheet = sheet
+        ),
+    }
+}
+
 /// One Origin file of the chooser: the parsed project and its ticks.
 #[derive(Debug, Clone)]
 pub(super) struct OriginFile {
     path: PathBuf,
     project: Arc<OriginProject>,
     selection: OriginSelection,
+    graphs: Vec<GraphInfo>,
+    /// The graphs the user ticked and did not untick since.
+    graph_picked: Vec<bool>,
+    /// The columns the user ticked or unticked by hand since their graph
+    /// ticked them: unticking a graph leaves them alone.
+    by_hand: BTreeSet<ColumnPos>,
 }
 
 impl OriginFile {
-    /// Ticked as `default_origin_selection` says (a sheet with no column has
-    /// nothing to tick).
+    /// Nothing ticked (#557): a graph or a column is picked by the user.
     fn new(path: PathBuf, project: Arc<OriginProject>) -> Self {
-        let selection = default_origin_selection(&project);
+        let selection = project
+            .books
+            .iter()
+            .map(|book| {
+                book.sheets
+                    .iter()
+                    .map(|sheet| vec![false; sheet.columns.len()])
+                    .collect()
+            })
+            .collect();
+        let graphs: Vec<GraphInfo> = project
+            .graphs
+            .iter()
+            .map(|graph| GraphInfo::new(&project, graph))
+            .collect();
         Self {
             path,
             project,
             selection,
+            graph_picked: vec![false; graphs.len()],
+            graphs,
+            by_hand: BTreeSet::new(),
+        }
+    }
+
+    fn graph_tick(&self, graph: usize) -> OriginTick {
+        let Some(info) = self.graphs.get(graph) else {
+            return OriginTick::None;
+        };
+        let ticked = info
+            .columns
+            .iter()
+            .filter(|&&(b, s, c)| self.column_ticked(b, s, c))
+            .count();
+        tick_of(ticked, info.columns.len())
+    }
+
+    /// Ticking a graph adds its columns; a column already ticked stays as it
+    /// is (and stays "by hand" when it was).
+    fn pick_graph(&mut self, graph: usize) {
+        let Some(columns) = self.graphs.get(graph).map(|g| g.columns.clone()) else {
+            return;
+        };
+        self.graph_picked[graph] = true;
+        for (b, s, c) in columns {
+            if !self.column_ticked(b, s, c) {
+                self.write_column(b, s, c, true);
+                self.by_hand.remove(&(b, s, c));
+            }
+        }
+    }
+
+    /// Unticking a graph unticks the columns it ticked, except those another
+    /// ticked graph uses and those the user touched by hand since.
+    fn unpick_graph(&mut self, graph: usize) {
+        let Some(columns) = self.graphs.get(graph).map(|g| g.columns.clone()) else {
+            return;
+        };
+        self.graph_picked[graph] = false;
+        for at in columns {
+            let used_elsewhere = self.graphs.iter().enumerate().any(|(other, info)| {
+                other != graph && self.graph_picked[other] && info.columns.contains(&at)
+            });
+            if !used_elsewhere && !self.by_hand.contains(&at) {
+                self.write_column(at.0, at.1, at.2, false);
+            }
         }
     }
 
@@ -108,16 +280,22 @@ impl OriginFile {
         tick_of(ticked, count)
     }
 
-    /// Sets one column (nothing happens for a column that does not exist).
+    /// Sets one column by hand (nothing happens for a column that does not
+    /// exist); no graph owns it from now on.
     fn set_column(&mut self, book: usize, sheet: usize, column: usize, ticked: bool) {
-        if let Some(tick) = self
+        if self.write_column(book, sheet, column, ticked) {
+            self.by_hand.insert((book, sheet, column));
+        }
+    }
+
+    /// Writes the tick; `false` for a column that does not exist.
+    fn write_column(&mut self, book: usize, sheet: usize, column: usize, ticked: bool) -> bool {
+        let tick = self
             .selection
             .get_mut(book)
             .and_then(|b| b.get_mut(sheet))
-            .and_then(|s| s.get_mut(column))
-        {
-            *tick = ticked;
-        }
+            .and_then(|s| s.get_mut(column));
+        tick.map(|tick| *tick = ticked).is_some()
     }
 
     /// Ticks (or unticks) every column of a sheet.
@@ -157,6 +335,20 @@ pub(super) struct OriginChooser {
     layout: FilesLayout,
     /// The folder of the new workbooks.
     pub(super) folder: ImportFolder,
+    /// What the list shows (#557); hides, never unticks.
+    show: OriginShow,
+}
+
+/// What the chooser lists (#557): the three Show buttons.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum OriginShow {
+    /// Workbooks and graphs.
+    #[default]
+    All,
+    /// Workbooks only.
+    Workbooks,
+    /// Graphs only.
+    Graphs,
 }
 
 /// A column as the chooser shows it.
@@ -204,6 +396,21 @@ pub struct OriginBookView {
     pub sheets: Vec<OriginSheetView>,
 }
 
+/// A graph as the chooser shows it (#557).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OriginGraphView {
+    /// The name shown: the Origin long name, else the short name.
+    pub name: String,
+    /// The Origin short name.
+    pub short_name: String,
+    /// The three states of its box (over the columns it plots).
+    pub tick: OriginTick,
+    /// One line per resolvable curve: `Y vs X · Book / Sheet`.
+    pub curves: Vec<String>,
+    /// Why its box is greyed out (no curve, or none that resolves).
+    pub unavailable: Option<String>,
+}
+
 /// A file as the chooser shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OriginFileView {
@@ -213,6 +420,8 @@ pub struct OriginFileView {
     pub file_name: String,
     /// Its books.
     pub books: Vec<OriginBookView>,
+    /// Its graphs.
+    pub graphs: Vec<OriginGraphView>,
     /// Part of the file could not be read (an `.opju` read as far as it goes):
     /// the chooser says so.
     pub partial: bool,
@@ -240,6 +449,24 @@ impl AppState {
                 path: file.path.clone(),
                 file_name: file_name(&file.path),
                 partial: file.project.partial,
+                graphs: file
+                    .graphs
+                    .iter()
+                    .enumerate()
+                    .map(|(index, graph)| OriginGraphView {
+                        name: graph.name.clone(),
+                        short_name: graph.short_name.clone(),
+                        tick: file.graph_tick(index),
+                        curves: graph.curves.clone(),
+                        unavailable: if graph.without_curve {
+                            Some(tr!("disabled-origin-graph-no-curve"))
+                        } else if graph.columns.is_empty() {
+                            Some(tr!("disabled-origin-graph-unresolved"))
+                        } else {
+                            None
+                        },
+                    })
+                    .collect(),
                 books: file
                     .project
                     .books
@@ -287,6 +514,14 @@ impl AppState {
                     .collect(),
             })
             .collect()
+    }
+
+    /// What the list shows; `All` when the chooser is not open.
+    #[must_use]
+    pub fn origin_import_show(&self) -> OriginShow {
+        self.origin_import
+            .as_ref()
+            .map_or(OriginShow::All, |chooser| chooser.show)
     }
 
     /// The plan Import would run, for the ticks, layouts and files of the
@@ -445,6 +680,7 @@ impl AppState {
         }
     }
 
+    /// Check All / Check None: every sheet and every graph.
     pub(super) fn check_all_origin_sheets(&mut self, ticked: bool) {
         let Some(chooser) = &mut self.origin_import else {
             return;
@@ -455,6 +691,31 @@ impl AppState {
                     entry.set_sheet(book_index, sheet, ticked);
                 }
             }
+            entry.graph_picked.fill(ticked);
+            if !ticked {
+                entry.by_hand.clear();
+            }
+        }
+    }
+
+    /// A graph that is wholly ticked is unticked (what it ticked, see
+    /// [`OriginFile::unpick_graph`]); otherwise its columns are added.
+    pub(super) fn toggle_origin_graph(&mut self, file: usize, graph: usize) {
+        if let Some(entry) = self.origin_file_mut(file) {
+            if entry.graphs.get(graph).is_none_or(|g| g.columns.is_empty()) {
+                return;
+            }
+            if entry.graph_tick(graph) == OriginTick::All {
+                entry.unpick_graph(graph);
+            } else {
+                entry.pick_graph(graph);
+            }
+        }
+    }
+
+    pub(super) fn set_origin_show(&mut self, show: OriginShow) {
+        if let Some(chooser) = &mut self.origin_import {
+            chooser.show = show;
         }
     }
 
@@ -548,6 +809,7 @@ impl AppState {
             where_: OriginWhere::default(),
             layout: FilesLayout::SheetPerFile,
             folder,
+            show: OriginShow::All,
         });
         for file in files {
             if !chooser.files.iter().any(|known| known.path == file.path) {
@@ -725,6 +987,7 @@ impl AppState {
             self.undo();
         }
         chooser.folder = self.reopened_folder(&chooser.folder);
+        chooser.show = OriginShow::All;
         self.import_state = None;
         self.origin_import = Some(chooser);
         self.notice(if undone {

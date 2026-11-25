@@ -2073,7 +2073,7 @@ origin-import-summary = To create: { $sheets ->
     [one] { $books } workbook
    *[other] { $books } workbooks
     }
-origin-import-partial = Part of this file could not be read: some workbooks keep their data but lose long names, units and X/Y roles
+origin-import-partial = Part of this file could not be read: some workbooks keep their data but lose long names, units and X/Y roles, and some graphs may be missing
 origin-import-own-x = These sheets keep an X of their own, its values differ from the first X: { $names }
 status-import-own-x = These files keep an X of their own, its values differ from the first X: { $names }
 status-import-folder-gone = The folder chosen for the import no longer exists: the workbooks were created at the root of the project
@@ -2083,10 +2083,10 @@ origin-import-accept =
     .hint = Creates the workbooks and sheets that the checked columns call for (Enter)
 origin-import-check-all =
     Check All
-    .hint = Checks every column of every sheet
+    .hint = Checks every column of every sheet and every graph
 origin-import-check-none =
     Check None
-    .hint = Unchecks every column of every sheet
+    .hint = Unchecks every column of every sheet and every graph
 origin-import-book-hint = Checks or unchecks all the columns of this workbook
 origin-import-sheet-size = { $columns ->
     [one] { $columns } column
@@ -2703,6 +2703,20 @@ origin-import-column-hint = Click to check or uncheck, Shift+click to check or u
 origin-import-column-check-in-all = Check “{ $name }” in All Sheets
 origin-import-column-uncheck-in-all = Uncheck “{ $name }” in All Sheets
 origin-import-sheet-hint = Checks or unchecks all the columns of this sheet
+origin-import-graphs-heading = Graphs
+origin-import-graph-hint = Checks or unchecks the columns this graph plots (and the error columns next to them)
+origin-import-graph-curves = { $count ->
+    [one] { $count } curve
+   *[other] { $count } curves
+}
+origin-import-curve = { $y } vs { $x } · { $book } / { $sheet }
+origin-import-curve-no-x = { $y } · { $book } / { $sheet }
+origin-import-show = Show:
+origin-import-show-all = All
+origin-import-show-workbooks = Workbooks
+origin-import-show-graphs = Graphs
+disabled-origin-graph-no-curve = This graph plots no curve
+disabled-origin-graph-unresolved = None of the curves of this graph could be matched to a column of a workbook
 disabled-import-folder-active-book = The folder is not used when importing into the active workbook
 import-footer-template = Template: { $value }
 import-footer-template-auto = Auto · { $name }

@@ -133,7 +133,8 @@ pub use autosave::{AutosaveJob, Garbage, RecoveryRow, ServerTick, AUTOSAVE_RETRY
 pub use column_use::FullColumnsCopy;
 pub use import_apply::ImportRun;
 pub use origin_import::{
-    OriginBookView, OriginColumnView, OriginFileView, OriginSheetView, OriginTick,
+    OriginBookView, OriginColumnView, OriginFileView, OriginGraphView, OriginSheetView, OriginShow,
+    OriginTick,
 };
 pub use stokesforge_importer::{OriginColumnKey, OriginWhere};
 
@@ -745,7 +746,18 @@ pub enum Action {
         /// The new state of its sheets.
         ticked: bool,
     },
-    /// Origin chooser: ticks every sheet that has columns.
+    /// Origin chooser (#557): ticks a graph that is not wholly ticked (its
+    /// plotted columns are added), unticks one that is (the columns another
+    /// ticked graph uses and those ticked by hand stay).
+    ToggleOriginGraph {
+        /// Rank of the file in the chooser.
+        file: usize,
+        /// Rank of the graph in the file.
+        graph: usize,
+    },
+    /// Origin chooser (#557): what the list shows; it hides, never unticks.
+    SetOriginShow(OriginShow),
+    /// Origin chooser: ticks every sheet that has columns, and every graph.
     CheckAllOriginSheets,
     /// Origin chooser: unticks every sheet.
     CheckNoOriginSheets,
@@ -7056,6 +7068,8 @@ impl AppState {
             Action::SetOriginBookTicked { file, book, ticked } => {
                 self.set_origin_book_ticked(file, book, ticked);
             }
+            Action::ToggleOriginGraph { file, graph } => self.toggle_origin_graph(file, graph),
+            Action::SetOriginShow(show) => self.set_origin_show(show),
             Action::CheckAllOriginSheets => self.check_all_origin_sheets(true),
             Action::CheckNoOriginSheets => self.check_all_origin_sheets(false),
             Action::ImportOrigin => self.import_origin(),
