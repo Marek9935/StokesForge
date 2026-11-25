@@ -188,6 +188,6 @@
     "image": "scripting-console.png",
     "feature": "python",
     "page": "scripting/console.md",
-    "shows": "The Python Script console after running a short script that finds the maximum of the Spectrum sheet: the script in the text box, the Run and Stop buttons and the output area. Rendered only by a build with the python feature."
+    "shows": "The Python Script console after running a short script that finds the maximum of the Spectrum sheet: the script in the text box, the Run, Run File…, Run Again and Stop buttons and the output area. Rendered only by a build with the python feature."
   }
 ]
