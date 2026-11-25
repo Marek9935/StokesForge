@@ -141,7 +141,10 @@
 //! - on load the memo is cleared and **no calculation is rerun** (A1, #316):
 //!   automatic and manual ones alike are trusted, the file's values kept
 //!   (`Recalculator::run_after_load`, one-shot flag `trust_loaded`, in both
-//!   modes). Their staleness marker comes from the file, completed by
+//!   modes), except a calculation that reads a formula column the load pass
+//!   itself rewrote (a kept formula that an older version never computed,
+//!   #556): an automatic one is recomputed, a manual one marked `Manual`.
+//!   Their staleness marker comes from the file, completed by
 //!   persistence: it marks `Manual` a calculation whose fingerprint of the
 //!   inputs' content (`Calculation::inputs_digest`) no longer matches. The
 //!   formula columns, on the other hand, are still recalculated on load; a
@@ -205,6 +208,11 @@ pub(crate) struct Recalculator {
     /// that pass: a calculation without a memo after `AddCalculation` or an
     /// undo is still recalculated.
     trust_loaded: bool,
+    /// Formula columns whose content the load pass changed (#556: a kept
+    /// formula that an older version never computed, computing now). A
+    /// calculation that reads one is not trusted as saved: the file's values
+    /// were computed from the column as it was. Cleared with `trust_loaded`.
+    loaded_changed: HashSet<NodeId>,
     /// The followed transposed sheets that were out of date in the file just
     /// opened (#463, same rule as A1): the sheet stays "Out of date" instead of
     /// being rewritten by the next unrelated command. Each entry is the source
@@ -238,6 +246,7 @@ impl Recalculator {
             stop: None,
             interrupted: false,
             trust_loaded: false,
+            loaded_changed: HashSet::new(),
             follow_hold: HashMap::new(),
             evaluations: 0,
         }
@@ -308,6 +317,7 @@ impl Recalculator {
             .collect();
         self.run(project);
         self.trust_loaded = false;
+        self.loaded_changed.clear();
     }
 
     /// Recalculates the project's formula columns that need it — **direct**
@@ -728,7 +738,11 @@ impl Recalculator {
                 Some(FormulaError::DeletedColumn) => &[],
                 _ => &evaluation.statuses,
             };
+            let before = column_version(project, id);
             write_formula_column(project, id, evaluation.values, statuses);
+            if self.trust_loaded && column_version(project, id) != before {
+                self.loaded_changed.insert(id);
+            }
             self.record(project, id, fingerprint);
         }
     }
@@ -1063,6 +1077,9 @@ enum CalcAction {
     /// Trusts the data present (manual calculation never seen, or redefined):
     /// notes the fingerprint, calculates nothing.
     Trust,
+    /// A manual calculation fed by a column the load pass rewrote (#556):
+    /// marked out of date, memo noted.
+    MarkNew,
     /// An input changed under a manual calculation.
     MarkStale,
     Recompute,
@@ -1245,8 +1262,22 @@ impl Recalculator {
             }
         };
         let previous = self.calc_memo.get(&id);
+        // First pass after a load, and an input that this very pass has just
+        // rewritten (#556): the file's values do not match it.
+        let fed_by_load_change = self.trust_loaded
+            && previous.is_none()
+            && fingerprint
+                .inputs
+                .iter()
+                .any(|(column, _)| self.loaded_changed.contains(column));
         let action = if force {
             CalcAction::Recompute
+        } else if fed_by_load_change {
+            if calc.auto_recalc {
+                CalcAction::Recompute
+            } else {
+                CalcAction::MarkNew
+            }
         } else if self.trust_loaded && previous.is_none() {
             // First pass after a `Load`, in both modes (otherwise the `Full`
             // oracle would diverge): the file's values are authoritative.
@@ -1309,6 +1340,15 @@ impl Recalculator {
                 if calc.stale == Some(Staleness::InputMissing) {
                     // The columns came back but nothing says the kept values
                     // correspond to them.
+                    let _ = project.set_calculation_stale(id, Some(Staleness::Manual));
+                }
+                self.remember(project, id, &calc, fingerprint);
+                false
+            }
+            CalcAction::MarkNew => {
+                // A manual calculation fed by a column that changed at load:
+                // marked out of date, values kept, until "Recalculate".
+                if !matches!(calc.stale, Some(Staleness::Failed(_))) {
                     let _ = project.set_calculation_stale(id, Some(Staleness::Manual));
                 }
                 self.remember(project, id, &calc, fingerprint);

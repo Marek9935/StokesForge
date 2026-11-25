@@ -2040,3 +2040,154 @@ fn retyping_the_same_values_in_an_input_leaves_a_calculation_as_it_was() {
         assert!((slope(&waiting, id) - 10.0).abs() < 1e-9, "{mode:?}");
     }
 }
+
+/// Load of a file written before #556 (#556): its sheet holds a kept
+/// `Sheet3!A + 1` with its column EMPTY, and calculations (one automatic, one
+/// manual) fed by that column. The load-time recalculation computes the column;
+/// the calculations must then be recomputed or marked out of date, never kept
+/// as saved without a mark. Witness: break the mark on load
+/// (`Recalculator::run_after_load` trusting a calculation whose input column
+/// changed content during the load pass).
+#[test]
+fn a_calculation_fed_by_a_kept_formula_that_computes_at_load_is_not_left_as_saved() {
+    use stokesforge_core::{ColumnFormula, FormulaPart, RemoteRef};
+    for mode in modes() {
+        // The project as an older version saved it.
+        let mut project = Project::new("Demo").unwrap();
+        let root = project.root();
+        let book = project.add_empty_workbook(root, Some("Book1")).unwrap();
+        let sheet = project.add_worksheet(book, Some("Sheet1")).unwrap();
+        let sheet3 = project.add_worksheet(book, Some("Sheet3")).unwrap();
+        let x = project
+            .add_column(
+                sheet,
+                None,
+                Some("X"),
+                Column::from_f64(&[1.0, 2.0, 3.0, 4.0]),
+            )
+            .unwrap();
+        let tmp = project
+            .add_column(
+                sheet,
+                None,
+                Some("T"),
+                Column::from_f64(&[2.0, 4.0, 6.0, 8.0]),
+            )
+            .unwrap();
+        let f = project
+            .add_column(sheet, None, Some("F"), Column::from_f64(&[]))
+            .unwrap();
+        let remote = project
+            .add_column(
+                sheet3,
+                None,
+                Some("A"),
+                Column::from_f64(&[10.0, 20.0, 30.0, 40.0]),
+            )
+            .unwrap();
+        let fit = fit_operation();
+        let mut ids = Vec::new();
+        for auto in [true, false] {
+            // Outputs as a fit of (X, T) gives them, stored for (X, F).
+            let on_t = vec![SeriesRef {
+                x: Some(x),
+                y: tmp,
+                sigma: None,
+            }];
+            let computed = compute(project.tree(), &fit, &on_t, None).unwrap();
+            let outputs = computed
+                .columns
+                .iter()
+                .map(|c| OutputDraft {
+                    series: c.series,
+                    key: c.key.clone(),
+                    index: c.index,
+                    meta: ColumnMeta::default(),
+                    data: c.data.clone(),
+                })
+                .collect();
+            let id = project
+                .add_calculation(CalculationDraft {
+                    operation: fit.clone(),
+                    series: vec![SeriesRef {
+                        x: Some(x),
+                        y: f,
+                        sigma: None,
+                    }],
+                    aux: None,
+                    outputs,
+                    results: computed.results,
+                    keep_results: true,
+                    auto_recalc: auto,
+                    low_r2_dialog: true,
+                })
+                .unwrap();
+            ids.push(id);
+        }
+        // The kept formula an older version stored, never computed.
+        project
+            .set_column_meta(
+                f,
+                ColumnMeta {
+                    formula: Some(ColumnFormula::from_parts_with_remote(
+                        vec![
+                            FormulaPart::Column(remote),
+                            FormulaPart::Text(" + 1".to_string()),
+                        ],
+                        std::collections::BTreeMap::from([(
+                            0,
+                            RemoteRef {
+                                sheet: sheet3,
+                                prefixed: true,
+                            },
+                        )]),
+                    )),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.stf");
+        stokesforge_persistence::save(&project, &path).unwrap();
+        let saved_slope: Vec<f64> = ids
+            .iter()
+            .map(|id| {
+                project.tree().calculation(*id).unwrap().results[0]
+                    .values
+                    .iter()
+                    .find(|v| v.key == "param.slope")
+                    .unwrap()
+                    .value
+            })
+            .collect();
+
+        // The load the application does.
+        let session =
+            Session::spawn_with_recalc(Project::new("Empty").unwrap(), None, mode).unwrap();
+        let handle = session.handle();
+        handle.load(&path).unwrap();
+        let loaded = handle.snapshot().unwrap();
+        let values: Vec<f64> = loaded
+            .tree
+            .node(f)
+            .and_then(|n| n.as_column())
+            .unwrap()
+            .numeric_view()
+            .map(|v| v.to_vec())
+            .unwrap_or_default();
+        assert_eq!(
+            values,
+            vec![11.0, 21.0, 31.0, 41.0],
+            "{mode:?}: computed at load"
+        );
+        for (id, saved) in ids.iter().zip(saved_slope) {
+            let calc = loaded.tree.calculation(*id).unwrap();
+            let recomputed = (slope(&loaded, *id) - 10.0).abs() < 1e-9;
+            assert!(
+                recomputed || calc.stale.is_some(),
+                "{mode:?}: auto={} left as saved (slope {saved}) without a mark",
+                calc.auto_recalc
+            );
+        }
+    }
+}

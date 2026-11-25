@@ -315,6 +315,7 @@ tests see it.
 | a remote column read by a column function counted in the length of the result (#403, #556) | `the_result_keeps_the_length_of_its_own_sheet`, `a_remote_read_by_a_column_function_keeps_the_own_length` |
 | a remote column read row by row left out of the length (#556), or its version out of the fingerprint | `a_row_wise_remote_sets_the_length_of_the_result`, `a_row_wise_remote_follows_the_other_sheet`, `b22` (`row_wise_computed`) |
 | a remote column not walked in the arguments of a column function, or its source or X counted as row-wise (#556) | `the_row_wise_remotes_are_those_read_per_row` (core) |
+| a calculation trusted as saved although its input column was rewritten by the load pass (a kept formula that now computes, #556) | `a_calculation_fed_by_a_kept_formula_that_computes_at_load_is_not_left_as_saved` |
 | Add rows starting below the tail of a formula column (#556) | `import_mode_add_rows_ignores_the_tail_of_a_row_wise_remote_formula` |
 | cycles and calculations kept to the own sheet (#403) | `a_loop_across_sheets_stays_not_calculated_and_stable`, `a_loop_through_a_calculation_and_a_remote_formula_waits_for_a_gesture`, `loops_are_found_project_wide` |
 | loop check without the paired X (#403) | `a_loop_through_a_paired_x_is_found` |
