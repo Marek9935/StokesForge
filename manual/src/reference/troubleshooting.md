@@ -212,7 +212,6 @@ The best attempt is still drawn. See [Fitting](../guide/analysis.md#fitting).
 | "Read as the range from … to … and rewritten …. For the number …, write it with a point" | A range call such as `max(B,1,5)` was rewritten `max(B, 1, 5)`. The cell is orange for 10 seconds. Write `1.5` for the number 1.5. |
 | "Several objects are named … apart from case. Rename one of them" | An older project holds two objects whose names differ only by case. Rename one of them. |
 | "Column … does not exist in sheet …" | The sheet of the reference has fewer columns. |
-| "A column of another sheet can only be read by at, max, min, mean, sum, std or integral. Give it to one of them as its column" | Write `max(Sheet3!B)` and use the result in the formula (`B / max(Sheet3!B)`). |
 | "The X column of an at() on another sheet is read in that sheet. Write it without a prefix (D, not Sheet3!D)" | In `at(Sheet3!B, x, D)`, `D` is a column of `Sheet3`. |
 | "Unknown function …. Check its spelling" | A name followed by `(` is not one of the functions listed in [Formula syntax](../guide/projects-and-workbooks.md#formula-syntax). |
 | "Unknown function …. Did you mean …?" | The name is close to a function: write that one. |

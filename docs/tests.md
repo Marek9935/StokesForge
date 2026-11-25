@@ -238,8 +238,14 @@ the sheet they must be in: named cases in `recalc_targeted.rs`
 `moving_the_remote_column_to_a_third_sheet_gives_ref`,
 `a_chain_across_sheets_is_calculated_in_one_pass`,
 `a_loop_across_sheets_stays_not_calculated_and_stable`,
-`the_result_keeps_the_length_of_its_own_sheet`), `analysis.rs` (a loop through a
-calculation and a remote formula), the `stokesforge-core/src/sheet_refs.rs`
+`the_result_keeps_the_length_of_its_own_sheet`; row by row, #556:
+`a_row_wise_remote_sets_the_length_of_the_result`,
+`a_remote_read_by_a_column_function_keeps_the_own_length`,
+`a_row_wise_remote_follows_the_other_sheet`,
+`a_row_wise_remote_gives_ref_when_the_sheet_goes_and_back_on_undo`,
+`a_row_wise_chain_across_sheets_and_a_row_wise_loop`), `analysis.rs` (a loop
+through a calculation and a remote formula, column function and row by row; a
+calculation fed by a row-wise remote formula follows or is marked out of date), the `stokesforge-core/src/sheet_refs.rs`
 tests (syntax, quotes, lookup, names, loops) and `b22`, which draws remote
 formulas, and saves and reloads them through the `.stf` side field.
 
@@ -263,7 +269,7 @@ formulas, and saves and reloads them through the `.stf` side field.
 | `stokesforge-commands/tests/undo_random.rs` | the undo/redo round trip also draws `SetFormula` and `RemoveFormula` steps (`SetColumnMeta`); a coverage count requires formulas to be really set. Witness: skipping `set_column_meta` in the undo arm of `DataDelta::ColumnMeta` when the meta before had no formula |
 | `stokesforge-persistence/tests/formula_roundtrip.rs` | `.stf` round trip of column formulas, local and remote |
 | `stokesforge-script/tests/formulas.rs` | column formulas through `pyst` (feature `python`, run by `scripts/python-test.sh`); `round` against Python's `decimal` (`Decimal(repr(x))` quantized half up, exact equality, #428); differential check of the numeric functions against Python's `math` and `statistics`, one ULP tolerance per function (4 ulps for the transcendental ones, exact for `sqrt`, `floor`, `ceil`, `sign`, `mod`); `erf`/`erfc` relative error and `sum`/`mean`/`std` at 2 ulps are held by `erf_erfc_and_the_aggregates_meet_their_target_tolerance` (#429). Witness: `atan` multiplied by `1 + 8 epsilon` fails it |
-| `stokesforge-core/src/sheet_refs.rs` (`tests`), `stokesforge-app-state/tests/formula_sheets.rs`, `stokesforge-persistence/tests/remote_formula.rs` | formulas that read other sheets (#403, batch 1): reading `Sheet3!B` / `[Book2]Sheet5!B`, case, quotes, workbook lookup (own folder, then project, path when ambiguous), the refusals (outside a column function, remote X, workbook without sheet), sibling names that differ only by case, loops (local, remote, through a paired X) refused at typing and framed when a file holds one; a remote formula saved and reloaded keeps its sheet (`formula_remote`, batch 2), forged files (sheet id beyond the bound refused, missing or non-sheet target and bad part index degrade to `#REF`), a project without remote reference writes no such field, and the object clipboard keeps or voids the reference (`project_objects.rs`) |
+| `stokesforge-core/src/sheet_refs.rs` (`tests`), `stokesforge-app-state/tests/formula_sheets.rs`, `stokesforge-persistence/tests/remote_formula.rs` | formulas that read other sheets (#403, batch 1): reading `Sheet3!B` / `[Book2]Sheet5!B`, case, quotes, workbook lookup (own folder, then project, path when ambiguous), the accepted row-wise forms (#556) and the refusals (remote X, workbook without sheet), sibling names that differ only by case, loops (local, remote, through a paired X) refused at typing and framed when a file holds one; a remote formula saved and reloaded keeps its sheet (`formula_remote`, batch 2), forged files (sheet id beyond the bound refused, missing or non-sheet target and bad part index degrade to `#REF`), a project without remote reference writes no such field, and the object clipboard keeps or voids the reference (`project_objects.rs`) |
 | `stokesforge-robustness/tests/b14_sweep.rs` | the version ↔ content doctrine on `History` alone, on which the whole mechanism rests — including for a column added with a number already used |
 | `stokesforge-core` (`project.rs`, `an_inserted_column_moves_the_counter_past_its_version`) | inserting a column moves the counter beyond its version |
 
@@ -306,7 +312,10 @@ tests see it.
 | remote column or paired X missing from the fingerprint (#403) | `editing_the_remote_column_recalculates_the_reader`, `a_role_change_in_the_remote_sheet_recalculates_the_reader`, `b22` |
 | membership read as "exists in the tree" instead of "is in the sheet it must be in" (#403) | `moving_the_remote_column_to_a_third_sheet_gives_ref`, `a_deleted_sheet_or_a_moved_column_shows_ref` |
 | one order per sheet instead of one for the project (#403) | `a_chain_across_sheets_is_calculated_in_one_pass` |
-| a remote column counted in the length of the result (#403) | `the_result_keeps_the_length_of_its_own_sheet` |
+| a remote column read by a column function counted in the length of the result (#403, #556) | `the_result_keeps_the_length_of_its_own_sheet`, `a_remote_read_by_a_column_function_keeps_the_own_length` |
+| a remote column read row by row left out of the length (#556), or its version out of the fingerprint | `a_row_wise_remote_sets_the_length_of_the_result`, `a_row_wise_remote_follows_the_other_sheet`, `b22` (`row_wise_computed`) |
+| a remote column not walked in the arguments of a column function, or its source or X counted as row-wise (#556) | `the_row_wise_remotes_are_those_read_per_row` (core) |
+| Add rows starting below the tail of a formula column (#556) | `import_mode_add_rows_ignores_the_tail_of_a_row_wise_remote_formula` |
 | cycles and calculations kept to the own sheet (#403) | `a_loop_across_sheets_stays_not_calculated_and_stable`, `a_loop_through_a_calculation_and_a_remote_formula_waits_for_a_gesture`, `loops_are_found_project_wide` |
 | loop check without the paired X (#403) | `a_loop_through_a_paired_x_is_found` |
 | kept refusal not tied to the revision (#403) | `the_kept_refusal_follows_the_project` |
