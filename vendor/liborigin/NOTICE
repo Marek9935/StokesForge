@@ -10,6 +10,9 @@ library for reading OriginLab project files:
 
 Ported from: OriginAnyParser.cpp (object framing, datasets, windows, layers,
 curves) and OriginParser.cpp (grouping of columns into books and sheets).
+The per-column command text (the formula of a column) is read from the
+first block of the sheet-layer annotations, as readAnnotationElement and
+OriginParser.cpp do for `command`.
 No liborigin source file is shipped; only the knowledge of the file format
 and the structure of these two parsers were ported, in new code.
 

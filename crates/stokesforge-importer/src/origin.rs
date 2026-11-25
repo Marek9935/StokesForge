@@ -549,6 +549,7 @@ mod tests {
             comment: String::new(),
             values: values.to_vec(),
             texts: Vec::new(),
+            formula: None,
         }
     }
 

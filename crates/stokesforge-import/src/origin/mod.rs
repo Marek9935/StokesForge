@@ -15,12 +15,34 @@
 //! `.opju` (the `CPYUA` container of Origin 2018 and later).
 //!
 //! [`read_project`] returns the books (workbooks) with their sheets and
-//! columns: names, long names, units, comments, values and text cells.
-//! Graphs, matrices and functions are recognised and counted, not read. Both
+//! columns: names, long names, units, comments, formulas, values and text
+//! cells, and the graphs with their layers and curves resolved to columns.
+//! Matrices and functions are recognised and counted, not read. Both
 //! containers give the same [`OriginProject`]; the `.opju` one is walked by
 //! `opju` (grammar in its module docs). An `.opju` whose window section is
 //! not understood is read from its datasets and window objects as far as they
 //! go, and [`OriginProject::partial`] says so.
+//!
+//! Column formulas: in a book window, each sheet layer lists annotations.
+//! The annotation header holds at 0x46 (41 bytes) a name, and its first
+//! block a NUL-terminated text. When the name is the short name of a column
+//! of THAT sheet and the text is not blank, the text is the column's command
+//! ([`OriginColumn::formula`]); the other annotations (`SCT`, `SPC_*`,
+//! `__*`, `Text`...) are not formulas. Only annotations at depth 0 count. A
+//! text longer than 64 KiB or holding a control character other than tab, CR
+//! and LF is refused (`None`, never an error). The formula is Origin's own
+//! text (`col(B)*2`, `raw_data!A`): it is not translated here.
+//!
+//! Graphs: a window with at least one layer that no dataset names (so it is
+//! not a book, nor a matrix) is a graph; one with no layer is a note or a
+//! layout and is only counted in [`OriginSkipped::graphs`]. Each curve record
+//! of a graph layer holds at header offsets 0x04 (Y) and 0x23 (X) the 1-based
+//! rank of its dataset among ALL the datasets of the file in file order
+//! (matrices and functions count). The ranks are resolved to
+//! [`OriginColumnAt`] (book, sheet, column positions in
+//! [`OriginProject::books`]) once every book is built, since a graph window
+//! may precede its book; a rank of 0, past the end or naming a dataset
+//! that is not in a book gives `None`.
 //!
 //! Robustness (invariant 10): every read is checked, a defect is an
 //! [`OriginError`], never a panic; annotation groups nest at most 64 deep
@@ -99,6 +121,9 @@ pub struct OriginColumn {
     pub values: Vec<f64>,
     /// Empty when no cell is text, else one entry per row (see [`Self::text`]).
     pub texts: Vec<Option<String>>,
+    /// The column's formula as Origin wrote it (the "command" of the column),
+    /// when it has one; see the module docs.
+    pub formula: Option<String>,
 }
 
 impl OriginColumn {
@@ -138,11 +163,45 @@ pub struct OriginSkipped {
     pub functions: usize,
 }
 
+/// Where a plotted dataset lives: positions in [`OriginProject::books`],
+/// then [`OriginBook::sheets`], then [`OriginSheet::columns`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OriginColumnAt {
+    pub book: usize,
+    pub sheet: usize,
+    pub column: usize,
+}
+
+/// A plotted curve of a graph layer; `None` when the dataset cannot be
+/// resolved to a column of a book.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OriginCurve {
+    pub y: Option<OriginColumnAt>,
+    pub x: Option<OriginColumnAt>,
+}
+
+/// A layer of a graph window.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OriginGraphLayer {
+    pub name: String,
+    pub curves: Vec<OriginCurve>,
+}
+
+/// A graph window.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OriginGraph {
+    pub short_name: String,
+    pub long_name: String,
+    pub layers: Vec<OriginGraphLayer>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct OriginProject {
     /// The Origin version stored in the file (for example 9.5), when present.
     pub version: Option<f64>,
     pub books: Vec<OriginBook>,
+    /// The graph windows in file order, curves resolved to columns of `books`.
+    pub graphs: Vec<OriginGraph>,
     pub skipped: OriginSkipped,
     /// `true` when the window section of an `.opju` was not understood to the
     /// end: the books of the windows read are complete, the others come from
@@ -203,7 +262,14 @@ fn assemble(
     // Column data per book, in file order, taken once by the header that names it.
     let mut by_book: HashMap<String, Vec<Option<ColumnData>>> = HashMap::new();
     let mut book_order: Vec<String> = Vec::new();
+    // The place of every dataset by rank (file order, matrices and functions
+    // included): book, sheet number and column name of a worksheet column.
+    let mut places: Vec<Option<(String, usize, String)>> = Vec::new();
     for dataset in datasets {
+        places.push(match &dataset.kind {
+            DatasetKind::Column(c) => Some((c.book.clone(), c.sheet, c.column.clone())),
+            _ => None,
+        });
         match dataset.kind {
             DatasetKind::Column(column) => {
                 if !by_book.contains_key(&column.book) {
@@ -221,16 +287,26 @@ fn assemble(
         }
     }
     let mut books = Vec::new();
+    // Sheet numbers of each book, parallel to `books`.
+    let mut numbers: Vec<Vec<usize>> = Vec::new();
     let mut done: HashSet<String> = HashSet::new();
+    let mut graph_windows = Vec::new();
     for window in windows {
         match by_book.remove(&window.name) {
             Some(columns) => {
                 done.insert(window.name.clone());
-                books.push(build_book(window, columns));
+                let (book, sheet_numbers) = build_book(window, columns);
+                books.push(book);
+                numbers.push(sheet_numbers);
             }
             None if done.contains(&window.name) => {}
             None if matrix_names.contains(&window.name) => skipped.matrices += 1,
-            None => skipped.graphs += 1,
+            None => {
+                skipped.graphs += 1;
+                if !window.layers.is_empty() {
+                    graph_windows.push(window);
+                }
+            }
         }
     }
     if partial {
@@ -244,7 +320,7 @@ fn assemble(
                     storage: String::new(),
                     layers: Vec::new(),
                 };
-                let mut book = build_book(window, columns);
+                let (mut book, sheet_numbers) = build_book(window, columns);
                 // No header named the sheets: Origin's default names.
                 for (index, sheet) in book.sheets.iter_mut().enumerate() {
                     if sheet.name.is_empty() {
@@ -252,18 +328,101 @@ fn assemble(
                     }
                 }
                 books.push(book);
+                numbers.push(sheet_numbers);
             }
         }
     }
+    let locator = Locator::new(&books, &numbers, &places);
+    let graphs = graph_windows
+        .into_iter()
+        .map(|window| locator.graph(window))
+        .collect();
     OriginProject {
         version,
         books,
+        graphs,
         skipped,
         partial,
     }
 }
 
-fn build_book(window: window::Window, mut data: Vec<Option<ColumnData>>) -> OriginBook {
+/// Resolves dataset ranks to positions in the books, once all are built.
+struct Locator<'a> {
+    books: &'a [OriginBook],
+    numbers: &'a [Vec<usize>],
+    places: &'a [Option<(String, usize, String)>],
+    by_name: HashMap<&'a str, usize>,
+}
+
+impl<'a> Locator<'a> {
+    fn new(
+        books: &'a [OriginBook],
+        numbers: &'a [Vec<usize>],
+        places: &'a [Option<(String, usize, String)>],
+    ) -> Self {
+        let mut by_name = HashMap::new();
+        for (i, book) in books.iter().enumerate() {
+            by_name.entry(book.short_name.as_str()).or_insert(i);
+        }
+        Self {
+            books,
+            numbers,
+            places,
+            by_name,
+        }
+    }
+
+    /// The column of the dataset of 1-based `rank`, if it is in a book.
+    fn at(&self, rank: Option<u16>) -> Option<OriginColumnAt> {
+        let (book_name, number, column_name) = self
+            .places
+            .get(usize::from(rank?).checked_sub(1)?)?
+            .as_ref()?;
+        let book = *self.by_name.get(book_name.as_str())?;
+        let sheet = self.numbers.get(book)?.iter().position(|n| n == number)?;
+        let column = self
+            .books
+            .get(book)?
+            .sheets
+            .get(sheet)?
+            .columns
+            .iter()
+            .position(|c| &c.short_name == column_name)?;
+        Some(OriginColumnAt {
+            book,
+            sheet,
+            column,
+        })
+    }
+
+    fn graph(&self, window: window::Window) -> OriginGraph {
+        OriginGraph {
+            short_name: window.name,
+            long_name: window.label,
+            layers: window
+                .layers
+                .into_iter()
+                .map(|layer| OriginGraphLayer {
+                    name: layer.sheet_name,
+                    curves: layer
+                        .curves
+                        .iter()
+                        .map(|c| OriginCurve {
+                            y: self.at(c.y_rank),
+                            x: self.at(c.x_rank),
+                        })
+                        .collect(),
+                })
+                .collect(),
+        }
+    }
+}
+
+/// The book and the sheet numbers of its sheets, in order.
+fn build_book(
+    window: window::Window,
+    mut data: Vec<Option<ColumnData>>,
+) -> (OriginBook, Vec<usize>) {
     let mut index: HashMap<(usize, &str), usize> = HashMap::new();
     for (i, column) in data.iter().enumerate() {
         if let Some(c) = column {
@@ -307,6 +466,7 @@ fn build_book(window: window::Window, mut data: Vec<Option<ColumnData>>) -> Orig
                 comment: curve.comment.clone(),
                 values,
                 texts,
+                formula: None,
             });
         }
     }
@@ -320,8 +480,24 @@ fn build_book(window: window::Window, mut data: Vec<Option<ColumnData>>) -> Orig
             comment: String::new(),
             values: column.values,
             texts: column.texts,
+            formula: None,
         });
     }
+    // Formulas: by column short name, in the sheet of the layer only.
+    for (n, layer) in window.layers.iter().enumerate() {
+        let Some(sheet_columns) = columns.get_mut(&(n + 1)) else {
+            continue;
+        };
+        for formula in &layer.formulas {
+            if let Some(column) = sheet_columns
+                .iter_mut()
+                .find(|c| c.short_name == formula.column)
+            {
+                column.formula.get_or_insert_with(|| formula.text.clone());
+            }
+        }
+    }
+    let numbers: Vec<usize> = sheet_numbers.iter().copied().collect();
     let sheets = sheet_numbers
         .into_iter()
         .map(|number| OriginSheet {
@@ -333,10 +509,11 @@ fn build_book(window: window::Window, mut data: Vec<Option<ColumnData>>) -> Orig
             columns: columns.remove(&number).unwrap_or_default(),
         })
         .collect();
-    OriginBook {
+    let book = OriginBook {
         short_name: window.name,
         long_name: window.label,
         sheets,
         info: horiba::info_lines(&window.storage),
-    }
+    };
+    (book, numbers)
 }

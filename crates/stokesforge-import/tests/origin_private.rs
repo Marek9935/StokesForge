@@ -167,6 +167,128 @@ fn private_opju_projects_read_completely_and_match_their_opj() {
     }
 }
 
+/// The `.opj` and `.opju` files of the folder (not its subfolders) and of
+/// `these/`, at any depth. The flag is `true` for a file under `these/`, where
+/// an unreadable or partial file is tolerated.
+fn origin_files(dir: &std::path::Path) -> Vec<(PathBuf, bool)> {
+    let mut out = Vec::new();
+    let mut pending = vec![
+        (dir.to_path_buf(), false, false),
+        (dir.join("these"), true, true),
+    ];
+    while let Some((folder, tolerant, recurse)) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&folder) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_dir() && recurse {
+                pending.push((path, tolerant, true));
+            } else if kind.is_file()
+                && matches!(
+                    path.extension().and_then(|e| e.to_str()),
+                    Some("opj" | "opju")
+                )
+            {
+                out.push((path, tolerant));
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+fn formulas_of(project: &OriginProject) -> Vec<Option<&str>> {
+    project
+        .books
+        .iter()
+        .flat_map(|b| &b.sheets)
+        .flat_map(|s| &s.columns)
+        .map(|c| c.formula.as_deref())
+        .collect()
+}
+
+/// Formulas and graphs (#556, #557) on the private files; prints counts
+/// only. A file that reads completely resolves its curves to columns (all
+/// but those of a dataset whose book has no window), and
+/// an `.opj` and `.opju` twin agree on formulas and graphs.
+#[test]
+#[ignore = "needs the private Origin files"]
+fn private_formulas_and_graphs_resolve_and_twins_agree() {
+    let dir = dir();
+    let files = origin_files(&dir);
+    if files.is_empty() {
+        eprintln!("no Origin file in {}: nothing checked", dir.display());
+        return;
+    }
+    let (mut unreadable, mut partial, mut complete) = (0, 0, 0);
+    let (mut formulas, mut formula_files) = (0, 0);
+    let (mut graphs, mut curves, mut resolved, mut twins) = (0, 0, 0, 0);
+    let mut windows_without_data = 0;
+    let mut by_path = std::collections::BTreeMap::new();
+    for (path, tolerant) in &files {
+        let bytes = std::fs::read(path).expect("readable file");
+        let project = match read_project(&bytes) {
+            Ok(project) => project,
+            Err(_) => {
+                assert!(tolerant, "a top-level file does not read");
+                unreadable += 1;
+                continue;
+            }
+        };
+        if project.partial {
+            assert!(tolerant, "a top-level file reads partially");
+            partial += 1;
+            continue;
+        }
+        complete += 1;
+        let n = formulas_of(&project).iter().flatten().count();
+        formulas += n;
+        formula_files += usize::from(n > 0);
+        graphs += project.graphs.len();
+        windows_without_data += project.skipped.graphs;
+        assert!(project.graphs.len() <= project.skipped.graphs);
+        for curve in project
+            .graphs
+            .iter()
+            .flat_map(|g| &g.layers)
+            .flat_map(|l| &l.curves)
+        {
+            curves += 1;
+            resolved += usize::from(curve.y.is_some() && curve.x.is_some());
+            for at in [curve.y, curve.x].into_iter().flatten() {
+                let sheet = &project.books[at.book].sheets[at.sheet];
+                assert!(at.column < sheet.columns.len());
+            }
+        }
+        by_path.insert(path.clone(), project);
+    }
+    // A dataset whose book has no window (a deleted book) is not resolvable.
+    assert!(
+        resolved * 1000 >= curves * 995,
+        "nearly every curve of a complete file resolves: {resolved} of {curves}"
+    );
+    for (path, opju) in &by_path {
+        if path.extension().and_then(|e| e.to_str()) != Some("opju") {
+            continue;
+        }
+        if let Some(opj) = by_path.get(&path.with_extension("opj")) {
+            assert_eq!(formulas_of(opj), formulas_of(opju), "formulas of a twin");
+            assert_eq!(opj.graphs, opju.graphs, "graphs of a twin");
+            twins += 1;
+        }
+    }
+    eprintln!(
+        "formulas and graphs: {} files, {complete} complete, {partial} partial, \
+         {unreadable} unreadable; {formulas} formulas in {formula_files} files; \
+         {graphs} graphs of {windows_without_data} windows without data, {curves} curves, {resolved} resolved; {twins} twin pairs equal",
+        files.len()
+    );
+}
+
 /// Timing (#536): `fs::read` then `read_project` of every private `.opj` and
 /// `.opju`. Prints only sizes, counts and durations, never file contents.
 /// Run with `--release` as well as in debug.

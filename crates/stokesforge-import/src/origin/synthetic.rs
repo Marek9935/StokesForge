@@ -63,6 +63,9 @@ pub struct Column {
     /// `.opju` only: text cells go to the string table (flag 0x04) instead
     /// of being written inline (flag 0x05).
     pub opju_text_by_reference: bool,
+    /// The column command, written as an annotation of the sheet layer
+    /// named by the column short name.
+    pub formula: Option<String>,
 }
 
 impl Column {
@@ -77,6 +80,7 @@ impl Column {
             storage: Cells::Mixed,
             opju_numbers: OpjuNumbers::Auto,
             opju_text_by_reference: false,
+            formula: None,
         }
     }
 }
@@ -94,6 +98,52 @@ pub struct Book {
     pub sheets: Vec<Sheet>,
     /// The `<HJYInfo>...` text appended to the label in an `OriginStorage` block.
     pub horiba_xml: Option<String>,
+}
+
+/// A curve record of a graph layer: the 1-based ranks of the Y and X
+/// datasets (all datasets in file order, matrices included).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GraphCurve {
+    pub y: u16,
+    pub x: u16,
+    /// Size of the record header: 515 (current), 493 (older `.opj`), or
+    /// shorter to test a truncated header (ranks are written where they fit).
+    pub header_len: usize,
+}
+
+impl GraphCurve {
+    pub fn new(y: u16, x: u16) -> Self {
+        Self {
+            y,
+            x,
+            header_len: 515,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphLayer {
+    pub name: String,
+    pub curves: Vec<GraphCurve>,
+}
+
+/// A graph window with its layers and plotted curves.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphWindow {
+    pub short_name: String,
+    pub long_name: String,
+    pub layers: Vec<GraphLayer>,
+}
+
+/// An annotation written in a sheet layer as it is (a name that is not a
+/// column, a blank or odd text...), after the column formulas.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Annotation {
+    /// Positions in [`Project::books`] and [`Book::sheets`].
+    pub book: usize,
+    pub sheet: usize,
+    pub name: String,
+    pub text: String,
 }
 
 #[derive(Debug, Clone)]
@@ -117,6 +167,18 @@ pub struct Project {
     pub opju_preview_len: usize,
     /// `.opju` only: text is written as UTF-8 (else as Windows-1252).
     pub opju_utf8: bool,
+    /// Graph windows with layers and curves, written after the windows of
+    /// `graphs` (or before the books when [`Self::graph_windows_first`]).
+    pub graph_windows: Vec<GraphWindow>,
+    /// Write the graph windows before the book windows.
+    pub graph_windows_first: bool,
+    /// Write the matrix datasets before the columns (they take the first ranks).
+    pub matrices_first: bool,
+    /// Extra annotations of sheet layers.
+    pub annotations: Vec<Annotation>,
+    /// `.opju` only: formula annotations use block 1 form `00` + legacy
+    /// object instead of the packed `0x80` object.
+    pub opju_legacy_formulas: bool,
 }
 
 impl Default for Project {
@@ -131,6 +193,11 @@ impl Default for Project {
             opju_bad_annotation: None,
             opju_preview_len: 0,
             opju_utf8: false,
+            graph_windows: Vec::new(),
+            graph_windows_first: false,
+            matrices_first: false,
+            annotations: Vec::new(),
+            opju_legacy_formulas: false,
         }
     }
 }
@@ -312,19 +379,108 @@ fn put_annotation_group(out: &mut Vec<u8>, depth: usize) {
     put_end(out); // third block (empty)
 }
 
-fn put_layer(out: &mut Vec<u8>, sheet: Option<&Sheet>, nesting: usize) {
-    put_object(out, &layer_header(sheet.map_or("", |s| s.name.as_str())));
+/// What a layer holds besides its annotations.
+#[derive(Clone, Copy)]
+enum Body<'a> {
+    Empty,
+    Sheet(&'a Sheet),
+    Graph(&'a [GraphCurve]),
+}
+
+/// The annotations of a sheet layer as `(name, text)`: the column formulas,
+/// then the extra ones of the project.
+fn sheet_annotations(project: &Project, book: usize, sheet: usize) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    if let Some(s) = project.books.get(book).and_then(|b| b.sheets.get(sheet)) {
+        for column in &s.columns {
+            if let Some(formula) = &column.formula {
+                out.push((column.short_name.clone(), formula.clone()));
+            }
+        }
+    }
+    for a in &project.annotations {
+        if (a.book, a.sheet) == (book, sheet) {
+            out.push((a.name.clone(), a.text.clone()));
+        }
+    }
+    out
+}
+
+/// A graph curve record header: ranks at 0x04 (Y) and 0x23 (X) where they fit.
+fn graph_curve_header(curve: &GraphCurve) -> Vec<u8> {
+    let mut header = vec![0u8; curve.header_len];
+    for (at, rank) in [(0x04, curve.y), (0x23, curve.x)] {
+        if let Some(room) = header.get_mut(at..at + 2) {
+            room.copy_from_slice(&rank.to_le_bytes());
+        }
+    }
+    header
+}
+
+/// An annotation header of 133 bytes with `name` at 0x46.
+fn annotation_header(name: &str) -> Vec<u8> {
+    let mut header = vec![0u8; 133];
+    let name = encode(name);
+    put_at(&mut header, 0x46, &name[..name.len().min(40)]);
+    header
+}
+
+fn put_layer(
+    out: &mut Vec<u8>,
+    name: &str,
+    nesting: usize,
+    annotations: &[(String, String)],
+    body: Body,
+) {
+    put_object(out, &layer_header(name));
     put_annotation_group(out, nesting);
+    for (name, text) in annotations {
+        put_object(out, &annotation_header(name));
+        let mut bytes = encode(text);
+        bytes.push(0);
+        put_object(out, &bytes); // block 1: the text
+        put_end(out); // block 2 (empty)
+        put_end(out); // block 3 (empty)
+    }
     put_end(out); // annotations
-    if let Some(sheet) = sheet {
-        for column in &sheet.columns {
-            put_curve(out, column);
+    match body {
+        Body::Empty => {}
+        Body::Sheet(sheet) => {
+            for column in &sheet.columns {
+                put_curve(out, column);
+            }
+        }
+        Body::Graph(curves) => {
+            for curve in curves {
+                put_object(out, &graph_curve_header(curve));
+                put_object(out, &[0]);
+            }
         }
     }
     put_end(out); // curves
     put_end(out); // axis breaks
     for _axis in 0..3 {
         put_end(out); // axis parameters x, y, z
+    }
+}
+
+fn put_graph_windows_opj(out: &mut Vec<u8>, project: &Project) {
+    for graph in &project.graph_windows {
+        put_object(out, &window_header(&graph.short_name, &graph.long_name));
+        for layer in &graph.layers {
+            put_layer(out, &layer.name, 0, &[], Body::Graph(&layer.curves));
+        }
+        put_end(out);
+    }
+}
+
+fn put_matrix_datasets_opj(out: &mut Vec<u8>, project: &Project) {
+    for matrix in &project.matrices {
+        let data: Vec<u8> = [1.0f64, 2.0, 3.0, 4.0]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
+        put_dataset(out, matrix, 0x6001, 8, 4, &data);
     }
 }
 
@@ -337,6 +493,9 @@ pub fn write_project(project: &Project) -> Vec<u8> {
     put_object(&mut out, &global);
     put_end(&mut out);
 
+    if project.matrices_first {
+        put_matrix_datasets_opj(&mut out, project);
+    }
     for book in &project.books {
         for (n, sheet) in book.sheets.iter().enumerate() {
             for column in &sheet.columns {
@@ -350,17 +509,16 @@ pub fn write_project(project: &Project) -> Vec<u8> {
             }
         }
     }
-    for matrix in &project.matrices {
-        let data: Vec<u8> = [1.0f64, 2.0, 3.0, 4.0]
-            .iter()
-            .flat_map(|v| v.to_le_bytes())
-            .collect();
-        put_dataset(&mut out, matrix, 0x6001, 8, 4, &data);
+    if !project.matrices_first {
+        put_matrix_datasets_opj(&mut out, project);
     }
     put_end(&mut out);
 
+    if project.graph_windows_first {
+        put_graph_windows_opj(&mut out, project);
+    }
     let mut nesting = project.annotation_nesting;
-    for book in &project.books {
+    for (index, book) in project.books.iter().enumerate() {
         let mut label = book.long_name.clone();
         if let Some(xml) = &book.horiba_xml {
             label.push_str("@${[0|4|TREE|1|2]}<OriginStorage>");
@@ -368,15 +526,26 @@ pub fn write_project(project: &Project) -> Vec<u8> {
             label.push_str("</OriginStorage>");
         }
         put_object(&mut out, &window_header(&book.short_name, &label));
-        for sheet in &book.sheets {
-            put_layer(&mut out, Some(sheet), std::mem::take(&mut nesting));
+        for (n, sheet) in book.sheets.iter().enumerate() {
+            let annotations = sheet_annotations(project, index, n);
+            let nesting = std::mem::take(&mut nesting);
+            put_layer(
+                &mut out,
+                &sheet.name,
+                nesting,
+                &annotations,
+                Body::Sheet(sheet),
+            );
         }
         put_end(&mut out);
     }
     for name in project.matrices.iter().chain(&project.graphs) {
         put_object(&mut out, &window_header(name, ""));
-        put_layer(&mut out, None, 0);
+        put_layer(&mut out, "", 0, &[], Body::Empty);
         put_end(&mut out);
+    }
+    if !project.graph_windows_first {
+        put_graph_windows_opj(&mut out, project);
     }
     put_end(&mut out);
     out
@@ -841,17 +1010,53 @@ enum Annotations {
     Bad,
 }
 
-fn put_opju_layer(out: &mut Vec<u8>, sheet: Option<&Sheet>, utf8: bool, annotations: Annotations) {
+/// Annotations of a layer of the `.opju` writer.
+struct OpjuLayer<'a> {
+    name: &'a str,
+    annotations: Annotations,
+    /// `(name, text)` annotations after the others.
+    texts: &'a [(String, String)],
+    legacy_form: bool,
+    body: Body<'a>,
+}
+
+fn put_opju_text_annotation(
+    out: &mut Vec<u8>,
+    name: &str,
+    text: &str,
+    legacy_form: bool,
+    utf8: bool,
+) {
+    put_packed(out, &annotation_header_opju(name, utf8));
+    put_blob(out, &[]);
+    let mut bytes = encode_text(text, utf8);
+    bytes.push(0);
+    if legacy_form {
+        out.push(0);
+        put_object(out, &bytes);
+    } else {
+        put_packed(out, &bytes);
+    }
+    put_blob(out, &[]); // block 2
+    put_blob(out, &[]); // block 3
+    out.extend_from_slice(&[0, 0]);
+}
+
+fn annotation_header_opju(name: &str, utf8: bool) -> Vec<u8> {
+    let mut header = vec![0u8; 133];
+    let name = encode_text(name, utf8);
+    put_at(&mut header, 0x46, &name[..name.len().min(40)]);
+    header
+}
+
+fn put_opju_layer(out: &mut Vec<u8>, layer: &OpjuLayer, utf8: bool) {
     let mut header = vec![0u8; 0x40];
     header[0x20..0x28].fill(0xFF);
     put_packed(out, &header);
-    put_text_line(
-        out,
-        &encode_text(sheet.map_or("", |s| s.name.as_str()), utf8),
-    );
+    put_text_line(out, &encode_text(layer.name, utf8));
     out.push(0); // always empty so far
     put_blob(out, &[0x42, 0x42, 0x42]); // layer properties
-    match annotations {
+    match layer.annotations {
         Annotations::None => {}
         Annotations::Forms => put_opju_annotation_forms(out),
         Annotations::Bad => {
@@ -860,23 +1065,37 @@ fn put_opju_layer(out: &mut Vec<u8>, sheet: Option<&Sheet>, utf8: bool, annotati
             out.push(0x42); // no such annotation form
         }
     }
+    for (name, text) in layer.texts {
+        put_opju_text_annotation(out, name, text, layer.legacy_form, utf8);
+    }
     out.extend_from_slice(&LIST_END);
-    if let Some(sheet) = sheet {
-        for column in &sheet.columns {
-            let mut header = vec![0u8; 0x12];
-            header[0x11] = column_code(column.designation);
-            header.extend_from_slice(&encode_text(&column.short_name, utf8));
-            put_packed(out, &header);
-            put_blob(out, &[9, 9]); // column property set
-            let mut text = format!("{}\r\n{}", column.long_name, column.unit);
-            if !column.comment.is_empty() {
-                text.push_str("\r\n");
-                text.push_str(&column.comment);
+    match layer.body {
+        Body::Empty => {}
+        Body::Sheet(sheet) => {
+            for column in &sheet.columns {
+                let mut header = vec![0u8; 0x12];
+                header[0x11] = column_code(column.designation);
+                header.extend_from_slice(&encode_text(&column.short_name, utf8));
+                put_packed(out, &header);
+                put_blob(out, &[9, 9]); // column property set
+                let mut text = format!("{}\r\n{}", column.long_name, column.unit);
+                if !column.comment.is_empty() {
+                    text.push_str("\r\n");
+                    text.push_str(&column.comment);
+                }
+                let mut bytes = encode_text(&text, utf8);
+                bytes.push(0);
+                put_blob(out, &zero_run(&bytes));
+                out.push(0); // always empty so far
             }
-            let mut bytes = encode_text(&text, utf8);
-            bytes.push(0);
-            put_blob(out, &zero_run(&bytes));
-            out.push(0); // always empty so far
+        }
+        Body::Graph(curves) => {
+            for curve in curves {
+                put_packed(out, &graph_curve_header(curve));
+                put_blob(out, &[9, 9]); // property set
+                put_blob(out, &zero_run(&[0])); // empty text
+                out.push(0); // always empty so far
+            }
         }
     }
     out.extend_from_slice(&LIST_END);
@@ -885,6 +1104,37 @@ fn put_opju_layer(out: &mut Vec<u8>, sheet: Option<&Sheet>, utf8: bool, annotati
     out.extend_from_slice(&LIST_END);
     out.extend_from_slice(&LIST_END); // y
     out.extend_from_slice(&LIST_END); // z
+}
+
+fn put_opju_graph_windows(out: &mut Vec<u8>, project: &Project, utf8: bool) {
+    for graph in &project.graph_windows {
+        put_blob(out, &[1, 2, 3, 4]); // a graph window carries a blob
+        put_packed(out, &opju_window_header(&graph.short_name));
+        put_text_line(out, &encode_text(&graph.long_name, utf8));
+        put_blob(out, &[0x01, 0x02]);
+        for layer in &graph.layers {
+            out.push(0);
+            let spec = OpjuLayer {
+                name: &layer.name,
+                annotations: Annotations::None,
+                texts: &[],
+                legacy_form: false,
+                body: Body::Graph(&layer.curves),
+            };
+            put_opju_layer(out, &spec, utf8);
+        }
+        out.push(0);
+        out.extend_from_slice(&LIST_END);
+    }
+}
+
+fn put_opju_matrices(out: &mut Vec<u8>, project: &Project, utf8: bool) {
+    for matrix in &project.matrices {
+        let column = Column::numbers("M", OriginDesignation::Y, &[1.0, 2.0, 3.0, 4.0]);
+        let (cells, _) = opju_cell_block(&column, utf8);
+        let header = opju_dataset_header(matrix, 0x6001);
+        put_opju_dataset(out, &zero_run(&header), &cells, &[]);
+    }
 }
 
 fn put_opju_preamble(out: &mut Vec<u8>, version: f64, preview_len: usize) {
@@ -906,6 +1156,9 @@ pub fn write_opju(project: &Project) -> Vec<u8> {
     let utf8 = project.opju_utf8;
     let mut out = Vec::new();
     put_opju_preamble(&mut out, project.version, project.opju_preview_len);
+    if project.matrices_first {
+        put_opju_matrices(&mut out, project, utf8);
+    }
     for book in &project.books {
         for (n, sheet) in book.sheets.iter().enumerate() {
             for column in &sheet.columns {
@@ -919,13 +1172,14 @@ pub fn write_opju(project: &Project) -> Vec<u8> {
             }
         }
     }
-    for matrix in &project.matrices {
-        let column = Column::numbers("M", OriginDesignation::Y, &[1.0, 2.0, 3.0, 4.0]);
-        let (cells, _) = opju_cell_block(&column, utf8);
-        let header = opju_dataset_header(matrix, 0x6001);
-        put_opju_dataset(&mut out, &zero_run(&header), &cells, &[]);
+    if !project.matrices_first {
+        put_opju_matrices(&mut out, project, utf8);
     }
     out.extend_from_slice(&LIST_END);
+
+    if project.graph_windows_first {
+        put_opju_graph_windows(&mut out, project, utf8);
+    }
 
     for (index, book) in project.books.iter().enumerate() {
         out.push(0); // a book carries no blob here
@@ -953,7 +1207,15 @@ pub fn write_opju(project: &Project) -> Vec<u8> {
                 (0, 0) if project.opju_annotations => Annotations::Forms,
                 _ => Annotations::None,
             };
-            put_opju_layer(&mut out, Some(sheet), utf8, annotations);
+            let texts = sheet_annotations(project, index, n);
+            let spec = OpjuLayer {
+                name: &sheet.name,
+                annotations,
+                texts: &texts,
+                legacy_form: project.opju_legacy_formulas,
+                body: Body::Sheet(sheet),
+            };
+            put_opju_layer(&mut out, &spec, utf8);
         }
         out.push(0);
         out.extend_from_slice(&LIST_END);
@@ -964,9 +1226,19 @@ pub fn write_opju(project: &Project) -> Vec<u8> {
         put_text_line(&mut out, b"");
         put_blob(&mut out, &[0x01, 0x02]);
         out.push(0);
-        put_opju_layer(&mut out, None, utf8, Annotations::None);
+        let spec = OpjuLayer {
+            name: "",
+            annotations: Annotations::None,
+            texts: &[],
+            legacy_form: false,
+            body: Body::Empty,
+        };
+        put_opju_layer(&mut out, &spec, utf8);
         out.push(0);
         out.extend_from_slice(&LIST_END);
+    }
+    if !project.graph_windows_first {
+        put_opju_graph_windows(&mut out, project, utf8);
     }
     out.push(0);
     out.extend_from_slice(&LIST_END);
@@ -1043,6 +1315,7 @@ mod tests {
         y.long_name = "Signal".into();
         y.unit = "CPS".into();
         y.comment = "first run".into();
+        y.formula = Some("col(A)*0.5+1".into());
         Project {
             books: vec![Book {
                 short_name: "Book1".into(),
@@ -1068,6 +1341,16 @@ mod tests {
             }],
             matrices: vec!["Matrix1".into()],
             graphs: vec!["Graph1".into()],
+            // Two curves sharing the X column (rank 1), datasets in file
+            // order: Data A, Data B, Note A, then the matrix.
+            graph_windows: vec![GraphWindow {
+                short_name: "Graph2".into(),
+                long_name: "Two curves".into(),
+                layers: vec![GraphLayer {
+                    name: "Layer1".into(),
+                    curves: vec![GraphCurve::new(2, 1), GraphCurve::new(3, 1)],
+                }],
+            }],
             opju_annotations: true,
             ..Project::default()
         }

@@ -260,7 +260,13 @@ fn a_truncated_origin_file_names_the_file_and_does_not_panic() {
     let dir = isolated();
     let bytes = std::fs::read(fixture("origin/synthetic.opj")).unwrap();
     let cut = dir.path().join("cut.opj");
-    std::fs::write(&cut, &bytes[..bytes.len() / 2]).unwrap();
+    // Cut inside the size field of the first dataset: always "truncated",
+    // whatever the size of the sample.
+    std::fs::write(
+        &cut,
+        &bytes[..stokesforge_import::origin::synthetic::FIRST_DATASET_OFFSET + 3],
+    )
+    .unwrap();
     let error = run(&["import", cut.to_str().unwrap()]).0.unwrap_err();
     assert!(
         error.contains("cut.opj") && error.contains("truncated"),
