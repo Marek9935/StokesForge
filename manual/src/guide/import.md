@@ -243,7 +243,7 @@ In a shared-X layout, only the first X is kept. A later X with the same values i
 
 ### Column formulas
 
-A column of an Origin workbook can hold a formula (Origin's **Set Column Values**). StokesForge translates it, sets it on the imported column when the translation is certain, and checks that it gives the **same values as Origin** (to a relative 1e-9; an empty cell equals an empty cell, a text cell does not equal a number). The check runs before anything is created.
+A column of an Origin workbook can hold a formula (Origin's **Set Column Values**). StokesForge translates it, sets it on the imported column when the translation is certain, and checks that it gives the **same values as Origin** (to a relative 1e-9, or to 1e-12 of the largest value of the column, so that rounding noise next to zero does not count; an empty cell equals an empty cell, a text cell does not equal a number). The check runs before anything is created.
 
 - **Same values**: the column takes the formula and stays live, like a formula you typed. A formula that reads another formula column is checked on Origin's values for that column.
 - **Different values**: the window **Formulas with Different Values** opens when you click **Import**. It lists each such column with the formula as Origin wrote it and one example row (for example "row 1: Origin 0.1215, formula 45.85"). Nothing is checked at first. Check the columns that must take the formula; the others keep Origin's values. **Cancel** imports nothing and gives you the **Import from Origin** window back. **Reopen Last Import…** remembers your answers.

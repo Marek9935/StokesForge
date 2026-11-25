@@ -39,6 +39,8 @@ use crate::origin_formula::{
 
 /// Relative tolerance of the comparison with Origin's values.
 const VALUE_TOLERANCE: f64 = 1e-9;
+/// Absolute floor, as a share of the largest magnitude of the column.
+const FLOOR_OF_COLUMN: f64 = 1e-12;
 
 /// A column of a file by position: book, sheet, column.
 pub type OriginColumnPos = (usize, usize, usize);
@@ -331,12 +333,22 @@ pub fn build_column_formula(
     Some(ColumnFormula::from_parts_with_remote(parts, remote))
 }
 
-fn same_value(a: f64, b: f64) -> bool {
-    (a.is_nan() && b.is_nan()) || a == b || (a - b).abs() <= VALUE_TOLERANCE * a.abs().max(b.abs())
+/// Equal values: both empty, or within a relative `1e-9`, or within `floor`
+/// (an absolute floor of the column, see [`first_difference`]).
+fn same_value(a: f64, b: f64, floor: f64) -> bool {
+    let gap = (a - b).abs();
+    (a.is_nan() && b.is_nan())
+        || a == b
+        || gap <= VALUE_TOLERANCE * a.abs().max(b.abs())
+        || gap <= floor
 }
 
 /// First row where the computed values differ from Origin's column. Trailing
 /// empty cells are ignored on both sides; a text cell of Origin always differs.
+/// Two numbers are equal within a relative `1e-9`, or within `1e-12 * M`, `M`
+/// being the largest finite magnitude among Origin's values of the column (no
+/// floor when there is none): float noise next to zero (`9e-20` against `0` in
+/// a column that reaches `0.5`) is not a difference.
 fn first_difference(
     origin: &stokesforge_import::origin::OriginColumn,
     computed: &[f64],
@@ -349,6 +361,12 @@ fn first_difference(
         .iter()
         .rposition(|value| !value.is_nan())
         .map_or(0, |row| row + 1);
+    let floor = FLOOR_OF_COLUMN
+        * origin
+            .values
+            .iter()
+            .filter(|value| value.is_finite())
+            .fold(0.0f64, |m, value| m.max(value.abs()));
     for row in 0..origin_len.max(computed_len) {
         let got = computed.get(row).copied().unwrap_or(f64::NAN);
         let cell = |value: f64| {
@@ -366,7 +384,7 @@ fn first_difference(
             });
         }
         let expected = origin.values.get(row).copied().unwrap_or(f64::NAN);
-        if !same_value(expected, got) {
+        if !same_value(expected, got, floor) {
             return Some(StaleExample {
                 row,
                 origin: cell(expected),
@@ -623,4 +641,42 @@ pub fn make_origin_import_column(
         Some(original) => with_formula_note(built, original),
         None => built,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stokesforge_import::origin::{OriginColumn, OriginDesignation};
+
+    fn column(values: &[f64]) -> OriginColumn {
+        OriginColumn {
+            short_name: "A".into(),
+            designation: OriginDesignation::Y,
+            long_name: String::new(),
+            unit: String::new(),
+            comment: String::new(),
+            values: values.to_vec(),
+            texts: Vec::new(),
+            formula: None,
+        }
+    }
+
+    #[test]
+    fn noise_next_to_zero_in_a_column_that_reaches_half_is_equal() {
+        let origin = column(&[0.5, 9e-20, 0.25]);
+        assert!(first_difference(&origin, &[0.5, 0.0, 0.25]).is_none());
+    }
+
+    #[test]
+    fn a_difference_of_1e_6_of_the_maximum_is_still_stale() {
+        let origin = column(&[0.5, 0.0]);
+        let found = first_difference(&origin, &[0.5, 0.5e-6]).expect("stale");
+        assert_eq!(found.row, 1);
+    }
+
+    #[test]
+    fn a_column_of_1e_20_values_differing_by_ten_percent_is_stale() {
+        let origin = column(&[1e-20, 2e-20]);
+        assert!(first_difference(&origin, &[1.1e-20, 2.2e-20]).is_some());
+    }
 }

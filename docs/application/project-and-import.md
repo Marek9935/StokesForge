@@ -189,7 +189,7 @@ to the kept X) and gives each formula column a `FormulaVerdict` (`Translated`,
 holding the planned sheets with Origin's values only, sets the translated formulas there
 (loops and self references are refused with `Tree::formula_loop`), computes each one with
 `evaluate_formula_with_x` the way the recalculation does (length of the longest column read
-row by row) and compares with Origin's values: equal within a relative `1e-9`, NaN equals
+row by row) and compares with Origin's values: equal within a relative `1e-9` or within `1e-12` of the largest magnitude of the column (float noise next to zero), NaN equals
 NaN, trailing empty cells ignored, a text cell of Origin is a difference. A formula that reads
 another formula column is judged on Origin's values for it. `Import` (`import_origin`) runs
 this first; with no `Stale` column the import runs at once, otherwise the window `Formulas
