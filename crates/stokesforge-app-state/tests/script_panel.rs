@@ -596,9 +596,6 @@ fn run_file(path: &std::path::Path) -> Action {
 /// Starts a console script that runs until Stop, and returns once it is really
 /// running.
 fn start_spinning(state: &mut AppState, dir: &std::path::Path) {
-    // The engine reaches `AppState` (and so Stop) only once a first run has
-    // ended: warm it up, or Stop of the very first run would do nothing.
-    run_and_wait(state, "pass\n");
     let marker = dir.join("spinning.marker");
     state.set_script_source(format!(
         "open({:?}, 'w').close()\nwhile True:\n    pass\n",
@@ -859,4 +856,84 @@ fn a_dropped_script_asks_nothing_while_something_else_holds_the_window() {
         thread::sleep(Duration::from_millis(1));
         state.poll_script();
     }
+}
+
+fn wait_for_end(state: &mut AppState) {
+    let deadline = Instant::now() + TIMEOUT;
+    while state.script_running() {
+        assert!(Instant::now() <= deadline, "Stop did not end the run");
+        thread::sleep(Duration::from_millis(1));
+        state.poll_script();
+    }
+}
+
+// --- Stop during the very first run of a session (A2 of #552) --------------
+
+/// A fresh state, an endless console script as the very first run: Stop ends it
+/// as interrupted. Witness: store the engine only when the run ends (the old
+/// assignment): Stop finds no engine and the run never ends.
+#[test]
+fn stop_ends_the_very_first_console_run_of_a_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state, _sheet) = start();
+    start_spinning(&mut state, dir.path());
+
+    state.dispatch(Action::InterruptScript);
+    wait_for_end(&mut state);
+    assert!(state.script_output().unwrap().interrupted);
+}
+
+/// Same, with a file as the very first run.
+#[test]
+fn stop_ends_the_very_first_file_run_of_a_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let marker = dir.path().join("spinning.marker");
+    let file = dir.path().join("spin.py");
+    std::fs::write(
+        &file,
+        format!(
+            "open({:?}, 'w').close()\nwhile True:\n    pass\n",
+            marker.display().to_string()
+        ),
+    )
+    .unwrap();
+    let (_session, mut state, _sheet) = start();
+    state.dispatch(run_file(&file));
+    let deadline = Instant::now() + TIMEOUT;
+    while !marker.exists() {
+        assert!(Instant::now() <= deadline, "the script did not start");
+        thread::sleep(Duration::from_millis(5));
+    }
+
+    state.dispatch(Action::InterruptScript);
+    wait_for_end(&mut state);
+    assert!(state.script_output().unwrap().interrupted);
+}
+
+/// A Stop clicked right after Run, while Python is still starting and the
+/// script has not begun, is kept and takes effect as soon as it runs; the next
+/// run is not affected by it.
+#[test]
+fn a_stop_before_the_engine_is_ready_takes_effect_and_does_not_leak() {
+    let (_session, mut state, _sheet) = start();
+    state.set_script_source("while True:\n    pass\n".to_string());
+    state.dispatch(Action::RunScript);
+    state.dispatch(Action::InterruptScript);
+    wait_for_end(&mut state);
+    assert!(state.script_output().unwrap().interrupted);
+
+    run_and_wait(&mut state, "print('next')\n");
+    let output = state.script_output().unwrap();
+    assert!(!output.interrupted, "the earlier Stop leaked: {output:?}");
+    assert!(output.stdout.contains("next"), "{:?}", output.stdout);
+}
+
+/// A Stop with nothing running is not remembered for the next run.
+#[test]
+fn a_stop_with_nothing_running_does_not_leak_into_the_next_run() {
+    let (_session, mut state, _sheet) = start();
+    state.dispatch(Action::InterruptScript);
+    run_and_wait(&mut state, "print('ok')\n");
+    let output = state.script_output().unwrap();
+    assert!(!output.interrupted && output.error.is_none(), "{output:?}");
 }

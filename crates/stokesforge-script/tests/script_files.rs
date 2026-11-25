@@ -394,13 +394,36 @@ fn an_unreadable_file_is_a_host_error() {
 
 /// A folder with accents. Needs `utf8_mode = 1` in the interpreter start
 /// (`stokesforge-python/src/interpreter.rs`): the isolated config does not read
-/// the locale, so the file system encoding is ASCII and the import of a
-/// sibling fails with `UnicodeEncodeError`. Pending a decision on that file.
+/// the locale, so without it the file system encoding is ASCII and the import of
+/// a sibling fails. Linux only (A1 of #552).
+#[cfg(target_os = "linux")]
 #[test]
-#[ignore = "needs utf8_mode in interpreter.rs (#552), outside the L1 scope"]
 fn a_folder_with_accents_is_importable() {
     let bench = exclusive_bench();
     bench.write("with accents \u{e9}/dep.py", "D = '\u{e9}'\n".as_bytes());
     let accent = bench.write("with accents \u{e9}/main.py", b"import dep\nprint(dep.D)\n");
     assert_eq!(out(&bench.file_ok(&accent)), vec!["\u{e9}"]);
+}
+
+/// `open()` without `encoding=` reads UTF-8 text (A1 of #552, Linux only).
+#[cfg(target_os = "linux")]
+#[test]
+fn open_without_encoding_reads_utf8() {
+    let bench = exclusive_bench();
+    bench.write("note.txt", "caf\u{e9}\n".as_bytes());
+    let main = bench.write(
+        "main.py",
+        b"from pathlib import Path\nprint(open(Path(__file__).parent / 'note.txt').read().strip())\n",
+    );
+    assert_eq!(out(&bench.file_ok(&main)), vec!["caf\u{e9}"]);
+}
+
+/// The interpreter runs in UTF-8 mode and stays isolated (A1 of #552).
+#[cfg(target_os = "linux")]
+#[test]
+fn the_interpreter_runs_in_utf8_mode_and_isolated() {
+    let bench = exclusive_bench();
+    bench.text_ok("pass\n");
+    assert!(interpreter::sys_flags_utf8_mode().unwrap());
+    assert!(interpreter::sys_flags_isolated().unwrap());
 }

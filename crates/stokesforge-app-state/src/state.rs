@@ -46,6 +46,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::Arc;
+#[cfg(feature = "python")]
+use std::sync::{Mutex, PoisonError};
 use std::thread;
 
 use stokesforge_commands::{Command, HistoryLabel, MacroKind, PlotEditKind};
@@ -4032,16 +4034,27 @@ pub struct AppState {
     /// itself is started neither here nor there, only at the first script.
     #[cfg(feature = "python")]
     python: Option<EmbeddedPython>,
-    /// The script engine, once started (at the first successful [`Action::
-    /// RunScript`]). Shared by `Arc` with the detached thread that
-    /// runs the current script, if there is one.
+    /// The script engine, once started (lazily, at the first run). A **shared
+    /// slot**: the detached run thread fills it the moment the engine exists,
+    /// so Stop reaches it during the very first run too (#552). One engine
+    /// for the whole session, shared by `Arc` with the run thread.
     #[cfg(feature = "python")]
-    engine: Option<Arc<ScriptEngine>>,
+    engine: EngineSlot,
+    /// Stop clicked while the run had not yet entered the script (Python
+    /// still starting): applied by [`AppState::poll_script`] as soon as the
+    /// script runs, cleared at the start and at the end of every run, so it
+    /// never leaks into the next one.
+    #[cfg(feature = "python")]
+    script_stop_pending: bool,
     /// Reply channel of a run in progress on a detached thread.
     /// `Some` until [`AppState::poll_script`] has received a reply.
     #[cfg(feature = "python")]
     pending_script: Option<mpsc::Receiver<PendingScriptResult>>,
 }
+
+/// Shared slot holding the script engine once the run thread has created it.
+#[cfg(feature = "python")]
+type EngineSlot = Arc<Mutex<Option<Arc<ScriptEngine>>>>;
 
 /// What a script run executes (#552): the console's text, or a file.
 #[cfg(feature = "python")]
@@ -4211,7 +4224,9 @@ impl AppState {
             #[cfg(feature = "python")]
             python: None,
             #[cfg(feature = "python")]
-            engine: None,
+            engine: EngineSlot::default(),
+            #[cfg(feature = "python")]
+            script_stop_pending: false,
             #[cfg(feature = "python")]
             pending_script: None,
         };
@@ -8004,6 +8019,7 @@ impl AppState {
     fn poll_script_pass(&mut self) {
         #[cfg(feature = "python")]
         {
+            self.apply_pending_script_stop();
             let received = match &self.pending_script {
                 Some(receiver) => match receiver.try_recv() {
                     Ok(reply) => Some(reply),
@@ -8020,6 +8036,7 @@ impl AppState {
                 return;
             };
             self.pending_script = None;
+            self.script_stop_pending = false;
             if let Some(engine) = engine {
                 // `pyst.save_as(path)` may have changed the project path: the
                 // window adopts it, as after a "Save as".
@@ -8034,7 +8051,6 @@ impl AppState {
                     self.saved_revision = Some(saved);
                     self.autosave_mark_clean();
                 }
-                self.engine = Some(engine);
             }
             match result {
                 Ok(outcome) => self.finish_script_run(outcome),
@@ -13837,7 +13853,8 @@ impl AppState {
             self.fail(tr!("error-script-no-python"));
             return false;
         };
-        let existing_engine = self.engine.clone();
+        let slot = Arc::clone(&self.engine);
+        self.script_stop_pending = false;
         // Identity of the script's own: a macro opened by the interface
         // (graph properties) does not absorb it and does not undo it (#21).
         let handle = self.handle.with_new_identity();
@@ -13858,9 +13875,16 @@ impl AppState {
         let spawned = thread::Builder::new()
             .name("stokesforge-app-script".to_owned())
             .spawn(move || {
-                let engine = match existing_engine {
+                let existing = slot.lock().unwrap_or_else(PoisonError::into_inner).clone();
+                let engine = match existing {
                     Some(engine) => Ok(engine),
-                    None => ScriptEngine::spawn(handle, python).map(Arc::new),
+                    None => ScriptEngine::spawn(handle, python)
+                        .map(Arc::new)
+                        .inspect(|engine| {
+                            // Reachable by Stop from now on, not at the end of the run.
+                            *slot.lock().unwrap_or_else(PoisonError::into_inner) =
+                                Some(Arc::clone(engine));
+                        }),
                 };
                 let reply = match engine {
                     Ok(engine) => {
@@ -13944,13 +13968,33 @@ impl AppState {
         // The `Arc` is cloned then the borrow released before `notice`: the two
         // fields of `self` cannot be borrowed at the same time as
         // `self.notice` needs an exclusive borrow.
-        let engine = self.engine.clone();
-        match engine {
-            Some(engine) if self.pending_script.is_some() => {
-                engine.interrupt();
-                self.notice(tr!("status-script-interrupt-requested"));
-            }
-            _ => self.notice(tr!("status-script-none-running")),
+        if self.pending_script.is_none() {
+            self.notice(tr!("status-script-none-running"));
+            return;
+        }
+        // The run may not have entered the script yet (engine or Python still
+        // starting): the request is kept and applied by `poll_script` as soon
+        // as it does, since an interruption sent earlier is erased by the
+        // start-of-run reset of the engine.
+        self.script_stop_pending = true;
+        self.apply_pending_script_stop();
+        self.notice(tr!("status-script-interrupt-requested"));
+    }
+
+    /// Forwards a pending Stop to the engine once its script is running.
+    #[cfg(feature = "python")]
+    fn apply_pending_script_stop(&mut self) {
+        if !self.script_stop_pending || self.pending_script.is_none() {
+            return;
+        }
+        let engine = self
+            .engine
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if let Some(engine) = engine.filter(|engine| engine.is_running()) {
+            engine.interrupt();
+            self.script_stop_pending = false;
         }
     }
 }

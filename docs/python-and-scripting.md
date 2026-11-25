@@ -37,6 +37,17 @@ setting `isolated`, `use_environment`, `user_site_directory`,
 `install_signal_handlers` and above all `module_search_paths` **explicitly**. No
 environment variable, no deprecated setter.
 
+**UTF-8 mode, Linux only (#552).** The isolated config does not read the
+locale, so the file system encoding would be ASCII: a folder with accents could
+not be imported and `open()` without `encoding=` would fail on UTF-8 text.
+On Linux the start therefore runs `PyPreConfig_InitIsolatedConfig` with
+`utf8_mode = 1` and `Py_PreInitialize` **before** any `Py_DecodeLocale` or
+`PyConfig` string call (`utf8_mode` is a `PyPreConfig` field in 3.12, not a
+`PyConfig` one). Every isolation guarantee is kept (`sys.flags.isolated == 1`).
+Windows and other systems are unchanged. Contract: `tests/script_files.rs`
+(`a_folder_with_accents_is_importable`, `open_without_encoding_reads_utf8`,
+`the_interpreter_runs_in_utf8_mode_and_isolated`).
+
 PyO3 offers **no** safe API for a custom initialization configuration —
 `Python::initialize()` calls `Py_InitializeEx(0)`, which reads the environment.
 Going through `pyo3::ffi` is therefore mandatory, and it is the only `unsafe` of
@@ -685,6 +696,14 @@ call `run_file`; **Run Again** reruns the last file of the session (kept in
 `AppState`, never in the project or the preferences). The output, the status
 messages, the single undo step and Stop are those of a console run, and the
 console text is left alone. Opening a project never runs a script.
+
+**Stop reaches the first run (#552).** `AppState` holds the engine in a shared
+slot that the detached run thread fills the moment the engine exists (it used
+to be stored only when the first run ended, so Stop did nothing then). A Stop
+clicked before the script has entered Python (Python still starting) is kept
+as a pending request, applied by `poll_script` as soon as the engine is
+running, and cleared at the start and at the end of every run: it never leaks
+into the next run.
 
 Limits, stated in the manual:
 

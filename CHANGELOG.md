@@ -24,6 +24,11 @@ without a message, see `docs/persistence.md`).
 
 ## [Unreleased]
 
+### Fixed
+
+- Stop works during the very first script run of a session, console or file (#552); a Stop clicked while Python is still starting takes effect as soon as the script runs and does not carry over to the next run.
+- On Linux the embedded Python runs in UTF-8 mode (#552): a script in a folder with accents can import its sibling modules, and `open()` without `encoding=` reads UTF-8 text. Windows is unchanged.
+
 ### Added
 
 - Running a Python file with its folder importable (#552, engine and CLI): `ScriptEngine::run_file` runs a file like `python file.py` in a fresh namespace; modules next to the script import, an edited module is read again at each run, no `__pycache__` is written, and the tracebacks show the real file and line. `stokesforge-cli run` uses it. `exit()` and `exit(0)` now end a script normally (writes kept), any other exit is an error that rolls back, in files and in the console. From the window: File ▸ Run Script File…, a **Run File…** and a **Run Again** button in the console, and dropping a `.py` or `.pyst` file, which asks for a confirmation (`[Cancel] [Run]`) because a script can write files that Ctrl+Z does not undo; the console shows the output and its text is left alone.

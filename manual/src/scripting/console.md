@@ -125,6 +125,8 @@ from pathlib import Path
 here = Path(__file__).parent
 ```
 
+On Linux, text files opened without an explicit encoding are read as UTF-8, and a script folder may contain accents.
+
 There is no `pip`: only the modules of the embedded Python, numpy, scipy and the files next to your script can be imported.
 
 **Run only scripts you trust.** A script is a program that runs with your rights: it can change the project and write or delete files on your disk. Ctrl+Z undoes what it did in the project, not what it wrote elsewhere.
