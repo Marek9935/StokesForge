@@ -2087,6 +2087,11 @@ origin-import-check-none =
     Check None
     .hint = Unchecks every column of every sheet and every graph
 origin-import-reads-unchecked = { $column } reads { $inputs }, not checked
+origin-import-reads-warning = { $count ->
+    [one] { $count } formula reads an unchecked column and will be kept as values: { $names }
+   *[other] { $count } formulas read unchecked columns and will be kept as values: { $names }
+}
+origin-import-reads-names-more = { $names } and { $more } more
 status-import-origin-formulas = { $done }; { $set ->
     [one] { $set } formula set
    *[other] { $set } formulas set
@@ -2736,6 +2741,10 @@ origin-import-show = Show:
 origin-import-show-all = All
 origin-import-show-workbooks = Workbooks
 origin-import-show-graphs = Graphs
+origin-import-no-graph = No graph in this file
+origin-import-no-graph-in = No graph in { $file }
+origin-import-no-workbook = No workbook in this file
+origin-import-no-workbook-in = No workbook in { $file }
 disabled-origin-graph-no-curve = This graph plots no curve
 disabled-origin-graph-unresolved = None of the curves of this graph could be matched to a column of a workbook
 disabled-import-folder-active-book = The folder is not used when importing into the active workbook

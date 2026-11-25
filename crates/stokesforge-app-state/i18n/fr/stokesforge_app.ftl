@@ -2086,6 +2086,11 @@ origin-import-check-none =
     Ne rien cocher
     .hint = Décoche toutes les colonnes de toutes les feuilles et tous les graphiques
 origin-import-reads-unchecked = { $column } lit { $inputs }, non coché
+origin-import-reads-warning = { $count ->
+    [one] { $count } formule lit une colonne non cochée et gardera les valeurs : { $names }
+   *[other] { $count } formules lisent des colonnes non cochées et garderont les valeurs : { $names }
+}
+origin-import-reads-names-more = { $names } et { $more } de plus
 status-import-origin-formulas = { $done } ; { $set ->
     [one] { $set } formule posée
    *[other] { $set } formules posées
@@ -2735,6 +2740,10 @@ origin-import-show = Afficher :
 origin-import-show-all = Tout
 origin-import-show-workbooks = Classeurs
 origin-import-show-graphs = Graphiques
+origin-import-no-graph = Aucun graphique dans ce fichier
+origin-import-no-graph-in = Aucun graphique dans { $file }
+origin-import-no-workbook = Aucun classeur dans ce fichier
+origin-import-no-workbook-in = Aucun classeur dans { $file }
 disabled-origin-graph-no-curve = Ce graphique ne trace aucune courbe
 disabled-origin-graph-unresolved = Aucune courbe de ce graphique n'a pu être rattachée à une colonne d'un classeur
 disabled-import-folder-active-book = Le dossier n'est pas utilisé quand on importe dans le classeur actif

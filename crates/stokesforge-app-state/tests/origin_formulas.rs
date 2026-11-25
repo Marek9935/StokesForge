@@ -580,3 +580,57 @@ fn measure_the_import_of_570_formula_columns() {
     println!("570 formula columns, 200 rows: import {elapsed:.2?}, {set} formulas set");
     assert_eq!(set, 570);
 }
+
+#[test]
+fn the_orange_line_of_the_chooser_counts_the_formulas_that_read_an_unchecked_column() {
+    let _isolation = isolate();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start(dir.path());
+    let mut columns = vec![
+        numbers("X", X, &[1.0, 2.0, 3.0]),
+        numbers("Y", Y, &[10.0, 20.0, 30.0]),
+    ];
+    for name in ["C", "D", "E", "F", "G"] {
+        columns.push(with_formula(
+            numbers(name, Y, &[20.0, 40.0, 60.0]),
+            "col(Y)*2",
+        ));
+    }
+    open_all(
+        &mut state,
+        dir.path(),
+        vec![book("A", "Run", vec![sheet("Data", columns)])],
+    );
+    assert_eq!(state.origin_import_reads_warning(), None, "all checked");
+    let toggle_y = || Action::ToggleOriginColumn {
+        file: 0,
+        book: 0,
+        sheet: 0,
+        column: 1,
+    };
+    state.dispatch(toggle_y());
+    let line = state.origin_import_reads_warning().expect("a warning");
+    assert_eq!(
+        line,
+        tr!(
+            "origin-import-reads-warning",
+            count = 5_i64,
+            names = tr!(
+                "origin-import-reads-names-more",
+                names = "C, D, E",
+                more = 2_i64
+            )
+        )
+    );
+    // A formula column that is not checked itself is not counted.
+    state.dispatch(Action::ToggleOriginColumn {
+        file: 0,
+        book: 0,
+        sheet: 0,
+        column: 2,
+    });
+    let line = state.origin_import_reads_warning().expect("still");
+    assert!(line.contains("D, E, F"), "{line}");
+    state.dispatch(toggle_y());
+    assert_eq!(state.origin_import_reads_warning(), None, "input checked");
+}

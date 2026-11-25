@@ -69,6 +69,7 @@ pub(super) fn origin_import_window(
     let summary = state.origin_import_summary();
     let blocker = state.origin_import_blocker();
     let own_x = state.origin_import_x_warning();
+    let reads_warning = state.origin_import_reads_warning();
     let show = state.origin_import_show();
     let accept_label = tr!("origin-import-accept");
     let accept_hint = tr!("origin-import-accept", "hint");
@@ -103,7 +104,9 @@ pub(super) fn origin_import_window(
             ui.horizontal(|ui| to_and_folder(ui, state, &mut requested));
             ui.horizontal(|ui| show_buttons(ui, show, &mut requested));
             ui.add_space(theme::SPACE_ITEM);
-            let reserved = if own_x.is_some() { 70.0 } else { 26.0 };
+            let reserved = 26.0
+                + if own_x.is_some() { 44.0 } else { 0.0 }
+                + if reads_warning.is_some() { 44.0 } else { 0.0 };
             let list_height = (ui.available_height() - reserved).max(80.0);
             theme::page_scroll_area()
                 .id_salt("stokesforge_origin_import_list")
@@ -123,14 +126,21 @@ pub(super) fn origin_import_window(
                             ui.label(theme::bold(&file.file_name))
                                 .on_hover_text(file.path.display().to_string());
                             partial_note(ui);
-                            file_body(ui, file_index, file, show, &mut requested);
+                            file_body(ui, file_index, file, show, files.len() > 1, &mut requested);
                         } else {
                             egui::CollapsingHeader::new(theme::bold(&file.file_name))
                                 .id_salt(("stokesforge_origin_file", file_index))
                                 .default_open(true)
                                 .show(ui, |ui| {
                                     partial_note(ui);
-                                    file_body(ui, file_index, file, show, &mut requested);
+                                    file_body(
+                                        ui,
+                                        file_index,
+                                        file,
+                                        show,
+                                        files.len() > 1,
+                                        &mut requested,
+                                    );
                                 })
                                 .header_response
                                 .on_hover_text(file.path.display().to_string());
@@ -138,6 +148,11 @@ pub(super) fn origin_import_window(
                     }
                 });
             ui.add_space(theme::SPACE_ITEM);
+            if let Some(line) = &reads_warning {
+                ui.label(
+                    egui::RichText::new(line).color(theme::warning_color(ui.visuals().dark_mode)),
+                );
+            }
             if let Some(line) = &own_x {
                 ui.label(
                     egui::RichText::new(line).color(theme::warning_color(ui.visuals().dark_mode)),
@@ -223,7 +238,12 @@ fn to_and_folder(ui: &mut egui::Ui, state: &AppState, requested: &mut Vec<Action
 
 /// The tabs `Show: All / Workbooks / Graphs` (#557).
 fn show_buttons(ui: &mut egui::Ui, current: OriginShow, requested: &mut Vec<Action>) {
-    ui.label(tr!("origin-import-show"));
+    // The tabs carry an underline below their text: the label drops a little
+    // to share their baseline.
+    ui.vertical(|ui| {
+        ui.add_space(theme::SPACE_ITEM);
+        ui.label(tr!("origin-import-show"));
+    });
     let tabs = [
         (OriginShow::All, tr!("origin-import-show-all")),
         (OriginShow::Workbooks, tr!("origin-import-show-workbooks")),
@@ -250,8 +270,29 @@ fn file_body(
     file_index: usize,
     file: &OriginFileView,
     show: OriginShow,
+    several: bool,
     requested: &mut Vec<Action>,
 ) {
+    let none = |ui: &mut egui::Ui, alone: String, named: String| {
+        ui.label(theme::dimmed_text(if several { named } else { alone }));
+    };
+    if show == OriginShow::Workbooks && file.books.is_empty() {
+        none(
+            ui,
+            tr!("origin-import-no-workbook"),
+            tr!(
+                "origin-import-no-workbook-in",
+                file = file.file_name.as_str()
+            ),
+        );
+    }
+    if show == OriginShow::Graphs && file.graphs.is_empty() {
+        none(
+            ui,
+            tr!("origin-import-no-graph"),
+            tr!("origin-import-no-graph-in", file = file.file_name.as_str()),
+        );
+    }
     if show != OriginShow::Graphs {
         for (book_index, book) in file.books.iter().enumerate() {
             book_node(ui, file_index, book_index, book, requested);
@@ -1327,6 +1368,69 @@ mod tests {
         harness.get_by_label("Y vs X · Book1 / Data");
     }
 
+    /// The orange line at the bottom counts the ticked formulas that read an
+    /// unchecked column, with the sheet closed (#556). Witness: a line drawn
+    /// only inside the open sheet would not be found here, and it goes away
+    /// once the input is checked.
+    #[test]
+    fn the_orange_line_of_the_footer_is_there_with_the_sheet_closed() {
+        let mut column = synthetic::Column::numbers("C", Y, &[20.0, 40.0, 60.0]);
+        column.formula = Some("col(Y)*2".into());
+        let project = synthetic::Project {
+            books: vec![book(
+                "A",
+                "Run",
+                vec![sheet(
+                    "Data",
+                    vec![
+                        synthetic::Column::numbers("X", X, &[1.0, 2.0, 3.0]),
+                        synthetic::Column::numbers("Y", Y, &[10.0, 20.0, 30.0]),
+                        column,
+                    ],
+                )],
+            )],
+            ..synthetic::Project::default()
+        };
+        let (bench, _) = start_project(project);
+        let mut harness = harness(bench);
+        let line = tr!("origin-import-reads-warning", count = 1_i64, names = "C");
+        assert!(harness.query_by_label(&line).is_none(), "nothing ticked");
+        let tick = |harness: &mut egui_kittest::Harness<'static, Bench>, column: usize| {
+            harness
+                .state_mut()
+                .state
+                .dispatch(Action::ToggleOriginColumn {
+                    file: 0,
+                    book: 0,
+                    sheet: 0,
+                    column,
+                });
+            harness.run();
+        };
+        tick(&mut harness, 0);
+        tick(&mut harness, 2);
+        harness.get_by_label(&line);
+        // The input checked: the line is gone.
+        tick(&mut harness, 1);
+        assert!(harness.query_by_label(&line).is_none());
+    }
+
+    /// A Show button with nothing to list says so, with the file name when
+    /// several files are open.
+    #[test]
+    fn a_show_button_with_nothing_to_list_says_so() {
+        let (bench, _) = start_project(synthetic::Project {
+            books: books(),
+            ..synthetic::Project::default()
+        });
+        let mut harness = harness(bench);
+        let none = tr!("origin-import-no-graph");
+        assert!(harness.query_by_label(&none).is_none(), "All lists books");
+        harness.get_by_label("Graphs").click();
+        harness.run();
+        harness.get_by_label(&none);
+    }
+
     /// In the pseudo-language the buttons of the window stay inside it and
     /// apart from each other. Runs in a child process (the language is the
     /// process's), see `long_texts_of_the_footer_and_menus_row_are_never_cut`.
@@ -1391,6 +1495,19 @@ mod tests {
         );
         assert!(window.contains_rect(to) && window.contains_rect(folder));
         assert!(!to.intersects(folder), "{to:?} {folder:?}");
+        // The reason Import is greyed out is not cut to one row: it wraps.
+        let reason = harness
+            .get_by_label_contains(&tr!("disabled-origin-import-nothing-ticked"))
+            .rect();
+        assert!(window.contains_rect(reason), "{reason:?}");
+        assert!(
+            reason.height() > 1.5 * theme::SECONDARY_TEXT_SIZE,
+            "one row, so cut: {reason:?}"
+        );
+        assert!(
+            !reason.intersects(harness.get_by_label_contains(&tr!("dialog-cancel")).rect()),
+            "{reason:?}"
+        );
         // The role badge of a column is wide enough for the longest role name.
         let designations = [
             OriginDesignation::X,

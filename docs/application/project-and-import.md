@@ -205,7 +205,7 @@ all, redo restores all). A column whose formula is not set (untranslatable, an i
 imported, refused, or values kept by the user) keeps Origin's values and gets
 `Origin formula: <text>` appended to its Comments (`; ` after an existing comment); a formula
 that is set leaves no note. The status line says how many formulas were set and kept
-(`status-import-origin-formulas`). The chooser warns in orange under a ticked column whose
+(`status-import-origin-formulas`). The chooser also keeps one orange line above its footer (`origin_import_reads_warning`: count, at most three names then « and N more »; resolved once per change of the ticks, cached in `OriginFile::reads_warning` and cleared by `write_column`, the only writer of the ticks). It warns in orange under a ticked column whose
 formula reads an unticked one (`OriginColumnView::reads_unticked`, resolved once per file in
 `OriginFile::formula_reads`; nothing is ticked for the user). The CLI and `pyst.import_file` go
 through `plan_origin_import_formulas`: a formula is set only when it gives Origin's values, the

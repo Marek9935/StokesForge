@@ -32,7 +32,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use stokesforge_commands::{Command, MacroKind};
 use stokesforge_core::{check_name, same_name_ignoring_case, Node, NodeId};
@@ -204,6 +204,10 @@ pub(super) struct OriginFile {
     /// once when the file is added (#556); the chooser warns when one is not
     /// ticked.
     formula_reads: BTreeMap<ColumnPos, Vec<ColumnPos>>,
+    /// The short names of the ticked formula columns that read an unticked
+    /// column, resolved on the first read after a change of the ticks (the
+    /// only write is `write_column`, which clears it), not at every frame.
+    reads_warning: OnceLock<Vec<String>>,
 }
 
 impl OriginFile {
@@ -232,6 +236,7 @@ impl OriginFile {
             graph_picked: vec![false; graphs.len()],
             graphs,
             formula_reads,
+            reads_warning: OnceLock::new(),
         }
     }
 
@@ -317,6 +322,27 @@ impl OriginFile {
             .collect()
     }
 
+    /// The ticked formula columns that read an unticked column (see
+    /// `reads_warning`).
+    fn columns_reading_unticked(&self) -> &[String] {
+        self.reads_warning.get_or_init(|| {
+            self.formula_reads
+                .keys()
+                .filter(|&&(b, s, c)| !self.reads_unticked(b, s, c).is_empty())
+                .filter_map(|&(b, s, c)| {
+                    self.project
+                        .books
+                        .get(b)?
+                        .sheets
+                        .get(s)?
+                        .columns
+                        .get(c)
+                        .map(|column| column.short_name.clone())
+                })
+                .collect()
+        })
+    }
+
     fn columns_in(&self, book: usize, sheet: usize) -> usize {
         self.project
             .books
@@ -353,6 +379,7 @@ impl OriginFile {
 
     /// Writes the tick; `false` for a column that does not exist.
     fn write_column(&mut self, book: usize, sheet: usize, column: usize, ticked: bool) -> bool {
+        self.reads_warning.take();
         let tick = self
             .selection
             .get_mut(book)
@@ -661,6 +688,38 @@ impl AppState {
             })
             .collect();
         Some(tr!("origin-import-own-x", names = names.join(", ")))
+    }
+
+    /// The orange line before Import (#556, F4): how many ticked formula
+    /// columns read an unticked column and will keep Origin's values, with up
+    /// to three of their names. `None` when there is none.
+    #[must_use]
+    pub fn origin_import_reads_warning(&self) -> Option<String> {
+        let chooser = self.origin_import.as_ref()?;
+        let names: Vec<&String> = chooser
+            .files
+            .iter()
+            .flat_map(OriginFile::columns_reading_unticked)
+            .collect();
+        if names.is_empty() {
+            return None;
+        }
+        let shown: Vec<&str> = names.iter().take(3).map(|name| name.as_str()).collect();
+        let list = shown.join(", ");
+        let list = if names.len() > shown.len() {
+            tr!(
+                "origin-import-reads-names-more",
+                names = list,
+                more = i64::try_from(names.len() - shown.len()).unwrap_or(i64::MAX)
+            )
+        } else {
+            list
+        };
+        Some(tr!(
+            "origin-import-reads-warning",
+            count = i64::try_from(names.len()).unwrap_or(i64::MAX),
+            names = list
+        ))
     }
 
     /// "To create: 3 sheets in 2 workbooks"; `None` when nothing is ticked.
