@@ -66,6 +66,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Script Settings | Réglages de script | Project object holding the TOML settings a script reads (#548) | Config, Paramètres, Options | #548 |
 | Run / Stop | Exécuter / Arrêter | Start / interrupt a script | Lancer, Interrompre, Kill | G |
 | Output | Sortie | Text written by a script | Résultat, Log | G |
+| Run File / Run Again | Exécuter un fichier / Exécuter à nouveau | Run a Python file with its folder importable / run the last file of the session again (#552) | Open Script, Relancer, Rerun | #552 |
 | Traceback | Trace d'appels | Call stack of a Python exception | Backtrace, Pile | D |
 
 ### 2.2 Application

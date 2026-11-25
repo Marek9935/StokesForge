@@ -175,6 +175,9 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Right | À droite |
 | Right Mirror Axis | Axe miroir de droite |
 | Right Y (Linked X) | Y à droite (X lié) |
+| Run Script | Exécuter le script |
+| Run Script File | Exécuter un fichier de script |
+| Run Script File… | Exécuter un fichier de script… |
 | Same Height | Même hauteur |
 | Same Width | Même largeur |
 | Save | Enregistrer |

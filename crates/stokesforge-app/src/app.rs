@@ -953,6 +953,11 @@ impl StokesForgeApp {
                     self.state.apply_default_folder_pick(kind, &path);
                 }
             }
+            PickRequest::RunScriptFile => {
+                if let Some(path) = first {
+                    actions.push(Action::RunScriptFile { path });
+                }
+            }
         }
     }
 

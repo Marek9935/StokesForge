@@ -59,6 +59,9 @@ pub enum PickRequest {
         settings: stokesforge_core::NodeId,
         file_name: String,
     },
+    /// File ▸ Run Script File… and the console's Run File… (#552): a `.py` or
+    /// `.pyst` file to run.
+    RunScriptFile,
 }
 
 impl PickRequest {
@@ -71,7 +74,8 @@ impl PickRequest {
             Self::ExportImportRecipe { .. }
             | Self::ImportImportRecipe
             | Self::AddImportFiles
-            | Self::ImportScriptSettings => FolderKind::Import,
+            | Self::ImportScriptSettings
+            | Self::RunScriptFile => FolderKind::Import,
             Self::ChooseDefaultFolder { kind } => *kind,
         }
     }
@@ -88,7 +92,9 @@ impl PickRequest {
             | Self::AddImportFiles
             | Self::ImportScriptSettings
             | Self::ExportScriptSettings { .. } => true,
-            Self::ChooseDefaultFolder { .. } => false,
+            // #552: the folder of the last script is its own memory
+            // (`AppState::last_script_file`), never the Import folder's.
+            Self::ChooseDefaultFolder { .. } | Self::RunScriptFile => false,
         }
     }
 
@@ -126,6 +132,9 @@ impl PickRequest {
             Self::ChooseDefaultFolder { .. } => {
                 dialog.set_title(tr!("preferences-folders-pick-title"))
             }
+            Self::RunScriptFile => dialog
+                .set_title(tr!("script-run-file-title"))
+                .add_filter(tr!("script-file-filter"), &["py", "pyst"]),
         }
     }
 
@@ -147,9 +156,10 @@ impl PickRequest {
             | Self::ExportGraph { .. }
             | Self::ExportImportRecipe { .. }
             | Self::ExportScriptSettings { .. } => dialog.save_file().map(|path| vec![path]),
-            Self::OpenProject | Self::ImportImportRecipe | Self::ImportScriptSettings => {
-                dialog.pick_file().map(|path| vec![path])
-            }
+            Self::OpenProject
+            | Self::ImportImportRecipe
+            | Self::ImportScriptSettings
+            | Self::RunScriptFile => dialog.pick_file().map(|path| vec![path]),
             Self::AddImportFiles => dialog.pick_files(),
             Self::ChooseDefaultFolder { .. } => dialog.pick_folder().map(|path| vec![path]),
         }

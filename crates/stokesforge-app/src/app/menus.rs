@@ -259,6 +259,21 @@ impl StokesForgeApp {
                     self.choose_save_path(actions);
                     ui.close();
                 }
+                // #552: the file runs with its own folder importable; greyed out
+                // with the reason while a script runs or without Python.
+                let run_file_blocked = self.state.script_blocked_reason();
+                if ui
+                    .add_enabled(
+                        run_file_blocked.is_none(),
+                        egui::Button::new(tr!("action-run-script-file")),
+                    )
+                    .on_hover_text(tr!("action-run-script-file", "hint"))
+                    .on_disabled_hover_text(run_file_blocked.unwrap_or_default())
+                    .clicked()
+                {
+                    actions.push(Action::PickFile(PickRequest::RunScriptFile));
+                    ui.close();
+                }
             });
             sections.section(ui, true, |ui| {
                 ui.menu_button(tr!("menu-language"), |ui| {
@@ -1932,6 +1947,25 @@ mod tests {
             vec![Action::AddFolder { parent: root }]
         );
         assert_closed(&mut app, &ctx, tab);
+        session.shutdown().unwrap();
+    }
+
+    /// #552: File ▸ Run Script File… asks for the picker, and is greyed out
+    /// with the reason of the console's Run when a script cannot start.
+    #[test]
+    fn the_file_menu_offers_run_script_file_and_asks_for_the_picker() {
+        let (session, mut app, _) = bench();
+        let tab = app.floating_tabs.last().copied();
+        let (ctx, menu) = open_menu(&mut app, tab, &tr!("menu-file"));
+        let entry = active(&menu, &tr!("action-run-script-file"));
+        assert_eq!(entry.enabled, app.state.script_blocked_reason().is_none());
+        if entry.enabled {
+            let pos = entry.center;
+            assert_eq!(
+                click_at(&mut app, &ctx, tab, pos),
+                vec![Action::PickFile(PickRequest::RunScriptFile)]
+            );
+        }
         session.shutdown().unwrap();
     }
 

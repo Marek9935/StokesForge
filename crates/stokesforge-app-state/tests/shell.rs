@@ -21772,3 +21772,114 @@ fn the_active_tab_mirror_has_a_script_settings_kind() {
     let id = NodeId::from_raw(3);
     assert_ne!(ActiveTabKind::ScriptSettings(id), ActiveTabKind::Note(id));
 }
+
+// --- Running a script file (#552) -------------------------------------------
+
+/// `.py` and `.pyst` (any case) are scripts, never data; a mixed drop splits
+/// every kind. Witness: remove the test on the extension and `a.py` lands in
+/// `data`.
+#[test]
+fn a_dropped_py_or_pyst_file_is_a_script_and_never_data() {
+    let plan = file_drop_plan(
+        &[
+            PathBuf::from("a.py"),
+            PathBuf::from("B.PY"),
+            PathBuf::from("c.Pyst"),
+            PathBuf::from("d.csv"),
+            PathBuf::from("e.stf"),
+            PathBuf::from("f.toml"),
+            PathBuf::from("notpy"),
+            PathBuf::from("g.pyc"),
+        ],
+        None,
+    );
+    assert_eq!(
+        plan.scripts,
+        vec![
+            PathBuf::from("a.py"),
+            PathBuf::from("B.PY"),
+            PathBuf::from("c.Pyst")
+        ]
+    );
+    assert_eq!(
+        plan.data,
+        vec![
+            PathBuf::from("d.csv"),
+            PathBuf::from("notpy"),
+            PathBuf::from("g.pyc")
+        ]
+    );
+    assert_eq!(plan.projects, vec![PathBuf::from("e.stf")]);
+    assert_eq!(plan.settings, vec![PathBuf::from("f.toml")]);
+}
+
+/// The picker of a script file starts in the folder of the last file run, else
+/// the Import default, and never feeds (nor reads) the Import folder memory.
+/// Witness: let `RunScriptFile` feed the memory and the Import dialog moves.
+#[test]
+fn the_script_picker_starts_in_the_last_script_folder_and_leaves_import_alone() {
+    use stokesforge_app_state::default_folders::FolderKind;
+    use stokesforge_app_state::file_picker::PickRequest;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = folder_state(dir.path());
+    state.dispatch(Action::SetDefaultFolder {
+        kind: FolderKind::Import,
+        folder: "/data/import".to_owned(),
+    });
+    let pick = PickRequest::RunScriptFile;
+    assert!(!pick.feeds_the_folder_memory());
+    let candidates = state.folder_candidates(&pick);
+    assert_eq!(candidates.default, some("/data/import"), "Import default");
+    assert_eq!(candidates.session_last, None);
+
+    // An Import dialog used /work/csv: not the script picker's business.
+    state.remember_picked_folder(
+        &PickRequest::AddImportFiles,
+        &[PathBuf::from("/work/csv/a.csv")],
+    );
+    assert_eq!(state.folder_candidates(&pick).session_last, None);
+
+    // Answering the picker remembers nothing for Import.
+    state.remember_picked_folder(&pick, &[PathBuf::from("/scripts/run.py")]);
+    assert_eq!(
+        state
+            .folder_candidates(&PickRequest::AddImportFiles)
+            .session_last,
+        some("/work/csv"),
+        "Import memory untouched by a script pick"
+    );
+}
+
+/// Without the Python bridge a file run, a Run Again and a dropped script are
+/// refused with the existing reason, no dialog and no command.
+#[cfg(not(feature = "python"))]
+#[test]
+fn a_script_file_is_refused_without_the_python_bridge() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let script = dir.path().join("run.py");
+    std::fs::write(&script, "print(1)\n").unwrap();
+    let before = state.snapshot().revision;
+
+    state.dispatch(Action::RunScriptFile {
+        path: script.clone(),
+    });
+    let status = state.status().expect("a message");
+    assert!(status.is_error());
+    assert_eq!(
+        status.text,
+        stokesforge_app_state::tr!("error-script-unavailable")
+    );
+    assert!(state.script_output().is_none());
+    assert!(state.last_script_file().is_none(), "nothing ran");
+
+    state.dispatch(Action::DropFiles {
+        paths: vec![script],
+        target_book: None,
+    });
+    assert!(state.pending_script_drop().is_none(), "no dialog");
+    assert!(!state.blocking_dialog());
+    assert!(state.status().expect("a message").is_error());
+    assert_eq!(state.snapshot().revision, before);
+    assert!(state.script_blocked_reason().is_some());
+}

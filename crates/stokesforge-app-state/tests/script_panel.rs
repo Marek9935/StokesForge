@@ -569,3 +569,294 @@ fn a_family_is_named_in_every_catalogue_language_in_the_application() {
     assert_eq!(by_name.panels[0].series, by_key.panels[0].series);
     assert_eq!(by_name.frame_widths, by_key.frame_widths);
 }
+
+// --- Running a script file (#552) -------------------------------------------
+
+/// Runs `path` as a file and waits for the end, like [`run_and_wait`].
+fn run_file_and_wait(state: &mut AppState, action: Action) {
+    state.dispatch(action);
+    let deadline = Instant::now() + TIMEOUT;
+    while state.script_running() {
+        assert!(
+            Instant::now() <= deadline,
+            "the script did not finish within {TIMEOUT:?}"
+        );
+        thread::sleep(Duration::from_millis(1));
+        state.poll_script();
+    }
+}
+
+fn run_file(path: &std::path::Path) -> Action {
+    Action::RunScriptFile {
+        path: path.to_path_buf(),
+    }
+}
+
+/// A script and its sibling module in a temporary folder.
+/// Starts a console script that runs until Stop, and returns once it is really
+/// running.
+fn start_spinning(state: &mut AppState, dir: &std::path::Path) {
+    // The engine reaches `AppState` (and so Stop) only once a first run has
+    // ended: warm it up, or Stop of the very first run would do nothing.
+    run_and_wait(state, "pass\n");
+    let marker = dir.join("spinning.marker");
+    state.set_script_source(format!(
+        "open({:?}, 'w').close()\nwhile True:\n    pass\n",
+        marker.display().to_string()
+    ));
+    state.dispatch(Action::RunScript);
+    let deadline = Instant::now() + TIMEOUT;
+    while !marker.exists() {
+        assert!(Instant::now() <= deadline, "the script did not start");
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+fn script_with_sibling(dir: &std::path::Path) -> PathBuf {
+    std::fs::write(dir.join("helpers.py"), "VALUE = 42.0\n").unwrap();
+    let main = dir.join("main.py");
+    std::fs::write(
+        &main,
+        "import helpers\n\
+         a = pyst.resolve(\"[Book1]Sheet1!Time\")\n\
+         pyst.set_column(a, pyst.column(a) * 0.0 + helpers.VALUE)\n\
+         print(\"from file\")\n",
+    )
+    .unwrap();
+    main
+}
+
+/// A file run shows its output, refreshes the snapshot, imports a sibling
+/// module, is one undo step and leaves the console text alone. Witness: run
+/// the file as text (the sibling import then fails).
+#[test]
+fn a_script_file_runs_with_its_sibling_module_in_one_undo_step() {
+    let dir = tempfile::tempdir().unwrap();
+    let main = script_with_sibling(dir.path());
+    let (_session, mut state, sheet) = start();
+    let time = column_id(&state, sheet, "Time");
+    state.set_script_source("keep = 1\n".to_string());
+
+    run_file_and_wait(&mut state, run_file(&main));
+
+    let output = state.script_output().expect("an output");
+    assert!(output.error.is_none(), "failed: {:?}", output.error);
+    assert!(output.stdout.contains("from file"), "{:?}", output.stdout);
+    assert_eq!(state.cell_text(time, 0), "42", "the snapshot was refreshed");
+    assert_eq!(
+        state.script_source(),
+        "keep = 1\n",
+        "console text untouched"
+    );
+    assert_eq!(state.last_script_file(), Some(main.as_path()));
+    assert!(state.take_script_reveal(), "the console is asked to show");
+    assert!(!state.take_script_reveal(), "once");
+
+    state.dispatch(Action::Undo);
+    assert_eq!(state.cell_text(time, 0), "0", "one Ctrl+Z undoes the run");
+}
+
+/// A file that has gone: the red message of the read error, no new revision,
+/// the file stays the one of Run Again.
+#[test]
+fn a_missing_script_file_is_a_red_message_and_no_revision() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state, _sheet) = start();
+    let before = state.snapshot().revision;
+
+    run_file_and_wait(&mut state, run_file(&dir.path().join("gone.py")));
+
+    let status = state.status().expect("a message");
+    assert!(status.is_error());
+    assert!(status.text.contains("gone.py"), "{}", status.text);
+    assert_eq!(state.snapshot().revision, before);
+    assert!(!state.can_undo());
+    assert!(state.script_output().is_none());
+}
+
+/// A run in progress refuses a second one, the file is not remembered, and
+/// Stop ends the first. Witness: drop the running test and both would start.
+#[test]
+fn a_script_file_is_refused_while_a_script_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    let main = script_with_sibling(dir.path());
+    let (_session, mut state, _sheet) = start();
+    start_spinning(&mut state, dir.path());
+    assert!(state.script_running());
+
+    state.dispatch(run_file(&main));
+    assert_eq!(
+        state.status().expect("message").text,
+        stokesforge_app_state::tr!("error-script-running")
+    );
+    assert!(
+        state.last_script_file().is_none(),
+        "the refused file is not kept"
+    );
+    assert!(!state.take_script_reveal());
+    assert!(state.script_blocked_reason().is_some());
+
+    state.dispatch(Action::InterruptScript);
+    let deadline = Instant::now() + TIMEOUT;
+    while state.script_running() {
+        assert!(Instant::now() <= deadline, "Stop did not end the run");
+        thread::sleep(Duration::from_millis(1));
+        state.poll_script();
+    }
+}
+
+/// Run Again reruns the edited file; with no file yet it runs nothing.
+#[test]
+fn run_again_runs_the_edited_file_and_does_nothing_before_a_first_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state, _sheet) = start();
+    state.dispatch(Action::RunScriptAgain);
+    assert!(!state.script_running());
+    assert!(state.script_output().is_none());
+
+    let file = dir.path().join("again.py");
+    std::fs::write(&file, "print('one')\n").unwrap();
+    run_file_and_wait(&mut state, run_file(&file));
+    assert!(state.script_output().unwrap().stdout.contains("one"));
+
+    std::fs::write(&file, "print('two')\n").unwrap();
+    run_file_and_wait(&mut state, Action::RunScriptAgain);
+    let stdout = &state.script_output().unwrap().stdout;
+    assert!(
+        stdout.contains("two") && !stdout.contains("one"),
+        "{stdout:?}"
+    );
+}
+
+/// Opening a project never runs a script nor remembers one. Witness: make the
+/// open path call `RunScriptFile` and the output appears.
+#[test]
+fn opening_a_project_runs_and_remembers_no_script() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("p.py"), "print('boom')\n").unwrap();
+    let (_session, mut state, _sheet) = start();
+    let project = dir.path().join("p.stf");
+    state.dispatch(Action::SaveAs {
+        path: project.display().to_string(),
+    });
+    state.dispatch(Action::OpenProject {
+        path: project.display().to_string(),
+        pending_edits: false,
+    });
+    assert!(!state.script_running());
+    assert!(state.script_output().is_none());
+    assert!(state.last_script_file().is_none());
+    assert!(!state.take_script_reveal());
+}
+
+/// The picker starts in the folder of the last file run (not the Import one).
+#[test]
+fn the_script_picker_starts_in_the_folder_of_the_last_file_run() {
+    use stokesforge_app_state::file_picker::PickRequest;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("f.py");
+    std::fs::write(&file, "pass\n").unwrap();
+    let (_session, mut state, _sheet) = start();
+    run_file_and_wait(&mut state, run_file(&file));
+    assert_eq!(
+        state
+            .folder_candidates(&PickRequest::RunScriptFile)
+            .session_last,
+        Some(dir.path().to_path_buf())
+    );
+}
+
+fn drop_script(state: &mut AppState, paths: Vec<PathBuf>) {
+    state.dispatch(Action::DropFiles {
+        paths,
+        target_book: None,
+    });
+}
+
+/// A dropped script asks first; Cancel runs nothing, Run runs it once.
+/// Witness: run in the drop handler and the Cancel case runs it.
+#[test]
+fn a_dropped_script_asks_then_cancel_runs_nothing_and_run_runs_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let main = script_with_sibling(dir.path());
+    let (_session, mut state, sheet) = start();
+    let time = column_id(&state, sheet, "Time");
+
+    drop_script(&mut state, vec![main.clone()]);
+    assert_eq!(state.pending_script_drop(), Some(main.as_path()));
+    assert!(state.blocking_dialog());
+    assert!(!state.script_running(), "nothing runs before the answer");
+
+    state.dispatch(Action::ConfirmScriptDrop(false));
+    assert!(state.pending_script_drop().is_none());
+    assert!(!state.script_running());
+    assert!(state.script_output().is_none());
+    assert!(state.last_script_file().is_none());
+    assert_eq!(state.cell_text(time, 0), "0");
+
+    drop_script(
+        &mut state,
+        vec![PathBuf::from(main.to_string_lossy().to_uppercase())],
+    );
+    state.dispatch(Action::ConfirmScriptDrop(false));
+    drop_script(&mut state, vec![main.clone()]);
+    run_file_and_wait(&mut state, Action::ConfirmScriptDrop(true));
+    assert_eq!(state.cell_text(time, 0), "42");
+    assert_eq!(state.last_script_file(), Some(main.as_path()));
+    assert!(state.pending_script_drop().is_none());
+    state.dispatch(Action::Undo);
+    assert_eq!(state.cell_text(time, 0), "0", "ran once: one undo step");
+}
+
+/// Several scripts in one drop: one message, no dialog, nothing runs; the other
+/// files follow their usual path (a `.toml` still becomes Script Settings).
+#[test]
+fn several_dropped_scripts_are_refused_with_one_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state, _sheet) = start();
+    drop_script(
+        &mut state,
+        vec![dir.path().join("a.py"), dir.path().join("b.pyst")],
+    );
+    assert!(state.pending_script_drop().is_none());
+    let status = state.status().expect("message");
+    assert!(status.is_error());
+    assert_eq!(
+        status.text,
+        stokesforge_app_state::tr!("error-script-drop-several")
+    );
+}
+
+/// No dialog while a script runs, while the import window is open or when
+/// Graph Properties is open (the drop is refused for every file).
+#[test]
+fn a_dropped_script_asks_nothing_while_something_else_holds_the_window() {
+    let dir = tempfile::tempdir().unwrap();
+    let main = script_with_sibling(dir.path());
+    let (_session, mut state, _sheet) = start();
+
+    state.open_import(None::<NodeId>);
+    drop_script(&mut state, vec![main.clone()]);
+    assert!(state.pending_script_drop().is_none());
+    // An open import window takes the failure into its own footer.
+    assert_eq!(
+        state.dialog_error(),
+        Some(stokesforge_app_state::tr!("error-script-drop-import-open").as_str())
+    );
+    state.cancel_import();
+
+    start_spinning(&mut state, dir.path());
+    drop_script(&mut state, vec![main]);
+    assert!(state.pending_script_drop().is_none());
+    assert_eq!(
+        state.status().expect("message").text,
+        stokesforge_app_state::tr!("error-script-running")
+    );
+    state.dispatch(Action::InterruptScript);
+    let deadline = Instant::now() + TIMEOUT;
+    while state.script_running() {
+        assert!(Instant::now() <= deadline);
+        thread::sleep(Duration::from_millis(1));
+        state.poll_script();
+    }
+}

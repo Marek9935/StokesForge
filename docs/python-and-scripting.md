@@ -679,6 +679,13 @@ the writes are committed. Any other code (`exit(2)`, `exit("message")`) is an
 error: the group is rolled back like after any uncaught exception. The rule
 is the same for console text and for files.
 
+**From the window (#552).** File ▸ Run Script File…, the console's **Run File…**
+(both open the picker, `.py` and `.pyst`) and the confirmed drop of a script
+call `run_file`; **Run Again** reruns the last file of the session (kept in
+`AppState`, never in the project or the preferences). The output, the status
+messages, the single undo step and Stop are those of a console run, and the
+console text is left alone. Opening a project never runs a script.
+
 Limits, stated in the manual:
 
 - `pyst` is refused in a thread the script creates (only the script thread

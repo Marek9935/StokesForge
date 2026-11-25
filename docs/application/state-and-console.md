@@ -81,6 +81,20 @@ nowhere else:
    included. This is what makes `dispatch` safe to call from the render
    loop for **all** actions.
 
+**Running a file (#552).** `Action::RunScriptFile { path }`, `RunScriptAgain` and
+`ConfirmScriptDrop(bool)` share `AppState::start_script(ScriptJob)` with
+`RunScript`: same detached thread, same refusals (`error-script-running`,
+`error-script-no-python`), the thread calls `ScriptEngine::run_file`, so the file
+is read off the interface thread and a missing file comes back as the red
+message of `ScriptError::ReadFile`. A started file run sets
+`AppState::last_script_file` (session only, never in the `.stf` or the
+preferences; it feeds Run Again and the picker's starting folder, not the Import
+folder memory) and `script_reveal`, which the shell reads once
+(`take_script_reveal`) to expand and show the console, docked or detached, whichever
+window the answer came from. A dropped script (`file_drop_plan().scripts`) only
+sets `pending_script_drop`; `blocking_dialog` covers it. The console text is
+never read nor written by a file run.
+
 Without the `python` feature, the console stays visible but disabled
 (`AppState::script_available`). `ScriptOutput` is a **deliberately independent**
 copy of `stokesforge_script::ScriptOutcome`, so that the public surface

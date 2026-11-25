@@ -12,6 +12,7 @@
 
 use eframe::egui;
 
+use stokesforge_app_state::file_picker::PickRequest;
 use stokesforge_app_state::state::{Action, AppState, ScriptOutput};
 use stokesforge_app_state::tr;
 
@@ -50,9 +51,12 @@ pub(super) fn script_contents(
         ui,
         ctx,
         &mut source,
-        state.script_output(),
-        state.script_running(),
-        state.script_available(),
+        ConsoleView {
+            output: state.script_output(),
+            running: state.script_running(),
+            available: state.script_available(),
+            last_file: state.last_script_file(),
+        },
         actions,
     );
     if source != state.script_source() {
@@ -60,16 +64,29 @@ pub(super) fn script_contents(
     }
 }
 
-/// The console borrows the output: no copy of a whole result on every frame.
+/// What the console reads of the state: it borrows the output, so no copy of a
+/// whole result on every frame.
+struct ConsoleView<'a> {
+    output: Option<&'a ScriptOutput>,
+    running: bool,
+    available: bool,
+    /// The last file run of the session (Run Again).
+    last_file: Option<&'a std::path::Path>,
+}
+
 fn script_fields_contents(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
     source: &mut String,
-    output: Option<&ScriptOutput>,
-    running: bool,
-    available: bool,
+    view: ConsoleView<'_>,
     actions: &mut Vec<Action>,
 ) {
+    let ConsoleView {
+        output,
+        running,
+        available,
+        last_file,
+    } = view;
     if running {
         // Without this, egui redraws only on an input event: the end of the
         // script would show up only at the user's next gesture.
@@ -102,6 +119,34 @@ fn script_fields_contents(
             .clicked()
         {
             actions.push(Action::RunScript);
+        }
+        // #552: a file runs with its own folder importable; the text above is
+        // left alone.
+        if ui
+            .add_enabled(available, egui::Button::new(tr!("script-run-file")))
+            .on_hover_text(tr!("script-run-file", "hint"))
+            .on_disabled_hover_text(&unavailable_reason)
+            .clicked()
+        {
+            actions.push(Action::PickFile(PickRequest::RunScriptFile));
+        }
+        let again_reason = if available && last_file.is_none() {
+            tr!("disabled-script-no-file")
+        } else {
+            unavailable_reason.clone()
+        };
+        // Enabled, the tooltip is the full path; disabled, it is the reason.
+        let path_text = last_file.map_or_else(String::new, |file| file.display().to_string());
+        if ui
+            .add_enabled(
+                available && last_file.is_some(),
+                egui::Button::new(tr!("script-run-again")),
+            )
+            .on_hover_text(path_text)
+            .on_disabled_hover_text(&again_reason)
+            .clicked()
+        {
+            actions.push(Action::RunScriptAgain);
         }
         if ui
             .add_enabled(running, egui::Button::new(tr!("script-stop")))
@@ -176,6 +221,12 @@ impl StokesForgeApp {
         ctx: &egui::Context,
         actions: &mut Vec<Action>,
     ) {
+        // A file run (menu, button, drop) shows its output wherever the answer
+        // came from: the state says so, once, whatever the order of the frame.
+        if self.state.take_script_reveal() {
+            self.script_collapsed = false;
+            self.script_open = true;
+        }
         if actions
             .iter()
             .any(|action| matches!(action, Action::RunScript))
@@ -360,5 +411,99 @@ mod tests {
         let output = paint(&mut app, vec![Action::RunScript]);
         assert!(!app.script_collapsed, "a run expands it");
         assert!(painted(&output, &tr!("script-not-run")));
+    }
+
+    /// #552: **Run File…** asks for the file picker (never runs by itself) and
+    /// **Run Again** stays greyed out, with its reason, until a file has run.
+    /// Witness: enable Run Again without a file and its click emits an action.
+    #[test]
+    fn run_file_opens_the_picker_and_run_again_waits_for_a_first_file() {
+        let (_session, mut state) = {
+            let (session, state) = state();
+            (session, state)
+        };
+        let context = egui::Context::default();
+        let actions = std::cell::RefCell::new(Vec::new());
+        let state = std::cell::RefCell::new(&mut state);
+        let paint = |context: &egui::Context, events| {
+            let mut output = context.run_ui(input(events), |ui| {
+                let ctx = ui.ctx().clone();
+                script_contents(ui, &ctx, &mut state.borrow_mut(), &mut actions.borrow_mut());
+            });
+            output.textures_delta.clear();
+            output
+        };
+        paint(&context, Vec::new());
+        let output = paint(&context, Vec::new());
+        let available = state.borrow().script_available();
+
+        click_at(
+            &context,
+            find_text_center(&output.shapes, &tr!("script-run-again")),
+            egui::Modifiers::NONE,
+            paint,
+        );
+        assert!(
+            actions.borrow().is_empty(),
+            "Run Again is greyed out before a first file"
+        );
+
+        click_at(
+            &context,
+            find_text_center(&output.shapes, &tr!("script-run-file")),
+            egui::Modifiers::NONE,
+            paint,
+        );
+        let expected = if available {
+            vec![Action::PickFile(PickRequest::RunScriptFile)]
+        } else {
+            Vec::new()
+        };
+        assert_eq!(*actions.borrow(), expected);
+    }
+
+    /// #552: a file run shows the console, collapsed or hidden, whatever the
+    /// order of the frame (the state says so). Python feature.
+    #[cfg(feature = "python")]
+    #[test]
+    fn a_file_run_shows_a_collapsed_or_hidden_console() {
+        use stokesforge_python::interpreter::{self, EmbeddedPython};
+        let (_session, mut state) = state();
+        let home = std::env::var_os(interpreter::HOME_ENV)
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../vendor/python/extracted/python")
+            });
+        state.set_python(EmbeddedPython::with_home(home));
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("reveal.py");
+        std::fs::write(&file, "pass\n").unwrap();
+        let mut app = StokesForgeApp::new(state);
+        app.script_open = false;
+        assert!(app.script_collapsed);
+        let context = egui::Context::default();
+        egui_extras::install_image_loaders(&context);
+        let paint = |app: &mut StokesForgeApp| {
+            let mut output = context.run_ui(input(Vec::new()), |ui| {
+                let ctx = ui.ctx().clone();
+                app.script_panel(ui, &ctx, &mut Vec::new());
+            });
+            output.textures_delta.clear();
+        };
+        paint(&mut app);
+        assert!(
+            app.script_collapsed && !app.script_open,
+            "nothing asked yet"
+        );
+        app.state.dispatch(Action::RunScriptFile { path: file });
+        paint(&mut app);
+        assert!(!app.script_collapsed && app.script_open);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while app.state.script_running() {
+            assert!(std::time::Instant::now() < deadline);
+            app.state.poll_script();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
     }
 }
