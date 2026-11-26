@@ -1887,6 +1887,274 @@ fn a_loop_across_sheets_stays_not_calculated_and_stable() {
     }
 }
 
+// -- a remote column read row by row (#556) -----------------------------------
+
+/// Sheet3!B gets `values`, so that its length differs from the own sheet's 3.
+fn set_remote_b(handle: &SessionHandle, o: &OtherSheet, values: &[f64]) {
+    handle.execute(enter(o.y, 0, values)).expect("Sheet3!B");
+}
+
+/// The result is as long as the longest column read row-wise, remote included;
+/// a row the shorter side lacks is an empty cell (`---`). Witness: the filter
+/// that leaves a remote column out of the length gives 3 rows.
+#[test]
+fn a_row_wise_remote_sets_the_length_of_the_result() {
+    for mode in BOTH {
+        let (_session, handle, f, o) = with_sheet3(mode);
+        set_remote_b(&handle, &o, &[1.0, 2.0, 3.0, 4.0, 5.0]);
+        handle
+            .execute(set_formula(&handle, f.c, "A + Sheet3!B"))
+            .expect("C = A + Sheet3!B");
+        let s = take_snapshot(&handle);
+        assert_eq!(
+            numbers(&s, f.c),
+            vec![Some(2.0), Some(4.0), Some(6.0), None, None],
+            "{mode:?}: five rows, the last two missing"
+        );
+        assert_eq!(s.tree.formula_letters(f.c).as_deref(), Some("A + Sheet3!B"));
+        // Shorter remote column: the own sheet's three rows.
+        let (_session, handle, f, o) = with_sheet3(mode);
+        handle
+            .execute(enter(o.c, 0, &[7.0, 8.0]))
+            .expect("Sheet3!C");
+        handle
+            .execute(set_formula(&handle, f.d, "A + Sheet3!C"))
+            .expect("D");
+        assert_eq!(
+            numbers(&take_snapshot(&handle), f.d),
+            vec![Some(8.0), Some(10.0), None],
+            "{mode:?}: three rows"
+        );
+        // Alone: the own ordinary columns (nine rows) do not count.
+        let (_session, handle, f, o) = with_sheet3(mode);
+        handle
+            .execute(enter(f.b, 0, &[1.0; 9]))
+            .expect("own B of nine rows");
+        set_remote_b(&handle, &o, &[1.0, 2.0, 3.0, 4.0, 5.0]);
+        handle
+            .execute(set_formula(&handle, f.c, "Sheet3!B"))
+            .expect("C = Sheet3!B");
+        assert_eq!(
+            numbers(&take_snapshot(&handle), f.c),
+            some(&[1.0, 2.0, 3.0, 4.0, 5.0]),
+            "{mode:?}"
+        );
+    }
+}
+
+/// A remote column read by a column function does not change the length.
+/// Witness: counting every remote column as row-wise gives five rows.
+#[test]
+fn a_remote_read_by_a_column_function_keeps_the_own_length() {
+    for mode in BOTH {
+        let (_session, handle, f, o) = with_sheet3(mode);
+        set_remote_b(&handle, &o, &[1.0, 2.0, 3.0, 4.0, 5.0]);
+        for text in [
+            "A + max(Sheet3!B)",
+            "A + at(Sheet3!B, 1)",
+            "A + mean(Sheet3!B)",
+        ] {
+            handle
+                .execute(set_formula(&handle, f.c, text))
+                .expect("formula");
+            assert_eq!(
+                numbers(&take_snapshot(&handle), f.c).len(),
+                3,
+                "{mode:?}: {text}"
+            );
+        }
+        // Both at once: the row-wise read sets the length.
+        handle
+            .execute(set_formula(&handle, f.c, "Sheet3!B - max(Sheet3!B)"))
+            .expect("formula");
+        assert_eq!(
+            numbers(&take_snapshot(&handle), f.c),
+            some(&[-4.0, -3.0, -2.0, -1.0, 0.0]),
+            "{mode:?}"
+        );
+    }
+}
+
+/// Editing, lengthening (then undoing) the remote column, and deleting rows on
+/// either side, keep the reader right; an unrelated command rewrites nothing
+/// in the targeted mode. Witnesses: the remote version out of `sources`; the
+/// length computed before the order loop.
+#[test]
+fn a_row_wise_remote_follows_the_other_sheet() {
+    for mode in BOTH {
+        let (_session, handle, f, o) = with_sheet3(mode);
+        handle
+            .execute(set_formula(&handle, f.c, "Sheet3!B - 1"))
+            .expect("C = Sheet3!B - 1");
+        assert_eq!(
+            numbers(&take_snapshot(&handle), f.c),
+            some(&[99.0, 199.0, 299.0]),
+            "{mode:?}"
+        );
+        handle.execute(enter(o.y, 1, &[5.0])).expect("edit a cell");
+        assert_eq!(
+            numbers(&take_snapshot(&handle), f.c),
+            some(&[99.0, 4.0, 299.0]),
+            "{mode:?}: edit"
+        );
+        // Lengthening the remote column lengthens the result; undo shortens it.
+        handle
+            .execute(enter(o.y, 3, &[1.0, 2.0]))
+            .expect("lengthen");
+        assert_eq!(numbers(&take_snapshot(&handle), f.c).len(), 5, "{mode:?}");
+        handle.undo().expect("undo");
+        assert_eq!(
+            numbers(&take_snapshot(&handle), f.c),
+            some(&[99.0, 4.0, 299.0]),
+            "{mode:?}: undo"
+        );
+        // Deleting a row on the remote side, then on the own side.
+        handle
+            .execute(Command::DeleteRows {
+                sheet: o.sheet,
+                at: 0,
+                count: 1,
+            })
+            .expect("delete a remote row");
+        assert_eq!(
+            numbers(&take_snapshot(&handle), f.c),
+            some(&[4.0, 299.0]),
+            "{mode:?}: remote rows deleted"
+        );
+        handle
+            .execute(Command::DeleteRows {
+                sheet: f.sheet,
+                at: 0,
+                count: 1,
+            })
+            .expect("delete an own row");
+        let s = take_snapshot(&handle);
+        assert_eq!(numbers(&s, f.c), some(&[4.0, 299.0]), "{mode:?}: own rows");
+        // Nothing to redo on an unrelated command.
+        handle.execute(unrelated(&s, 3)).expect("unrelated");
+        let after = take_snapshot(&handle);
+        assert_eq!(version(&s, f.c), version(&after, f.c), "{mode:?}: stable");
+        if mode == FormulaRecalc::Targeted {
+            assert_eq!(evaluations(&after), evaluations(&s), "not evaluated");
+        }
+    }
+}
+
+/// Removing the remote sheet empties the cells (`#REF`), undo brings them
+/// back; so does moving the column to a third sheet.
+#[test]
+fn a_row_wise_remote_gives_ref_when_the_sheet_goes_and_back_on_undo() {
+    for mode in BOTH {
+        let (_session, handle, f, o) = with_sheet3(mode);
+        handle
+            .execute(set_formula(&handle, f.c, "Sheet3!B * 2"))
+            .expect("formula");
+        handle
+            .execute(Command::RemoveNode { id: o.sheet })
+            .expect("remove Sheet3");
+        let s = take_snapshot(&handle);
+        assert_eq!(s.tree.formula_letters(f.c).as_deref(), Some("#REF * 2"));
+        assert!(all_empty(&s, f.c), "{mode:?}");
+        handle.undo().expect("undo");
+        assert_eq!(
+            numbers(&take_snapshot(&handle), f.c),
+            some(&[200.0, 400.0, 600.0]),
+            "{mode:?}"
+        );
+        let book = take_snapshot(&handle)
+            .tree
+            .parent(f.sheet)
+            .unwrap()
+            .unwrap();
+        handle
+            .execute(Command::AddWorksheet {
+                book,
+                name: Some("Sheet4".to_string()),
+            })
+            .expect("Sheet4");
+        let sheet4 = *take_snapshot(&handle)
+            .tree
+            .children(book)
+            .unwrap()
+            .last()
+            .unwrap();
+        handle
+            .execute(Command::Move {
+                id: o.y,
+                new_parent: sheet4,
+                index: 0,
+            })
+            .expect("B goes to Sheet4");
+        assert!(all_empty(&take_snapshot(&handle), f.c), "{mode:?}: moved");
+        handle.undo().expect("undo the move");
+        assert_eq!(
+            numbers(&take_snapshot(&handle), f.c),
+            some(&[200.0, 400.0, 600.0]),
+            "{mode:?}"
+        );
+    }
+}
+
+/// A chain across sheets read row-wise (Sheet3!C = B * 2, Sheet1!D =
+/// Sheet3!C + 1) is right after one edit, with the length of its source; and a
+/// loop through two row-wise reads stays framed, never a hang.
+#[test]
+fn a_row_wise_chain_across_sheets_and_a_row_wise_loop() {
+    use stokesforge_core::{ColumnFormula, FormulaPart, RemoteRef};
+    for mode in BOTH {
+        let (_session, handle, f, o) = with_sheet3(mode);
+        handle
+            .execute(set_formula(&handle, o.c, "B * 2"))
+            .expect("Sheet3!C");
+        handle
+            .execute(set_formula(&handle, f.d, "Sheet3!C + 1"))
+            .expect("D reads it row by row");
+        handle
+            .execute(enter(o.y, 0, &[1.0, 2.0, 3.0, 4.0]))
+            .expect("edit Sheet3!B, longer");
+        assert_eq!(
+            numbers(&take_snapshot(&handle), f.d),
+            some(&[3.0, 5.0, 7.0, 9.0]),
+            "{mode:?}: one pass, four rows"
+        );
+        // The loop: Sheet1!C reads Sheet3!C, which reads Sheet1!C, row-wise.
+        let (_session, handle, f, o) = with_sheet3(mode);
+        let reading = |read: NodeId, sheet: NodeId| {
+            ColumnFormula::from_parts_with_remote(
+                vec![
+                    FormulaPart::Column(read),
+                    FormulaPart::Text(" + 1".to_string()),
+                ],
+                std::collections::BTreeMap::from([(
+                    0,
+                    RemoteRef {
+                        sheet,
+                        prefixed: true,
+                    },
+                )]),
+            )
+        };
+        for (column, read, sheet) in [(f.c, o.c, o.sheet), (o.c, f.c, f.sheet)] {
+            handle
+                .execute(Command::SetColumnMeta {
+                    column,
+                    meta: ColumnMeta {
+                        formula: Some(reading(read, sheet)),
+                        ..Default::default()
+                    },
+                })
+                .expect("formula installed as a file would hold it");
+        }
+        let s = take_snapshot(&handle);
+        assert!(all_empty(&s, f.c), "{mode:?}");
+        assert!(all_empty(&s, o.c), "{mode:?}");
+        handle.execute(unrelated(&s, 4)).expect("unrelated");
+        let after = take_snapshot(&handle);
+        assert_eq!(version(&s, f.c), version(&after, f.c), "stable");
+        assert_eq!(version(&s, o.c), version(&after, o.c), "stable");
+    }
+}
+
 /// #391: after pasting a folder, the formula of the **copied** workbook reads
 /// the copied column and the original formula keeps reading the original one:
 /// writing a copied A recomputes the copied C only, and vice versa.

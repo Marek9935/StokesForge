@@ -13,7 +13,12 @@
 //! thousand columns). A column row is a check box, its X/Y role, its long name
 //! and its unit; click toggles it, Shift+click toggles the range from the last
 //! one clicked in that sheet, right-click offers the same column in all
-//! sheets. A sheet with no column has its box greyed out with its reason. With
+//! sheets. Under the workbooks of each file a **Graphs** heading lists its
+//! graphs (#557): a three-state box over the columns the graph plots, its name
+//! and curve count, and its curves (`Y vs X · Book / Sheet`, no box) once
+//! opened; a graph with no usable curve is greyed with its reason. Three
+//! buttons `Show: All / Workbooks / Graphs` above the list hide one kind or
+//! the other and never untick. Nothing is ticked at opening. A sheet with no column has its box greyed out with its reason. With
 //! a single file the file level is a plain heading line. The state, the ticks
 //! and the reasons live in `AppState` (`origin_import_*`); the window decides
 //! nothing and pushes only actions. A long name (Horiba labels run to 60
@@ -30,10 +35,12 @@ use super::dialogs::{
 use super::import_to::{
     folder_label, folder_menu, menu_button, to_menu, LayoutOptions, ToPick, WhereOption,
 };
+use super::tab_strip::{tab_strip, TabStripSide};
 use crate::icons::Icon;
 use crate::theme;
 use stokesforge_app_state::state::{
-    Action, AppState, OriginBookView, OriginColumnView, OriginSheetView, OriginTick, OriginWhere,
+    Action, AppState, OriginBookView, OriginColumnView, OriginFileView, OriginGraphView,
+    OriginSheetView, OriginShow, OriginTick, OriginWhere,
 };
 use stokesforge_app_state::tr;
 use stokesforge_import::origin::OriginDesignation;
@@ -62,6 +69,10 @@ pub(super) fn origin_import_window(
     let summary = state.origin_import_summary();
     let blocker = state.origin_import_blocker();
     let own_x = state.origin_import_x_warning();
+    let reads_warning = state.origin_import_reads_warning();
+    let show = state.origin_import_show();
+    let include_reads = state.origin_import_include_reads();
+    let include_reads_blocker = state.origin_import_include_reads_blocker();
     let accept_label = tr!("origin-import-accept");
     let accept_hint = tr!("origin-import-accept", "hint");
     let reason = blocker.clone().unwrap_or_default();
@@ -93,8 +104,11 @@ pub(super) fn origin_import_window(
             // The two menus of the Import window, above the tree: their labels
             // are too long for the footer.
             ui.horizontal(|ui| to_and_folder(ui, state, &mut requested));
+            ui.horizontal(|ui| show_buttons(ui, show, &mut requested));
             ui.add_space(theme::SPACE_ITEM);
-            let reserved = if own_x.is_some() { 70.0 } else { 26.0 };
+            let reserved = 52.0
+                + if own_x.is_some() { 44.0 } else { 0.0 }
+                + if reads_warning.is_some() { 44.0 } else { 0.0 };
             let list_height = (ui.available_height() - reserved).max(80.0);
             theme::page_scroll_area()
                 .id_salt("stokesforge_origin_import_list")
@@ -114,14 +128,21 @@ pub(super) fn origin_import_window(
                             ui.label(theme::bold(&file.file_name))
                                 .on_hover_text(file.path.display().to_string());
                             partial_note(ui);
-                            books(ui, file_index, &file.books, &mut requested);
+                            file_body(ui, file_index, file, show, files.len() > 1, &mut requested);
                         } else {
                             egui::CollapsingHeader::new(theme::bold(&file.file_name))
                                 .id_salt(("stokesforge_origin_file", file_index))
                                 .default_open(true)
                                 .show(ui, |ui| {
                                     partial_note(ui);
-                                    books(ui, file_index, &file.books, &mut requested);
+                                    file_body(
+                                        ui,
+                                        file_index,
+                                        file,
+                                        show,
+                                        files.len() > 1,
+                                        &mut requested,
+                                    );
                                 })
                                 .header_response
                                 .on_hover_text(file.path.display().to_string());
@@ -129,6 +150,17 @@ pub(super) fn origin_import_window(
                     }
                 });
             ui.add_space(theme::SPACE_ITEM);
+            include_reads_box(
+                ui,
+                include_reads,
+                include_reads_blocker.as_deref(),
+                &mut requested,
+            );
+            if let Some(line) = &reads_warning {
+                ui.label(
+                    egui::RichText::new(line).color(theme::warning_color(ui.visuals().dark_mode)),
+                );
+            }
             if let Some(line) = &own_x {
                 ui.label(
                     egui::RichText::new(line).color(theme::warning_color(ui.visuals().dark_mode)),
@@ -212,10 +244,148 @@ fn to_and_folder(ui: &mut egui::Ui, state: &AppState, requested: &mut Vec<Action
     }
 }
 
-fn books(ui: &mut egui::Ui, file: usize, books: &[OriginBookView], requested: &mut Vec<Action>) {
-    for (book_index, book) in books.iter().enumerate() {
-        book_node(ui, file, book_index, book, requested);
+/// The box "Include the columns formulas read" (#556, #557): greyed out, with
+/// the reason, while no file has a formula that reads another column.
+fn include_reads_box(
+    ui: &mut egui::Ui,
+    on: bool,
+    blocker: Option<&str>,
+    requested: &mut Vec<Action>,
+) {
+    let mut checked = on;
+    let response = ui
+        .add_enabled(
+            blocker.is_none(),
+            egui::Checkbox::new(&mut checked, tr!("origin-import-include-reads")),
+        )
+        .on_hover_text(tr!("origin-import-include-reads", "hint"))
+        .on_disabled_hover_text(blocker.unwrap_or_default());
+    if response.changed() {
+        requested.push(Action::SetOriginIncludeReads(checked));
     }
+}
+
+/// The tabs `Show: All / Workbooks / Graphs` (#557).
+fn show_buttons(ui: &mut egui::Ui, current: OriginShow, requested: &mut Vec<Action>) {
+    // The tabs carry an underline below their text: the label drops a little
+    // to share their baseline.
+    ui.vertical(|ui| {
+        ui.add_space(theme::SPACE_ITEM);
+        ui.label(tr!("origin-import-show"));
+    });
+    let tabs = [
+        (OriginShow::All, tr!("origin-import-show-all")),
+        (OriginShow::Workbooks, tr!("origin-import-show-workbooks")),
+        (OriginShow::Graphs, tr!("origin-import-show-graphs")),
+    ];
+    tab_strip(
+        ui,
+        TabStripSide::Top,
+        &tabs,
+        current,
+        |picked| {
+            if picked != current {
+                requested.push(Action::SetOriginShow(picked));
+            }
+        },
+        None,
+        || {},
+    );
+}
+
+/// The books of a file, then its graphs under a heading, as `show` says.
+fn file_body(
+    ui: &mut egui::Ui,
+    file_index: usize,
+    file: &OriginFileView,
+    show: OriginShow,
+    several: bool,
+    requested: &mut Vec<Action>,
+) {
+    let none = |ui: &mut egui::Ui, alone: String, named: String| {
+        ui.label(theme::dimmed_text(if several { named } else { alone }));
+    };
+    if show == OriginShow::Workbooks && file.books.is_empty() {
+        none(
+            ui,
+            tr!("origin-import-no-workbook"),
+            tr!(
+                "origin-import-no-workbook-in",
+                file = file.file_name.as_str()
+            ),
+        );
+    }
+    if show == OriginShow::Graphs && file.graphs.is_empty() {
+        none(
+            ui,
+            tr!("origin-import-no-graph"),
+            tr!("origin-import-no-graph-in", file = file.file_name.as_str()),
+        );
+    }
+    if show != OriginShow::Graphs {
+        for (book_index, book) in file.books.iter().enumerate() {
+            book_node(ui, file_index, book_index, book, requested);
+        }
+    }
+    if show != OriginShow::Workbooks && !file.graphs.is_empty() {
+        ui.add_space(theme::SPACE_ITEM);
+        ui.label(theme::bold(tr!("origin-import-graphs-heading")));
+        for (graph_index, graph) in file.graphs.iter().enumerate() {
+            graph_node(ui, file_index, graph_index, graph, requested);
+        }
+    }
+}
+
+/// One graph: its three-state box, name and curve count on the header row, its
+/// curves below once opened (closed by default). A curve row has no box.
+fn graph_node(
+    ui: &mut egui::Ui,
+    file: usize,
+    index: usize,
+    graph: &OriginGraphView,
+    requested: &mut Vec<Action>,
+) {
+    let mut checked = graph.tick == OriginTick::All;
+    let mixed = graph.tick == OriginTick::Some;
+    let id = ui.make_persistent_id(("stokesforge_origin_graph", file, index));
+    egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
+        .show_header(ui, |ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(theme::secondary_text(tr!(
+                    "origin-import-graph-curves",
+                    count = i64::try_from(graph.curves.len()).unwrap_or(i64::MAX)
+                )));
+                if !graph.short_name.is_empty() && graph.short_name != graph.name {
+                    ui.label(theme::secondary_text(&graph.short_name));
+                }
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    // A long name is cut with an ellipsis where the row ends.
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                    let response = ui
+                        .add_enabled(
+                            graph.unavailable.is_none(),
+                            egui::Checkbox::new(&mut checked, graph.name.as_str())
+                                .indeterminate(mixed),
+                        )
+                        .on_disabled_hover_text(graph.unavailable.clone().unwrap_or_default());
+                    let response = if graph.name.chars().count() > LONG_NAME {
+                        response.on_hover_text(&graph.name)
+                    } else {
+                        response.on_hover_text(tr!("origin-import-graph-hint"))
+                    };
+                    if response.changed() {
+                        requested.push(Action::ToggleOriginGraph { file, graph: index });
+                    }
+                });
+            });
+        })
+        .body(|ui| {
+            for curve in &graph.curves {
+                // One line per curve, cut where the row ends; full on hover.
+                ui.add(egui::Label::new(curve.as_str()).truncate())
+                    .on_hover_text(curve);
+            }
+        });
 }
 
 /// One workbook: its three-state box and name on the header row, its sheets
@@ -246,10 +416,14 @@ fn book_node(
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                 let response = ui
                     .add_enabled(
-                        importable,
+                        importable && !book.locked,
                         egui::Checkbox::new(&mut checked, book.name.as_str()).indeterminate(mixed),
                     )
-                    .on_disabled_hover_text(tr!("disabled-origin-sheet-empty"));
+                    .on_disabled_hover_text(if book.locked {
+                        tr!("disabled-origin-all-read-by-formulas")
+                    } else {
+                        tr!("disabled-origin-sheet-empty")
+                    });
                 let response = if book.name.chars().count() > LONG_NAME {
                     response.on_hover_text(&book.name)
                 } else {
@@ -301,11 +475,15 @@ fn sheet_node(
                     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                     let response = ui
                         .add_enabled(
-                            sheet.columns > 0,
+                            sheet.columns > 0 && !sheet.locked,
                             egui::Checkbox::new(&mut checked, sheet.name.as_str())
                                 .indeterminate(mixed),
                         )
-                        .on_disabled_hover_text(tr!("disabled-origin-sheet-empty"));
+                        .on_disabled_hover_text(if sheet.locked {
+                            tr!("disabled-origin-all-read-by-formulas")
+                        } else {
+                            tr!("disabled-origin-sheet-empty")
+                        });
                     let response = if sheet.name.chars().count() > LONG_NAME {
                         response.on_hover_text(&sheet.name)
                     } else {
@@ -337,6 +515,34 @@ fn designation_text(designation: OriginDesignation) -> String {
     }
 }
 
+/// The width of the role badge: 64 points at least, and enough for the longest
+/// role name in the language in use, so that none is ever cut (#556).
+fn badge_width(ui: &egui::Ui) -> f32 {
+    let font = egui::FontId::proportional(theme::SECONDARY_TEXT_SIZE);
+    [
+        OriginDesignation::X,
+        OriginDesignation::Y,
+        OriginDesignation::Z,
+        OriginDesignation::XError,
+        OriginDesignation::YError,
+        OriginDesignation::Label,
+        OriginDesignation::Disregard,
+    ]
+    .into_iter()
+    .map(|designation| {
+        ui.painter()
+            .layout_no_wrap(
+                designation_text(designation),
+                font.clone(),
+                egui::Color32::PLACEHOLDER,
+            )
+            .size()
+            .x
+    })
+    .fold(64.0_f32, f32::max)
+        + 4.0
+}
+
 /// The columns of an open sheet. Only the rows on screen are painted: the
 /// others only take their height, so a thousand columns cost a few dozen
 /// widgets, and nothing is cut off.
@@ -353,6 +559,9 @@ fn column_rows(
         let clip = ui.clip_rect();
         if top + row_height < clip.top() || top > clip.bottom() {
             ui.allocate_space(egui::vec2(1.0, row_height));
+            if !columns[index].reads_unticked.is_empty() {
+                ui.allocate_space(egui::vec2(1.0, row_height));
+            }
             continue;
         }
         column_row(ui, at, index, columns, last_id, requested);
@@ -380,19 +589,35 @@ fn column_row(
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                 let mut ticked = column.ticked;
                 let hint = tr!("origin-import-column-hint");
-                let boxed = ui.add(egui::Checkbox::without_text(&mut ticked));
+                // Ticked only because a formula reads it: greyed out, with the
+                // reason; neither the box nor the name answers a click.
+                let reason = column.read_by.as_ref().map(|reader| {
+                    tr!(
+                        "disabled-origin-column-read-by-formula",
+                        column = reader.as_str()
+                    )
+                });
+                let boxed = ui
+                    .add_enabled(reason.is_none(), egui::Checkbox::without_text(&mut ticked))
+                    .on_disabled_hover_text(reason.clone().unwrap_or_default());
                 let badge = ui
                     .add_sized(
-                        egui::vec2(64.0, ui.spacing().interact_size.y),
+                        egui::vec2(badge_width(ui), ui.spacing().interact_size.y),
                         egui::Label::new(theme::secondary_text(designation_text(
                             column.designation,
                         )))
                         .truncate(),
                     )
                     .on_hover_text(designation_text(column.designation));
-                let name =
-                    ui.add(egui::Label::new(column.long_name.as_str()).sense(egui::Sense::click()));
-                let name = if column.long_name.chars().count() > LONG_NAME {
+                let sense = if reason.is_some() {
+                    egui::Sense::hover()
+                } else {
+                    egui::Sense::click()
+                };
+                let name = ui.add(egui::Label::new(column.long_name.as_str()).sense(sense));
+                let name = if let Some(reason) = &reason {
+                    name.on_hover_text(reason)
+                } else if column.long_name.chars().count() > LONG_NAME {
                     name.on_hover_text(format!("{}\n{hint}", column.long_name))
                 } else {
                     name.on_hover_text(hint)
@@ -402,6 +627,25 @@ fn column_row(
             });
         });
     });
+    if !column.reads_unticked.is_empty() {
+        // Orange line under the column (#556): its formula reads columns that
+        // are not checked; they are never checked for the user.
+        ui.horizontal(|ui| {
+            ui.set_height(ui.spacing().interact_size.y);
+            ui.add_space(ui.spacing().icon_width + ui.spacing().icon_spacing);
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(tr!(
+                        "origin-import-reads-unchecked",
+                        column = column.short_name.as_str(),
+                        inputs = column.reads_unticked.join(", ")
+                    ))
+                    .color(theme::warning_color(ui.visuals().dark_mode)),
+                )
+                .truncate(),
+            );
+        });
+    }
     let shift = ui.input(|input| input.modifiers.shift);
     let target = !column.ticked;
     if clicked {
@@ -522,7 +766,43 @@ mod tests {
         ]
     }
 
+    /// The chooser as the tests of #490 and #537 knew it: the `Data` sheets
+    /// ticked (all non-empty sheets of a book with no `Data` sheet). Since
+    /// #557 the chooser opens with nothing ticked, see [`start_unticked`].
     fn start(books: Vec<synthetic::Book>) -> (Bench, PathBuf) {
+        let (mut bench, path) = start_unticked(books);
+        let files = bench.state.origin_import_files();
+        for (book_index, book) in files[0].books.iter().enumerate() {
+            let has_data = book
+                .sheets
+                .iter()
+                .any(|sheet| sheet.name.eq_ignore_ascii_case("Data"));
+            for (sheet_index, sheet) in book.sheets.iter().enumerate() {
+                let ticked = if has_data {
+                    sheet.name.eq_ignore_ascii_case("Data")
+                } else {
+                    sheet.columns > 0
+                };
+                if ticked {
+                    bench.state.dispatch(Action::ToggleOriginSheet {
+                        file: 0,
+                        book: book_index,
+                        sheet: sheet_index,
+                    });
+                }
+            }
+        }
+        (bench, path)
+    }
+
+    fn start_unticked(books: Vec<synthetic::Book>) -> (Bench, PathBuf) {
+        start_project(synthetic::Project {
+            books,
+            ..synthetic::Project::default()
+        })
+    }
+
+    fn start_project(project: synthetic::Project) -> (Bench, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let session = stokesforge_session::Session::spawn(
             stokesforge_core::Project::new("Origin").unwrap(),
@@ -536,10 +816,7 @@ mod tests {
         )
         .unwrap();
         let path = dir.path().join("kinetics.opj");
-        let bytes = synthetic::write_project(&synthetic::Project {
-            books,
-            ..synthetic::Project::default()
-        });
+        let bytes = synthetic::write_project(&project);
         std::fs::write(&path, bytes).unwrap();
         state.dispatch(Action::DropFiles {
             paths: vec![path.clone()],
@@ -1065,6 +1342,230 @@ mod tests {
         harness.get_by_label(&line);
     }
 
+    const LONG_GRAPH: &str = "Graph of the absorbance of the sample number twelve against the wavelength, measured with the second grating and the slow scan, after the night run";
+
+    /// `books()` with two graphs: `G1` (long name, Y of `Data` against its X)
+    /// and `Empty` (a layer with no curve). Ranks: G 1, X 2, Y 3, T 4, S 5.
+    fn with_graphs() -> synthetic::Project {
+        let window =
+            |short: &str, long: &str, curves: Vec<synthetic::GraphCurve>| synthetic::GraphWindow {
+                short_name: short.into(),
+                long_name: long.into(),
+                layers: vec![synthetic::GraphLayer {
+                    name: "Layer1".into(),
+                    curves,
+                }],
+            };
+        synthetic::Project {
+            books: books(),
+            graph_windows: vec![
+                window("G1", LONG_GRAPH, vec![synthetic::GraphCurve::new(3, 2)]),
+                window("Empty", "Nothing plotted", vec![]),
+            ],
+            ..synthetic::Project::default()
+        }
+    }
+
+    /// The graphs are listed under the books with their curve count, a click
+    /// on the box ticks the columns, a Show button hides rows and unticks
+    /// nothing, and a graph with no curve is greyed out.
+    #[test]
+    fn graphs_are_listed_ticked_by_their_box_and_hidden_by_the_show_buttons() {
+        let (bench, _) = start_project(with_graphs());
+        let mut harness = harness(bench);
+        assert!(
+            ticks(&harness).iter().flatten().all(|t| !t),
+            "nothing ticked"
+        );
+        harness.get_by_label(LONG_GRAPH);
+        harness.get_by_label("1 curve");
+        harness.get_by_label("0 curves");
+        assert!(harness
+            .get_by_label("Nothing plotted")
+            .accesskit_node()
+            .is_disabled());
+        harness.get_by_label(LONG_GRAPH).click();
+        harness.run();
+        assert_eq!(ticks(&harness), vec![vec![false, true, false], vec![false]]);
+        assert_eq!(
+            harness.get_by_label(LONG_GRAPH).accesskit_node().toggled(),
+            Some(egui::accesskit::Toggled::True)
+        );
+        harness.get_by_label("To create: 1 sheet in 1 workbook");
+        // Workbooks only: no graph row, the ticks stay.
+        harness.get_by_label("Workbooks").click();
+        harness.run();
+        assert!(harness.query_by_label(LONG_GRAPH).is_none());
+        harness.get_by_label("Book1");
+        assert_eq!(ticks(&harness), vec![vec![false, true, false], vec![false]]);
+        // Back to All: the graph is there, still ticked.
+        harness.get_by_label("All").click();
+        harness.run();
+        assert_eq!(
+            harness.get_by_label(LONG_GRAPH).accesskit_node().toggled(),
+            Some(egui::accesskit::Toggled::True)
+        );
+        // Graphs only: no workbook row.
+        harness.get_all_by_label("Graphs").next().unwrap().click();
+        harness.run();
+        assert!(harness.query_by_label("Book1").is_none());
+        harness.get_by_label(LONG_GRAPH);
+    }
+
+    /// The curves of an open graph read `Y vs X · Book / Sheet`, with no box.
+    #[test]
+    fn an_open_graph_lists_its_curves_without_a_box() {
+        let (bench, _) = start_project(with_graphs());
+        let mut harness = harness(bench);
+        expand(&mut harness, LONG_GRAPH);
+        harness.get_by_label("Y vs X · Book1 / Data");
+    }
+
+    /// The orange line at the bottom counts the ticked formulas that read an
+    /// unchecked column, with the sheet closed (#556). Witness: a line drawn
+    /// only inside the open sheet would not be found here, and it goes away
+    /// once the input is checked.
+    #[test]
+    fn the_orange_line_of_the_footer_is_there_with_the_sheet_closed() {
+        let mut column = synthetic::Column::numbers("C", Y, &[20.0, 40.0, 60.0]);
+        column.formula = Some("col(Y)*2".into());
+        let project = synthetic::Project {
+            books: vec![book(
+                "A",
+                "Run",
+                vec![sheet(
+                    "Data",
+                    vec![
+                        synthetic::Column::numbers("X", X, &[1.0, 2.0, 3.0]),
+                        synthetic::Column::numbers("Y", Y, &[10.0, 20.0, 30.0]),
+                        column,
+                    ],
+                )],
+            )],
+            ..synthetic::Project::default()
+        };
+        let (bench, _) = start_project(project);
+        let mut harness = harness(bench);
+        let line = tr!("origin-import-reads-warning", count = 1_i64, names = "C");
+        assert!(harness.query_by_label(&line).is_none(), "nothing ticked");
+        let tick = |harness: &mut egui_kittest::Harness<'static, Bench>, column: usize| {
+            harness
+                .state_mut()
+                .state
+                .dispatch(Action::ToggleOriginColumn {
+                    file: 0,
+                    book: 0,
+                    sheet: 0,
+                    column,
+                });
+            harness.run();
+        };
+        tick(&mut harness, 0);
+        tick(&mut harness, 2);
+        harness.get_by_label(&line);
+        // The input checked: the line is gone.
+        tick(&mut harness, 1);
+        assert!(harness.query_by_label(&line).is_none());
+    }
+
+    fn formula_project() -> synthetic::Project {
+        let mut column = synthetic::Column::numbers("C", Y, &[20.0, 40.0, 60.0]);
+        column.formula = Some("col(Y)*2".into());
+        let mut input = synthetic::Column::numbers("Y", Y, &[10.0, 20.0, 30.0]);
+        input.long_name = "Signal".into();
+        synthetic::Project {
+            books: vec![book(
+                "A",
+                "Run",
+                vec![sheet(
+                    "Data",
+                    vec![
+                        synthetic::Column::numbers("X", X, &[1.0, 2.0, 3.0]),
+                        input,
+                        column,
+                    ],
+                )],
+            )],
+            ..synthetic::Project::default()
+        }
+    }
+
+    fn disabled_boxes(harness: &egui_kittest::Harness<'static, Bench>) -> usize {
+        harness
+            .get_all_by_role(egui::accesskit::Role::CheckBox)
+            .filter(|node| node.accesskit_node().is_disabled())
+            .count()
+    }
+
+    /// The box "Include the columns formulas read" ticks what the checked
+    /// formulas read, and the box of such a column is greyed out: neither its
+    /// box nor its name answers a click (#556, #557). Witness: without the
+    /// greying, no checkbox is disabled and the click unticks the column.
+    #[test]
+    fn the_include_reads_box_greys_the_columns_it_ticked() {
+        let (bench, _) = start_project(formula_project());
+        let mut harness = harness(bench);
+        let label = tr!("origin-import-include-reads");
+        harness.get_by_label(&label).click();
+        harness.run();
+        assert!(harness.state().state.origin_import_include_reads());
+        harness
+            .state_mut()
+            .state
+            .dispatch(Action::ToggleOriginColumn {
+                file: 0,
+                book: 0,
+                sheet: 0,
+                column: 2,
+            });
+        harness.run();
+        expand(&mut harness, "Run");
+        expand(&mut harness, "Data");
+        assert_eq!(column_ticks(&harness, 0), vec![false, true, true]);
+        assert_eq!(disabled_boxes(&harness), 1, "the column Y");
+        harness.get_by_label("Signal").click();
+        harness.run();
+        assert_eq!(column_ticks(&harness, 0), vec![false, true, true]);
+        assert!(harness.state().state.origin_import_include_reads());
+        // Off: the column is free again.
+        harness.get_by_label(&label).click();
+        harness.run();
+        assert_eq!(column_ticks(&harness, 0), vec![false, false, true]);
+        assert_eq!(disabled_boxes(&harness), 0);
+    }
+
+    /// With no formula in the files the box is there but greyed out.
+    #[test]
+    fn the_include_reads_box_is_greyed_out_without_a_formula() {
+        let (bench, _) = start_project(synthetic::Project {
+            books: books(),
+            ..synthetic::Project::default()
+        });
+        let mut harness = harness(bench);
+        assert_eq!(disabled_boxes(&harness), 1, "the box itself");
+        harness
+            .get_by_label(&tr!("origin-import-include-reads"))
+            .click();
+        harness.run();
+        assert!(!harness.state().state.origin_import_include_reads());
+    }
+
+    /// A Show button with nothing to list says so, with the file name when
+    /// several files are open.
+    #[test]
+    fn a_show_button_with_nothing_to_list_says_so() {
+        let (bench, _) = start_project(synthetic::Project {
+            books: books(),
+            ..synthetic::Project::default()
+        });
+        let mut harness = harness(bench);
+        let none = tr!("origin-import-no-graph");
+        assert!(harness.query_by_label(&none).is_none(), "All lists books");
+        harness.get_by_label("Graphs").click();
+        harness.run();
+        harness.get_by_label(&none);
+    }
+
     /// In the pseudo-language the buttons of the window stay inside it and
     /// apart from each other. Runs in a child process (the language is the
     /// process's), see `long_texts_of_the_footer_and_menus_row_are_never_cut`.
@@ -1074,12 +1575,39 @@ mod tests {
         use stokesforge_app_state::i18n::{self, Language};
         assert_eq!(i18n::language(), Language::PseudoEnglish);
         println!("origin chooser checked in {}", i18n::language().tag());
-        let (bench, _) = start(books());
+        let (bench, _) = start_project(with_graphs());
         let harness = harness(bench);
         let window = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0));
+        // The Show buttons and the graph row stay inside the window.
+        let show = [
+            tr!("origin-import-show-all"),
+            tr!("origin-import-show-workbooks"),
+            tr!("origin-import-show-graphs"),
+        ];
+        let mut show_rects = Vec::new();
+        for label in &show {
+            // The first match: the tab (the heading of the graphs comes later).
+            let rect = harness
+                .get_all_by_label_contains(label)
+                .next()
+                .unwrap()
+                .rect();
+            assert!(window.contains_rect(rect), "{label}: {rect:?}");
+            show_rects.push(rect);
+        }
+        for pair in show_rects.windows(2) {
+            assert!(!pair[0].intersects(pair[1]), "{pair:?}");
+        }
+        // The heading and the Show button have the same text.
+        for graph in harness.get_all_by_label_contains(&tr!("origin-import-graphs-heading")) {
+            assert!(window.contains_rect(graph.rect()), "{:?}", graph.rect());
+        }
+        let row = harness.get_by_label_contains("Graph of the absorbance");
+        assert!(window.contains_rect(row.rect()), "cut: {:?}", row.rect());
         let labels = [
             tr!("origin-import-check-all"),
             tr!("origin-import-check-none"),
+            tr!("origin-import-include-reads"),
             tr!("dialog-cancel"),
             tr!("origin-import-accept"),
         ];
@@ -1103,6 +1631,43 @@ mod tests {
         );
         assert!(window.contains_rect(to) && window.contains_rect(folder));
         assert!(!to.intersects(folder), "{to:?} {folder:?}");
+        // The reason Import is greyed out is not cut to one row: it wraps.
+        let reason = harness
+            .get_by_label_contains(&tr!("disabled-origin-import-nothing-ticked"))
+            .rect();
+        assert!(window.contains_rect(reason), "{reason:?}");
+        assert!(
+            reason.height() > 1.5 * theme::SECONDARY_TEXT_SIZE,
+            "one row, so cut: {reason:?}"
+        );
+        assert!(
+            !reason.intersects(harness.get_by_label_contains(&tr!("dialog-cancel")).rect()),
+            "{reason:?}"
+        );
+        // The role badge of a column is wide enough for the longest role name.
+        let designations = [
+            OriginDesignation::X,
+            OriginDesignation::Y,
+            OriginDesignation::Z,
+            OriginDesignation::XError,
+            OriginDesignation::YError,
+            OriginDesignation::Label,
+            OriginDesignation::Disregard,
+        ];
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let width = badge_width(ui);
+            for designation in designations {
+                let text = designation_text(designation);
+                let galley = ui.painter().layout_no_wrap(
+                    text.clone(),
+                    egui::FontId::proportional(theme::SECONDARY_TEXT_SIZE),
+                    egui::Color32::PLACEHOLDER,
+                );
+                assert!(galley.size().x <= width, "{text} is cut: {width}");
+            }
+        });
+        output.textures_delta.clear();
     }
 
     /// The pseudo-language check above, run in a child process whose language

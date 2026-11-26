@@ -287,7 +287,8 @@ fn witness_project() -> (Project, ViewTables) {
     project.transpose_rows(source, &[0, 1]).expect("transposed");
 
     // Formulas that read other sheets (#403): `Sheet2!X` in the same workbook,
-    // `[Spectres]<sheet>!X` in another one (the additive remote side field).
+    // `[Spectres]<sheet>!X` in another one (the additive remote side field), and one
+    // of them read row by row (#556).
     let sheet_name =
         |project: &Project, id: NodeId| project.tree().get(id).expect("sheet").name().to_string();
     let remote_sheet = project
@@ -299,6 +300,8 @@ fn witness_project() -> (Project, ViewTables) {
     for (name, text) in [
         ("DansClasseur", format!("A+max({own}!A)")),
         ("AutreClasseur", format!("max([Spectres]{other}!A)")),
+        // Read row by row (#556): the column of another sheet as an own one.
+        ("LigneParLigne", format!("{own}!A + 1")),
     ] {
         let id = add_column(&mut project, remote_sheet, name, &[0.0, 0.0, 0.0]);
         let formula = project

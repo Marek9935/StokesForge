@@ -1901,6 +1901,31 @@ mod tests {
         assert_eq!(formula.remote_sheets().get(&c3[1]), Some(&sheet3));
     }
 
+    /// A remote column read row by row follows the same rules as one read by a
+    /// column function (#556): kept by a sheet duplicate, `#REF` once pasted in
+    /// another project.
+    #[test]
+    fn a_row_wise_remote_reference_is_copied_like_any_other() {
+        let mut project = Project::new("Demo").expect("project");
+        let (sheet1, c1) = sheet_with_columns(&mut project, "Book1", 3);
+        let book = project.tree().parent(sheet1).unwrap().unwrap();
+        let sheet3 = project.add_worksheet(book, Some("Sheet3")).expect("sheet");
+        let c3 = project
+            .add_column(sheet3, None, None, Column::from_f64(&[1.0, 2.0]))
+            .expect("column");
+        set_formula(&mut project, c1[2], "A + Sheet3!A");
+        let copy = project.duplicate_worksheet(sheet1, "Copy").expect("copy");
+        let copied = columns_of(&project, copy);
+        assert_eq!(
+            project.tree().formula_letters(copied[2]).as_deref(),
+            Some("A + Sheet3!A")
+        );
+        assert_eq!(
+            formula_of(&project, copied[2]).remote_sheets().get(&c3),
+            Some(&sheet3)
+        );
+    }
+
     /// Duplicating the workbook that holds both sheets: the copy reads its own
     /// Sheet3 (#403). Mutant: `keep` always true -> the copy reads the original.
     #[test]

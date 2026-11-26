@@ -740,7 +740,6 @@ error-formula-workbook-without-sheet = A reference to another workbook names its
 error-formula-ambiguous-workbook = Several workbooks are named { $name }. Write the path from the project root, for example [Folder/{ $name }]Sheet1!B
 error-formula-ambiguous-name = Several objects are named { $name } apart from case. Rename one of them
 error-formula-unknown-column-in = Column { $column } does not exist in sheet { $sheet }
-error-formula-remote-outside = A column of another sheet can only be read by at, max, min, mean, sum, std or integral. Give it to one of them as its column
 error-formula-remote-x = The X column of an at() on another sheet is read in that sheet. Write it without a prefix (D, not Sheet3!D)
 error-paste-formula-kept = The formula of column { $column } does not compute: { $reason }
 error-paste-formulas-kept = The formulas of columns { $columns } do not compute. { $first }: { $reason }
@@ -1249,7 +1248,7 @@ formula-help-family-operators = Operators
 formula-help-op-arithmetic = Add, subtract, multiply, divide
 formula-help-op-power = Power
 formula-help-op-comparison = Comparison: 1 if true, 0 if false
-formula-help-reference = Column of another sheet, read by the column functions (at, max, min, mean, sum, std, integral). Another workbook: [Book2]Sheet5!B. A name with a space is quoted: 'Blanc 2'!B. A transposed sheet Sheet1ᵀ can be written Sheet1T
+formula-help-reference = Column of another sheet, read row by row like an own column (Sheet3!B - 1) or by the column functions (at, max, min, mean, sum, std, integral). Another workbook: [Book2]Sheet5!B. A name with a space is quoted: 'Blanc 2'!B. A transposed sheet Sheet1ᵀ can be written Sheet1T
 formula-help-family-powers = Powers and logarithms
 formula-help-family-trigonometry = Trigonometry
 formula-help-family-error = Error function
@@ -2074,7 +2073,7 @@ origin-import-summary = To create: { $sheets ->
     [one] { $books } workbook
    *[other] { $books } workbooks
     }
-origin-import-partial = Part of this file could not be read: some workbooks keep their data but lose long names, units and X/Y roles
+origin-import-partial = Part of this file could not be read: some workbooks keep their data but lose long names, units and X/Y roles, and some graphs may be missing
 origin-import-own-x = These sheets keep an X of their own, its values differ from the first X: { $names }
 status-import-own-x = These files keep an X of their own, its values differ from the first X: { $names }
 status-import-folder-gone = The folder chosen for the import no longer exists: the workbooks were created at the root of the project
@@ -2084,10 +2083,37 @@ origin-import-accept =
     .hint = Creates the workbooks and sheets that the checked columns call for (Enter)
 origin-import-check-all =
     Check All
-    .hint = Checks every column of every sheet
+    .hint = Checks every column of every sheet and every graph
 origin-import-check-none =
     Check None
-    .hint = Unchecks every column of every sheet
+    .hint = Unchecks every column of every sheet and every graph
+origin-import-reads-unchecked = { $column } reads { $inputs }, not checked
+origin-import-reads-warning = { $count ->
+    [one] { $count } formula reads an unchecked column and will be kept as values: { $names }
+   *[other] { $count } formulas read unchecked columns and will be kept as values: { $names }
+}
+origin-import-reads-names-more = { $names } and { $more } more
+status-import-origin-formulas = { $done }; { $set ->
+    [one] { $set } formula set
+   *[other] { $set } formulas set
+}, { $kept ->
+    [one] { $kept } kept as values
+   *[other] { $kept } kept as values
+}
+origin-formulas-title = Formulas with Different Values
+origin-formulas-intro = These formulas give other values than Origin shows. Check the columns that must take the formula. The others keep Origin’s values
+origin-formulas-row = { $book } · { $sheet } · { $column } = { $formula }
+origin-formulas-example = row { $row }: Origin { $origin }, formula { $formula }
+origin-formulas-empty = empty
+origin-formulas-accept =
+    Import
+    .hint = Imports, setting the checked formulas (Enter)
+origin-formulas-check-all =
+    Check All
+    .hint = Checks every formula
+origin-formulas-check-none =
+    Check None
+    .hint = Unchecks every formula
 origin-import-book-hint = Checks or unchecks all the columns of this workbook
 origin-import-sheet-size = { $columns ->
     [one] { $columns } column
@@ -2704,6 +2730,30 @@ origin-import-column-hint = Click to check or uncheck, Shift+click to check or u
 origin-import-column-check-in-all = Check “{ $name }” in All Sheets
 origin-import-column-uncheck-in-all = Uncheck “{ $name }” in All Sheets
 origin-import-sheet-hint = Checks or unchecks all the columns of this sheet
+origin-import-graphs-heading = Graphs
+origin-import-graph-hint = Checks or unchecks the columns this graph plots (and the error columns next to them)
+origin-import-graph-curves = { $count ->
+    [one] { $count } curve
+   *[other] { $count } curves
+}
+origin-import-curve = { $y } vs { $x } · { $book } / { $sheet }
+origin-import-curve-no-x = { $y } · { $book } / { $sheet }
+origin-import-show = Show:
+origin-import-show-all = All
+origin-import-show-workbooks = Workbooks
+origin-import-show-graphs = Graphs
+origin-import-include-reads =
+    Include the columns that formulas read
+    .hint = Also imports the columns that the formulas of the checked columns read, so that those formulas stay live
+disabled-origin-include-reads-no-formula = No column of these files has a formula that reads other columns
+disabled-origin-column-read-by-formula = Read by the formula of { $column }
+disabled-origin-all-read-by-formulas = Every column here is imported because a formula reads it
+origin-import-no-graph = No graph in this file
+origin-import-no-graph-in = No graph in { $file }
+origin-import-no-workbook = No workbook in this file
+origin-import-no-workbook-in = No workbook in { $file }
+disabled-origin-graph-no-curve = This graph plots no curve
+disabled-origin-graph-unresolved = None of the curves of this graph could be matched to a column of a workbook
 disabled-import-folder-active-book = The folder is not used when importing into the active workbook
 import-footer-template = Template: { $value }
 import-footer-template-auto = Auto · { $name }

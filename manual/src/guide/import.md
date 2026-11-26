@@ -197,7 +197,7 @@ The values are rewritten in place. The columns keep their identity, so graphs th
 
 ## Origin projects (.opj and .opju)
 
-StokesForge reads the **workbooks** of an Origin project saved as `.opj` or `.opju` (Origin 2018 and later). Graphs and matrices of the project are left out.
+StokesForge reads the **workbooks** and the **graphs** of an Origin project saved as `.opj` or `.opju` (Origin 2018 and later). A graph is not recreated: the data it plots are imported. Matrices of the project are left out.
 
 An `.opj` or `.opju` never goes through the text import. StokesForge recognises an Origin project by its extension or by the start of its content, so a file renamed (for example `measure.dat`) is still taken as an Origin project. Drop it on the window, choose it with **Add Files…** in the **Import** window, or choose **File ▸ Import ▸ Import…**: the **Import from Origin** window opens instead. If the **Import** window is open, the file moves to the new window and the **Import** window closes when nothing else is left in it. If you drop a text file that needs a look together with an Origin file, the **Import** window opens for the text file and the status bar says "The Origin file will open after the Import window"; the **Import from Origin** window appears when you close the **Import** window.
 
@@ -205,7 +205,7 @@ An `.opj` or `.opju` never goes through the text import. StokesForge recognises 
 
 <img src="../images/import-origin-chooser.png" alt="The Import from Origin window on a small project: the file name, one workbook with its check box, its two sheets with their numbers of columns and rows, the line saying what will be created, and the buttons Check All, Check None, Cancel and Import." width="640">
 
-The window lists each file, then each Origin workbook of the file, then the sheets of each workbook, with the number of columns and rows of each sheet. Several files dropped together are listed together. Above the list, **To:** and **Folder:** are the menus of the **Import** window.
+The window lists each file, then each Origin workbook of the file, then the sheets of each workbook, with the number of columns and rows of each sheet. Under the workbooks of each file, the heading **Graphs** lists its graphs, each with its number of curves. Above the list, **Show:** has three buttons, **All**, **Workbooks** and **Graphs**: they hide one kind of row or the other and never uncheck anything. Several files dropped together are listed together. Above the list, **To:** and **Folder:** are the menus of the **Import** window.
 
 **To:**
 
@@ -230,13 +230,28 @@ In a shared-X layout, only the first X is kept. A later X with the same values i
 - Click a column to check or uncheck it. **Shift+click** checks or unchecks all the columns between the last column you clicked in that sheet and this one.
 - Right-click a column and choose **Check “Name” in All Sheets** or **Uncheck “Name” in All Sheets** to act on the columns that have the same long name in every sheet of the file.
 - A check box on a sheet or a workbook checks or unchecks all its columns; it shows a dash when only some are checked.
-- By default, the sheet called `Data` is checked in each workbook, with all its columns. When a workbook has no `Data` sheet, all its sheets that have columns are checked.
+- Nothing is checked when the window opens. **Import** stays greyed out until you check something.
+- A check box on a graph checks the columns the graph plots: the X and Y of each curve, and the error columns that stand right after a plotted Y. Checking a graph always adds to what is checked; the columns also show checked in their sheet. Click the arrow of a graph to see its curves (`Y vs X · Book / Sheet`); a curve has no check box. The box shows a dash when you unchecked one of its columns since you checked the graph; click it to check the missing columns. A graph you did not check shows an empty box, even if its columns are checked. A column used by two graphs is imported once.
+- Unchecking a graph unchecks its columns, except those another checked graph uses. Columns that no checked graph plots are never touched by a click on a graph.
+- A graph that plots no curve, or none whose data StokesForge can find, is greyed out, and its tooltip says why.
 - A sheet with no column is greyed out: there is nothing to import.
-- **Check All** checks every column of every sheet. **Check None** unchecks everything.
+- **Check All** checks every column of every sheet and every graph. **Check None** unchecks everything.
 - The line under the list says what Import will create, for example "To create: 3 sheets in 2 workbooks".
 - **Import** is greyed out while nothing is checked, or while the name of a new folder is empty or already used, and says why. **Cancel** closes the window and creates nothing.
 
 **Import** creates the workbooks and sheets of the chosen layout in the chosen folder, named after the Origin long names (the short name when there is none). If a name is already used or not allowed, the workbook or sheet keeps its automatic name. The new workbooks open in the workspace, and the whole import is a single step in the history: one **Undo** removes the workbooks and the new folder.
+
+### Column formulas
+
+A column of an Origin workbook can hold a formula (Origin's **Set Column Values**). StokesForge translates it, sets it on the imported column when the translation is certain, and checks that it gives the **same values as Origin** (to a relative 1e-9, or to 1e-12 of the largest value of the column, so that rounding noise next to zero does not count; an empty cell equals an empty cell, a text cell does not equal a number). The check runs before anything is created.
+
+- **Same values**: the column takes the formula and stays live, like a formula you typed. A formula that reads another formula column is checked on Origin's values for that column.
+- **Different values**: the window **Formulas with Different Values** opens when you click **Import**. It lists each such column with the formula as Origin wrote it and one example row (for example "row 1: Origin 0.1215, formula 45.85"). Nothing is checked at first. Check the columns that must take the formula; the others keep Origin's values. **Cancel** imports nothing and gives you the **Import from Origin** window back. **Reopen Last Import…** remembers your answers.
+- **Anything else** keeps Origin's values: a formula StokesForge cannot translate (for example a script, a string, `sum(B)`), a formula that reads a column you did not check or another workbook you did not import, or a formula that would read itself. The column gets a line at the end of its **Comments**, `Origin formula: ` followed by the text Origin held, so nothing is lost. A column whose formula is set gets no such line.
+
+In the **Import from Origin** window, a checked column whose formula reads an unchecked column shows an orange line under it ("C reads B, not checked"). StokesForge never checks that column for you, unless you tick **Include the columns that formulas read** (below the list, unchecked each time the window opens). While it is on, every column read by the formula of a checked column, and by the formulas of those columns in turn, in any sheet or workbook of the same file (the X column of an `at` or `table` formula included), is imported too and shows checked in its sheet; so a graph that plots C, computed from B, brings B and the formula stays live. Such a column cannot be unchecked while the box is on: its box is greyed out with "Read by the formula of C". Turn the box off and the window goes back to exactly what you checked yourself or through a graph. **Check None** unchecks the columns and leaves the box as it is; the box is greyed out when no formula of the files reads another column. **Reopen Last Import** brings the box back as you left it. The orange lines only concern a column that nothing can bring. An orange line above the buttons, visible even with the sheets closed, counts these formulas ("1 formula reads an unchecked column and will be kept as values: C"): they keep Origin's values. The **Graphs** and **Workbooks** buttons say "No graph in this file" or "No workbook in this file" when the list would be empty.
+
+The status bar ends with the count, for example "2 formulas set, 1 kept as values". The whole import, formulas included, is one step of the history.
 
 ### What is kept
 
@@ -251,11 +266,11 @@ These columns do not remember a source file, so **Refresh from Source** does not
 
 ### When a file cannot be read completely
 
-Some `.opju` files use a part of the format StokesForge does not read yet. If only the part that holds the descriptions is concerned, the window opens and shows, in orange under the file name, "Part of this file could not be read: some workbooks keep their data but lose long names, units and X/Y roles". After the import, the status bar repeats it in orange ("Imported 3 workbooks; part of the file could not be read"). A sheet that has lost its name is called `Sheet1`, `Sheet2`… (Origin's default names), in the window and in the workbook. If the data themselves cannot be read, the file is refused with the message "This .opju file uses a part of the format StokesForge cannot read yet. Open it in the free Origin Viewer and save it as .opj (Origin 2018 to 2022b can also save .opj)". A file that announces more data or text than it can hold is refused as damaged.
+Some `.opju` files use a part of the format StokesForge does not read yet. If only the part that holds the descriptions is concerned, the window opens and shows, in orange under the file name, "Part of this file could not be read: some workbooks keep their data but lose long names, units and X/Y roles, and some graphs may be missing". After the import, the status bar repeats it in orange ("Imported 3 workbooks; part of the file could not be read"). A sheet that has lost its name is called `Sheet1`, `Sheet2`… (Origin's default names), in the window and in the workbook. If the data themselves cannot be read, the file is refused with the message "This .opju file uses a part of the format StokesForge cannot read yet. Open it in the free Origin Viewer and save it as .opj (Origin 2018 to 2022b can also save .opj)". A file that announces more data or text than it can hold is refused as damaged.
 
 ### From the command line and scripts
 
-`stokesforge-cli import` and `pyst.import_file` read an `.opj` or `.opju` without a window: they import the `Data` sheets of each workbook (all the sheets that have columns when a workbook has no `Data` sheet), one workbook per Origin workbook, at the root of the project, with one sheet per Origin sheet.
+`stokesforge-cli import` and `pyst.import_file` read an `.opj` or `.opju` without a window: they set the formulas that give Origin's values and keep the values (and the `Origin formula:` line in the Comments) of the others, without asking. They import the `Data` sheets of each workbook (graphs are not read there) (all the sheets that have columns when a workbook has no `Data` sheet), one workbook per Origin workbook, at the root of the project, with one sheet per Origin sheet.
 
 ## Common problems
 

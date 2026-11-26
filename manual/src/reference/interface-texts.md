@@ -81,6 +81,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Fitting… | Ajustement… |
 | Forget Template | Oublier le modèle |
 | Formula Functions | Fonctions de formule |
+| Formulas with Different Values | Formules aux valeurs différentes |
 | Free | Libre |
 | General | Général |
 | Graph | Graphique |

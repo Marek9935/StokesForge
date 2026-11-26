@@ -124,7 +124,7 @@ text wizard. Routing is by extension or by the first bytes, `CPYA`/`CPYUA`
 (`ImportReply::origin`, `read_origin_file`), and `apply_ready_import` hands the
 parsed projects (shared by `Arc`) to `AppState::add_origin_reads`, which opens
 the **chooser** (`state/origin_import.rs`: files, books, sheets with column and
-row counts, ticks from `default_origin_selection`, minus sheets with no column)
+row counts and graphs; nothing ticked at opening since #557, `default_origin_selection` stays for the CLI and `pyst`)
 or extends it (a path already there is not added twice). An unreadable file is
 one red message built by `errors::import::failure_message`. An Origin-only job
 skips the recipe part entirely (no empty "Import" entry, no "0 of 0"); a mixed
@@ -139,7 +139,21 @@ other files with a message. The ticks are per column (#537; sheet and book boxes
 show `OriginTick` all/none/some; actions `ToggleOriginColumn`,
 `SetOriginColumnRange` for Shift+click, `SetOriginColumnInAllSheets` by long name
 else short name, `ToggleOriginSheet`, `SetOriginBookTicked`, Check All/None); a
-sheet with no ticked column is no table. The chooser also holds the classic layouts
+sheet with no ticked column is no table. **Graphs (#557).** Each file also lists its
+graphs (`OriginFileView::graphs`, resolved once in `GraphInfo` when the file is added: the
+columns a graph plots are the X and Y of each resolvable curve, plus the `YError` and
+`XError` columns standing right after a plotted Y; a curve with no resolvable Y is
+ignored, one with no resolvable X ticks its Y alone; two layers are one line). `ToggleOriginGraph`
+works on a picked state of the graph (`OriginFile::graph_picked`): a click on an empty box
+picks it and ticks its columns (the same ticks the books show), on "some" ticks its missing
+columns, on a ticked box unpicks it and unticks its columns except those another picked
+graph uses, so a click always changes the box. A graph that is not picked shows an empty
+box whatever its columns; a picked one shows ticked, or "some" when a column was unticked
+by hand since. Columns no picked graph plots are never touched by a graph click. The box is
+three-state; a graph with no curve, or none that resolves, is greyed with a reason.
+`SetOriginShow` (`OriginShow`: All, Workbooks, Graphs) only hides rows and is reset on
+Reopen Last Import, which restores the ticks and the graph picks. Check All / Check None
+cover the graphs. The chooser also holds the classic layouts
 (`SetOriginWhere`: one workbook per Origin workbook, or one new workbook named
 after the file when there is one file; `SetOriginLayout`: one sheet per Origin
 sheet, side by side, shared X) and a **folder**: one Origin sheet is one "file" of
@@ -158,10 +172,61 @@ sheets in one `MacroKind::Import` group (one
 history entry, one undo); a name the model would refuse (invalid, or already a
 sibling's, case aside) is not sent: the object keeps its automatic name and
 nothing is said. Origin columns have no import source, so Refresh from Source
-stays greyed for them. `OriginFileView::partial` (from `OriginProject::partial`, an `.opju` read as far as it goes) makes the chooser print the `origin-import-partial` orange note under that file name (S-R18), and, after the import, an orange status line (`status-import-origin-partial`). Sheets left without a name by a partial read are `Sheet1`, `Sheet2`… (set by `assemble`). Reopen Last Import after an Origin import undoes it (if
+stays greyed for them. A formula column is created with its values first, then given its formula. `OriginFileView::partial` (from `OriginProject::partial`, an `.opju` read as far as it goes) makes the chooser print the `origin-import-partial` orange note under that file name (S-R18), and, after the import, an orange status line (`status-import-origin-partial`). Sheets left without a name by a partial read are `Sheet1`, `Sheet2`… (set by `assemble`). Reopen Last Import after an Origin import undoes it (if
 still on top) and reopens the chooser on the same parsed files, ticks, layouts and
 folder (the Import window gets its folder back the same way); the
 most recent import, text or Origin, decides between wizard and chooser.
+
+**Column formulas of an Origin import (#556).** The reader gives each column's formula text
+(`OriginColumn::formula`); `origin_formula.rs` translates it into pieces of the formula
+language (`col(B)*2`, `col(B)(645)`, `Max`, `table(...)`, a decimal comma) or refuses it, and
+`origin_formula_plan.rs` does the rest, all pure and all **before anything is created**:
+`resolve_origin_formula` resolves each reference **by Origin short name** in the sheet or
+book it names, in the same file (never by position letter); `plan_origin_formulas` maps the
+references onto the planned columns (a dropped shared X goes through `OriginLayoutPlan::x_map`
+to the kept X) and gives each formula column a `FormulaVerdict` (`Translated`,
+`NotImportedInput`, `Untranslatable`); `judge_origin_formulas` builds a **scratch `Project`**
+holding the planned sheets with Origin's values only, sets the translated formulas there
+(loops and self references are refused with `Tree::formula_loop`), computes each one with
+`evaluate_formula_with_x` the way the recalculation does (length of the longest column read
+row by row) and compares with Origin's values: equal within a relative `1e-9` or within `1e-12` of the largest magnitude of the column (float noise next to zero), NaN equals
+NaN, trailing empty cells ignored, a text cell of Origin is a difference. A formula that reads
+another formula column is judged on Origin's values for it. `Import` (`import_origin`) runs
+this first; with no `Stale` column the import runs at once, otherwise the window `Formulas
+with Different Values` opens (`state/origin_formulas.rs`, `origin_formulas_open`; the chooser
+is hidden meanwhile, so one modal at a time): one row per stale column, all unticked, Check
+All / Check None / Import / Cancel (`SetOriginFormulaTick`, `CheckAllOriginFormulas`,
+`ImportOriginFormulas`, `CancelOriginFormulas`). Cancel creates nothing and leaves the chooser
+open. The answers are kept in `OriginChooser::accepted_formulas` and in the copy that Reopen
+Last Import restores. `run_origin_import` then creates the books, sheets and columns with
+Origin's values, and sets each formula with one `SetColumnMeta` on the real `NodeId`s of
+`take_origin_created_columns`, **inside the same `MacroKind::Import` group** (one undo removes
+all, redo restores all). A column whose formula is not set (untranslatable, an input not
+imported, refused, or values kept by the user) keeps Origin's values and gets
+`Origin formula: <text>` appended to its Comments (`; ` after an existing comment); a formula
+that is set leaves no note. The status line says how many formulas were set and kept
+(`status-import-origin-formulas`). The chooser also keeps one orange line above its footer (`origin_import_reads_warning`: count, at most three names then « and N more »; resolved once per change of the ticks, cached in `OriginFile::reads_warning` and cleared by `write_column`, the only writer of the ticks). It warns in orange under a ticked column whose
+formula reads an unticked one (`OriginColumnView::reads_unticked`, resolved once per file in
+`OriginFile::formula_reads`; nothing is ticked for the user unless the box below is on).
+**Include the columns formulas read (#556, #557).** `OriginChooser::include_reads` (off at every
+opening, kept in `last_origin_import`, so Reopen Last Import restores it; `Action::SetOriginIncludeReads`)
+is an overlay, never written into the ticks: `OriginFile::derived` (a `OnceLock` cleared by
+`write_column` and by the box) walks `formula_reads` from the ticked formula columns, transitively
+and with each column ticked once (a loop ends), and gives `effective`, the ticks Import uses. Every
+reader of the ticks goes through it: the tree (`column_ticked`), the summary, the Import blocker, the
+orange lines, and `OriginSource::selection` (hence the plan, shared X, side by side, the verdicts and
+the window `Formulas with Different Values`). The reads are those of `resolve_origin_formula` (the X
+of an `at`/`table` form is one of its references); no second resolution. A column that only the
+overlay ticked is `OriginColumnView::read_by` (the short name of the first formula column that reads
+it): its box is greyed out with `disabled-origin-column-read-by-formula` and neither the box nor the
+name answers a click (a sheet or workbook box whose columns are all in that case is greyed too,
+`locked`). Turning the box off drops exactly what only the overlay added; a column ticked by hand or
+through a graph stays, and unticking it while a ticked formula still reads it leaves it ticked (then
+locked). Check None clears the ticks, not the box. The box is greyed out with
+`disabled-origin-include-reads-no-formula` when no file has a formula that reads another column. The
+CLI and `pyst` are unchanged. The CLI and `pyst.import_file` go
+through `plan_origin_import_formulas`: a formula is set only when it gives Origin's values, the
+others keep their values and the note, and they never ask.
 
 Interface (#537): the two windows paint their `To:` and `Folder:` menus with one
 module, `stokesforge-app/src/app/import_to.rs`

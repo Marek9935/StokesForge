@@ -370,6 +370,74 @@ fn python_import_reads_origin_workbooks_in_one_gesture() {
     assert!(!after.history.in_macro);
 }
 
+/// #556: `pyst.import_file` of an Origin project sets the formula that gives
+/// Origin's values, keeps the values of the others with a note in their
+/// Comments, and never asks. Everything is one `Import` gesture: one undo gives
+/// back the project as it was.
+#[test]
+fn python_import_sets_origin_formulas_in_the_one_gesture() {
+    use stokesforge_import::origin::synthetic::{self, Column as OColumn};
+    use stokesforge_import::origin::OriginDesignation;
+    let bench = bench();
+    let dir = tempfile::tempdir().unwrap();
+    let column = |name: &str, values: &[f64], formula: Option<&str>| {
+        let mut column = OColumn::numbers(name, OriginDesignation::Y, values);
+        column.formula = formula.map(str::to_string);
+        column
+    };
+    let bytes = synthetic::write_project(&synthetic::Project {
+        books: vec![synthetic::Book {
+            short_name: "F1".into(),
+            long_name: "Formulas".into(),
+            sheets: vec![synthetic::Sheet {
+                name: "Data".into(),
+                columns: vec![
+                    column("B", &[10.0, 20.0], None),
+                    column("C", &[20.0, 40.0], Some("col(B)*2")),
+                    column("D", &[1.5, 1.5], Some("col(B)*3")),
+                ],
+            }],
+            horiba_xml: None,
+        }],
+        ..synthetic::Project::default()
+    });
+    let path = dir.path().join("formulas.opj");
+    std::fs::write(&path, &bytes).unwrap();
+    let before = bench.session.snapshot().unwrap();
+    execute(
+        &bench,
+        &format!(
+            "sheets = pyst.import_file({:?})\nassert len(sheets) == 1\n",
+            path.to_str().unwrap()
+        ),
+    );
+    let imported = bench.session.snapshot().unwrap();
+    let book = *imported
+        .tree
+        .node(imported.tree.root())
+        .unwrap()
+        .children()
+        .last()
+        .unwrap();
+    let sheet = imported.tree.node(book).unwrap().children()[0];
+    let columns = imported.tree.node(sheet).unwrap().children().to_vec();
+    let meta = |index: usize| {
+        imported
+            .tree
+            .node(columns[index])
+            .unwrap()
+            .as_column()
+            .unwrap()
+            .meta()
+            .clone()
+    };
+    assert!(meta(1).formula.is_some(), "the matching formula is set");
+    assert!(meta(2).formula.is_none(), "the stale one keeps its values");
+    assert_eq!(meta(2).comment, "Origin formula: col(B)*3");
+    execute(&bench, "assert pyst.undo()\n");
+    assert_eq!(*bench.session.snapshot().unwrap().tree, *before.tree);
+}
+
 /// The `.opju` twin of the test above: same project written as `.opju`,
 /// Data sheets only, one undo; a truncated file changes nothing.
 #[test]

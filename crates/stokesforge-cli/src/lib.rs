@@ -213,16 +213,18 @@ fn import(args: &[String], out: &mut dyn Write) -> Result<(), String> {
         .find(|item| item.table.is_ok())
         .map_or(FilesLayout::SheetPerFile, |item| item.recipe.files_layout);
     let plans = stokesforge_importer::plan_import(&items, layout);
+    // The formulas of an Origin project are set when they give Origin's values;
+    // any other formula column keeps its values (#556). Never a question.
     let origin_plans: Vec<_> = origin_files
         .iter()
         .map(|(_, project)| {
-            stokesforge_importer::plan_origin_import(
+            stokesforge_importer::plan_origin_import_formulas(
                 project,
                 &stokesforge_importer::default_origin_selection(project),
             )
         })
         .collect();
-    if plans.is_empty() && origin_plans.iter().all(Vec::is_empty) {
+    if plans.is_empty() && origin_plans.iter().all(|plan| plan.plan.books.is_empty()) {
         let reasons: Vec<&str> = failures.iter().map(String::as_str).collect();
         return Err(format!("nothing to import: {}", reasons.join(" ; ")));
     }
@@ -263,25 +265,31 @@ fn import(args: &[String], out: &mut dyn Write) -> Result<(), String> {
         )
         .map_err(|err| err.to_string())?;
     }
-    for ((_, origin), book_plans) in origin_files.iter().zip(&origin_plans) {
-        for book_plan in book_plans {
+    for ((_, origin), import) in origin_files.iter().zip(&origin_plans) {
+        let mut located = std::collections::BTreeMap::new();
+        for book_plan in &import.plan.books {
             // Like the sheets: a name the project refuses keeps an automatic one.
             let book = project
                 .add_empty_workbook(root, Some(&book_plan.name))
                 .or_else(|_| project.add_empty_workbook(root, None))
                 .map_err(|err| err.to_string())?;
-            let origin_book = &origin.books[book_plan.book];
             for sheet_plan in &book_plan.sheets {
-                let origin_sheet = &origin_book.sheets[sheet_plan.sheet];
                 let sheet = project
                     .add_worksheet(book, Some(&sheet_plan.name))
                     .or_else(|_| project.add_worksheet(book, None))
                     .map_err(|err| err.to_string())?;
-                for column in &origin_sheet.columns {
-                    let column = stokesforge_importer::make_origin_column(origin_book, column);
-                    project
+                for planned in &sheet_plan.columns {
+                    let Some(column) = stokesforge_importer::make_origin_import_column(
+                        origin,
+                        planned,
+                        &import.decision,
+                    ) else {
+                        continue;
+                    };
+                    let id = project
                         .add_column(sheet, None, None, column)
                         .map_err(|err| err.to_string())?;
+                    located.insert(planned.key(), (id, sheet));
                     column_count += 1;
                 }
                 sheet_count += 1;
@@ -290,10 +298,48 @@ fn import(args: &[String], out: &mut dyn Write) -> Result<(), String> {
                     "worksheet \"{}\" of Origin book \"{}\": {}",
                     sheet_plan.name,
                     book_plan.name,
-                    counted(origin_sheet.columns.len(), "column")
+                    counted(sheet_plan.columns.len(), "column")
                 )
                 .map_err(|err| err.to_string())?;
             }
+        }
+        let mut set = 0usize;
+        for key in &import.decision.set {
+            let Some(stokesforge_importer::PlannedFormula {
+                verdict: stokesforge_importer::FormulaVerdict::Translated(pieces),
+                ..
+            }) = import.formulas.get(key)
+            else {
+                continue;
+            };
+            let Some(&(column, sheet)) = located.get(key) else {
+                continue;
+            };
+            let locate = |k: stokesforge_importer::OriginColumnKey| located.get(&k).copied();
+            let Some(formula) = stokesforge_importer::build_column_formula(pieces, sheet, &locate)
+            else {
+                continue;
+            };
+            let mut meta = project
+                .tree()
+                .node(column)
+                .and_then(|node| node.as_column())
+                .map(|column| column.meta().clone())
+                .unwrap_or_default();
+            meta.formula = Some(formula);
+            project
+                .set_column_meta(column, meta)
+                .map_err(|err| err.to_string())?;
+            set += 1;
+        }
+        if set + import.decision.kept.len() > 0 {
+            writeln!(
+                out,
+                "formulas: {} set, {} kept as values",
+                set,
+                import.decision.kept.len()
+            )
+            .map_err(|err| err.to_string())?;
         }
     }
     for failure in &failures {

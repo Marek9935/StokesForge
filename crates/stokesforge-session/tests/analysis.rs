@@ -1235,11 +1235,15 @@ fn loading_relays_the_dropped_correction_traces() {
 /// sheet (#403): the calculation reads F, F reads the calculation's output in
 /// the other sheet. It would never stabilize: the calculation is flagged
 /// `Manual` and left as it is, in both modes. Mutant: the formula edges of
-/// `calculations_in_a_cycle` keep to the own sheet -> no loop is seen.
+/// `calculations_in_a_cycle` keep to the own sheet -> no loop is seen. Both
+/// with a column function (`max(Sheet1!B)`) and row by row (`Sheet1!B + 1`, #556).
 #[test]
 fn a_loop_through_a_calculation_and_a_remote_formula_waits_for_a_gesture() {
     use stokesforge_core::{ColumnFormula, FormulaPart, RemoteRef};
-    for mode in modes() {
+    for (mode, (head, tail)) in modes()
+        .into_iter()
+        .flat_map(|mode| [(mode, ("max(", ")")), (mode, ("", " + 1"))])
+    {
         let (_session, handle, m) = start(mode);
         let book = handle
             .snapshot()
@@ -1286,7 +1290,7 @@ fn a_loop_through_a_calculation_and_a_remote_formula_waits_for_a_gesture() {
             .snapshot()
             .unwrap()
             .tree
-            .formula_from_letters(f, "max(Sheet1!B)")
+            .formula_from_letters(f, &format!("{head}Sheet1!B{tail}"))
             .unwrap();
         handle
             .execute(Command::SetColumnMeta {
@@ -1326,9 +1330,9 @@ fn a_loop_through_a_calculation_and_a_remote_formula_waits_for_a_gesture() {
             .unwrap();
         let reads_output = ColumnFormula::from_parts_with_remote(
             vec![
-                FormulaPart::Text("max(".to_string()),
+                FormulaPart::Text(head.to_string()),
                 FormulaPart::Column(output),
-                FormulaPart::Text(")".to_string()),
+                FormulaPart::Text(tail.to_string()),
             ],
             std::collections::BTreeMap::from([(
                 1,
@@ -1351,7 +1355,7 @@ fn a_loop_through_a_calculation_and_a_remote_formula_waits_for_a_gesture() {
             .snapshot()
             .unwrap()
             .tree
-            .formula_from_letters(f, "max(Sheet1!C)")
+            .formula_from_letters(f, &format!("{head}Sheet1!C{tail}"))
             .unwrap();
         handle
             .execute(Command::SetColumnMeta {
@@ -1366,8 +1370,109 @@ fn a_loop_through_a_calculation_and_a_remote_formula_waits_for_a_gesture() {
         assert_eq!(
             snapshot.tree.calculation(calc).unwrap().stale,
             Some(Staleness::Manual),
-            "{mode:?}"
+            "{mode:?} {head}{tail}"
         );
+    }
+}
+
+/// A calculation fed by a formula column that reads another sheet row by row
+/// (#556): editing the other sheet changes the formula column, and the
+/// calculation follows (automatic) or is marked out of date (manual). The same
+/// mechanism covers an old file whose kept `Sheet3!B + 1` starts computing at
+/// the first pass after load: the column's version moves, the calculation is
+/// never left wrong without a mark. Witness: leave the remote version out of
+/// the formula's fingerprint -> neither follows.
+#[test]
+fn a_calculation_fed_by_a_row_wise_remote_formula_follows_or_is_marked() {
+    for mode in modes() {
+        for auto in [true, false] {
+            let (_session, handle, m) = start(mode);
+            let book = handle
+                .snapshot()
+                .unwrap()
+                .tree
+                .parent(m.sheet)
+                .unwrap()
+                .unwrap();
+            handle
+                .execute(Command::AddWorksheet {
+                    book,
+                    name: Some("Sheet3".to_string()),
+                })
+                .unwrap();
+            let sheet3 = *handle
+                .snapshot()
+                .unwrap()
+                .tree
+                .children(book)
+                .unwrap()
+                .last()
+                .unwrap();
+            let last_of = |sheet: NodeId| {
+                *handle
+                    .snapshot()
+                    .unwrap()
+                    .tree
+                    .children(sheet)
+                    .unwrap()
+                    .last()
+                    .unwrap()
+            };
+            handle
+                .execute(Command::AddColumn {
+                    sheet: sheet3,
+                    index: None,
+                    name: Some("B".to_string()),
+                    column: Column::from_f64(&[1.0, 2.0, 3.0, 4.0]),
+                })
+                .unwrap();
+            let remote_b = last_of(sheet3);
+            handle
+                .execute(Command::AddColumn {
+                    sheet: m.sheet,
+                    index: None,
+                    name: Some("F".to_string()),
+                    column: Column::from_f64(&[]),
+                })
+                .unwrap();
+            let f = last_of(m.sheet);
+            let formula = handle
+                .snapshot()
+                .unwrap()
+                .tree
+                .formula_from_letters(f, "Sheet3!A * 2")
+                .unwrap();
+            handle
+                .execute(Command::SetColumnMeta {
+                    column: f,
+                    meta: ColumnMeta {
+                        formula: Some(formula),
+                        ..Default::default()
+                    },
+                })
+                .unwrap();
+            let calc = add_fit_on(&handle, m.x, f, auto);
+            let before = slope(&handle.snapshot().unwrap(), calc);
+            assert!((before - 2.0).abs() < 1e-9, "{mode:?}: {before}");
+            handle
+                .execute(enter(remote_b, &[1.0, 4.0, 9.0, 16.0]))
+                .unwrap();
+            let after = handle.snapshot().unwrap();
+            if auto {
+                assert_eq!(after.tree.calculation(calc).unwrap().stale, None);
+                assert!(
+                    (slope(&after, calc) - 10.0).abs() < 1e-9,
+                    "{mode:?}: {}",
+                    slope(&after, calc)
+                );
+            } else {
+                assert_eq!(
+                    after.tree.calculation(calc).unwrap().stale,
+                    Some(Staleness::Manual),
+                    "{mode:?}"
+                );
+            }
+        }
     }
 }
 
@@ -1933,5 +2038,156 @@ fn retyping_the_same_values_in_an_input_leaves_a_calculation_as_it_was() {
             "{mode:?}"
         );
         assert!((slope(&waiting, id) - 10.0).abs() < 1e-9, "{mode:?}");
+    }
+}
+
+/// Load of a file written before #556 (#556): its sheet holds a kept
+/// `Sheet3!A + 1` with its column EMPTY, and calculations (one automatic, one
+/// manual) fed by that column. The load-time recalculation computes the column;
+/// the calculations must then be recomputed or marked out of date, never kept
+/// as saved without a mark. Witness: break the mark on load
+/// (`Recalculator::run_after_load` trusting a calculation whose input column
+/// changed content during the load pass).
+#[test]
+fn a_calculation_fed_by_a_kept_formula_that_computes_at_load_is_not_left_as_saved() {
+    use stokesforge_core::{ColumnFormula, FormulaPart, RemoteRef};
+    for mode in modes() {
+        // The project as an older version saved it.
+        let mut project = Project::new("Demo").unwrap();
+        let root = project.root();
+        let book = project.add_empty_workbook(root, Some("Book1")).unwrap();
+        let sheet = project.add_worksheet(book, Some("Sheet1")).unwrap();
+        let sheet3 = project.add_worksheet(book, Some("Sheet3")).unwrap();
+        let x = project
+            .add_column(
+                sheet,
+                None,
+                Some("X"),
+                Column::from_f64(&[1.0, 2.0, 3.0, 4.0]),
+            )
+            .unwrap();
+        let tmp = project
+            .add_column(
+                sheet,
+                None,
+                Some("T"),
+                Column::from_f64(&[2.0, 4.0, 6.0, 8.0]),
+            )
+            .unwrap();
+        let f = project
+            .add_column(sheet, None, Some("F"), Column::from_f64(&[]))
+            .unwrap();
+        let remote = project
+            .add_column(
+                sheet3,
+                None,
+                Some("A"),
+                Column::from_f64(&[10.0, 20.0, 30.0, 40.0]),
+            )
+            .unwrap();
+        let fit = fit_operation();
+        let mut ids = Vec::new();
+        for auto in [true, false] {
+            // Outputs as a fit of (X, T) gives them, stored for (X, F).
+            let on_t = vec![SeriesRef {
+                x: Some(x),
+                y: tmp,
+                sigma: None,
+            }];
+            let computed = compute(project.tree(), &fit, &on_t, None).unwrap();
+            let outputs = computed
+                .columns
+                .iter()
+                .map(|c| OutputDraft {
+                    series: c.series,
+                    key: c.key.clone(),
+                    index: c.index,
+                    meta: ColumnMeta::default(),
+                    data: c.data.clone(),
+                })
+                .collect();
+            let id = project
+                .add_calculation(CalculationDraft {
+                    operation: fit.clone(),
+                    series: vec![SeriesRef {
+                        x: Some(x),
+                        y: f,
+                        sigma: None,
+                    }],
+                    aux: None,
+                    outputs,
+                    results: computed.results,
+                    keep_results: true,
+                    auto_recalc: auto,
+                    low_r2_dialog: true,
+                })
+                .unwrap();
+            ids.push(id);
+        }
+        // The kept formula an older version stored, never computed.
+        project
+            .set_column_meta(
+                f,
+                ColumnMeta {
+                    formula: Some(ColumnFormula::from_parts_with_remote(
+                        vec![
+                            FormulaPart::Column(remote),
+                            FormulaPart::Text(" + 1".to_string()),
+                        ],
+                        std::collections::BTreeMap::from([(
+                            0,
+                            RemoteRef {
+                                sheet: sheet3,
+                                prefixed: true,
+                            },
+                        )]),
+                    )),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.stf");
+        stokesforge_persistence::save(&project, &path).unwrap();
+        let saved_slope: Vec<f64> = ids
+            .iter()
+            .map(|id| {
+                project.tree().calculation(*id).unwrap().results[0]
+                    .values
+                    .iter()
+                    .find(|v| v.key == "param.slope")
+                    .unwrap()
+                    .value
+            })
+            .collect();
+
+        // The load the application does.
+        let session =
+            Session::spawn_with_recalc(Project::new("Empty").unwrap(), None, mode).unwrap();
+        let handle = session.handle();
+        handle.load(&path).unwrap();
+        let loaded = handle.snapshot().unwrap();
+        let values: Vec<f64> = loaded
+            .tree
+            .node(f)
+            .and_then(|n| n.as_column())
+            .unwrap()
+            .numeric_view()
+            .map(|v| v.to_vec())
+            .unwrap_or_default();
+        assert_eq!(
+            values,
+            vec![11.0, 21.0, 31.0, 41.0],
+            "{mode:?}: computed at load"
+        );
+        for (id, saved) in ids.iter().zip(saved_slope) {
+            let calc = loaded.tree.calculation(*id).unwrap();
+            let recomputed = (slope(&loaded, *id) - 10.0).abs() < 1e-9;
+            assert!(
+                recomputed || calc.stale.is_some(),
+                "{mode:?}: auto={} left as saved (slope {saved}) without a mark",
+                calc.auto_recalc
+            );
+        }
     }
 }

@@ -128,16 +128,19 @@ pub use import_template::{
 };
 pub use import_tocheck::{ShownFileStatus, ToCheckPoint, ToCheckSource};
 pub mod open_dialog;
+mod origin_formulas;
 mod origin_import;
 mod transpose;
 pub use analysis::{CalculationDelete, StaleExport};
 pub use autosave::{AutosaveJob, Garbage, RecoveryRow, ServerTick, AUTOSAVE_RETRY};
 pub use column_use::FullColumnsCopy;
 pub use import_apply::ImportRun;
+pub use origin_formulas::OriginFormulaRow;
 pub use origin_import::{
-    OriginBookView, OriginColumnView, OriginFileView, OriginSheetView, OriginTick,
+    OriginBookView, OriginColumnView, OriginFileView, OriginGraphView, OriginSheetView, OriginShow,
+    OriginTick,
 };
-pub use stokesforge_importer::OriginWhere;
+pub use stokesforge_importer::{OriginColumnKey, OriginWhere};
 
 /// How long a command waits for the formula recalculation it started to
 /// finish before handing control back to the interface (#239): a recalculation
@@ -761,7 +764,22 @@ pub enum Action {
         /// The new state of its sheets.
         ticked: bool,
     },
-    /// Origin chooser: ticks every sheet that has columns.
+    /// Origin chooser (#557): ticks a graph that is not wholly ticked (its
+    /// plotted columns are added), unticks one that is (the columns another
+    /// ticked graph uses and those ticked by hand stay).
+    ToggleOriginGraph {
+        /// Rank of the file in the chooser.
+        file: usize,
+        /// Rank of the graph in the file.
+        graph: usize,
+    },
+    /// Origin chooser (#557): what the list shows; it hides, never unticks.
+    SetOriginShow(OriginShow),
+    /// Origin chooser (#556, #557): "Include the columns formulas read". On,
+    /// the columns read by the formulas of the checked columns (transitively)
+    /// are imported too; off, only what was checked by hand or by a graph.
+    SetOriginIncludeReads(bool),
+    /// Origin chooser: ticks every sheet that has columns, and every graph.
     CheckAllOriginSheets,
     /// Origin chooser: unticks every sheet.
     CheckNoOriginSheets,
@@ -770,6 +788,18 @@ pub enum Action {
     ImportOrigin,
     /// Origin chooser: closes it without importing anything.
     CancelOriginImport,
+    /// Window `Formulas with Different Values` (#556): ticks or unticks the
+    /// formula of row `index`.
+    SetOriginFormulaTick {
+        index: usize,
+        ticked: bool,
+    },
+    /// The same window: ticks or unticks every row.
+    CheckAllOriginFormulas(bool),
+    /// The same window, Import: runs the import with the ticked formulas.
+    ImportOriginFormulas,
+    /// The same window, Cancel: nothing is imported, the chooser stays open.
+    CancelOriginFormulas,
     /// Refreshes the imported columns of `sheet` from their source files
     /// (reread with the stored recipe), **in place**: the columns keep
     /// their identity, so the graphs that plot them stay valid.
@@ -3985,6 +4015,9 @@ pub struct AppState {
     /// `take_created_books`, in order (#537): imports find their workbooks
     /// here, never by counting the children of a folder.
     created_books: Vec<NodeId>,
+    /// Columns the last Origin import created, by Origin column (#556); read
+    /// with `take_origin_created_columns`.
+    origin_created_columns: std::collections::BTreeMap<OriginColumnKey, Option<NodeId>>,
     /// Start of a formula recalculation the interface did not wait for (#239);
     /// `None` when none is running. As long as it is set, the snapshot is
     /// not refreshed (the actor would answer only at the end) and the status bar
@@ -4014,6 +4047,9 @@ pub struct AppState {
     /// The Origin chooser (#490), when open. It is painted only while the
     /// import wizard is closed ([`AppState::origin_import_open`]).
     origin_import: Option<origin_import::OriginChooser>,
+    /// The window `Formulas with Different Values` (#556), when open over the
+    /// chooser.
+    origin_formulas: Option<origin_formulas::OriginFormulaForm>,
     /// Files imported successfully, to be added to the recent files by the
     /// window layer ([`AppState::take_imported_paths`]).
     recent_to_record: Vec<PathBuf>,
@@ -4205,6 +4241,7 @@ impl AppState {
             waker: None,
             books_to_open: Vec::new(),
             created_books: Vec::new(),
+            origin_created_columns: std::collections::BTreeMap::new(),
             recalc_since: None,
             garbage: autosave::Garbage::default(),
             defer_garbage: false,
@@ -4215,6 +4252,7 @@ impl AppState {
             last_import: None,
             last_origin_import: None,
             origin_import: None,
+            origin_formulas: None,
             recent_to_record: Vec::new(),
             script_source: String::new(),
             last_script_file: None,
@@ -7129,10 +7167,19 @@ impl AppState {
             Action::SetOriginBookTicked { file, book, ticked } => {
                 self.set_origin_book_ticked(file, book, ticked);
             }
+            Action::ToggleOriginGraph { file, graph } => self.toggle_origin_graph(file, graph),
+            Action::SetOriginShow(show) => self.set_origin_show(show),
+            Action::SetOriginIncludeReads(on) => self.set_origin_include_reads(on),
             Action::CheckAllOriginSheets => self.check_all_origin_sheets(true),
             Action::CheckNoOriginSheets => self.check_all_origin_sheets(false),
             Action::ImportOrigin => self.import_origin(),
             Action::CancelOriginImport => self.origin_import = None,
+            Action::SetOriginFormulaTick { index, ticked } => {
+                self.set_origin_formula_tick(index, ticked);
+            }
+            Action::CheckAllOriginFormulas(ticked) => self.check_all_origin_formulas(ticked),
+            Action::ImportOriginFormulas => self.confirm_origin_formulas(),
+            Action::CancelOriginFormulas => self.cancel_origin_formulas(),
             Action::RefreshFromSource { sheet } => self.refresh_from_source(sheet),
             Action::ViewColumnMetadata { column } => self.metadata_view = Some(column),
             Action::CloseColumnMetadata => self.metadata_view = None,
@@ -12906,7 +12953,21 @@ impl AppState {
                 }
             }
             ImportMode::AddRows => {
-                let start = self.row_count(sheet);
+                // After the last **ordinary** row: a formula column that reads
+                // a longer column of another sheet (#556) may reach below it,
+                // and its tail is not data to append to.
+                let tree = self.tree();
+                let start = tree
+                    .children(sheet)
+                    .map(|ids| {
+                        ids.iter()
+                            .filter_map(|id| tree.node(*id).and_then(|node| node.as_column()))
+                            .filter(|column| column.meta().formula.is_none())
+                            .map(Column::len)
+                            .max()
+                            .unwrap_or(0)
+                    })
+                    .unwrap_or(0);
                 let existing: Vec<NodeId> = self
                     .visible_columns(sheet)
                     .into_iter()

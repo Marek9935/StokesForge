@@ -11596,6 +11596,58 @@ fn import_mode_add_rows_extends_the_existing_columns() {
     assert_eq!(state.row_count(sheet), rows_before);
 }
 
+/// Add rows starts after the last ordinary row, not below the tail of a formula
+/// column that reads a longer column of another sheet (#556). Witness: starting
+/// at `row_count` writes the rows below the tail.
+#[test]
+fn import_mode_add_rows_ignores_the_tail_of_a_row_wise_remote_formula() {
+    use stokesforge_import::{FilesLayout, ImportMode};
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let mut project = Project::new("Demo").unwrap();
+    let root = project.root();
+    let book = project.add_empty_workbook(root, Some("Book1")).unwrap();
+    let sheet = project.add_worksheet(book, Some("Sheet1")).unwrap();
+    let long = project.add_worksheet(book, Some("Long")).unwrap();
+    let a = project
+        .add_column(sheet, None, Some("A"), Column::from_f64(&[1.0, 2.0, 3.0]))
+        .unwrap();
+    let f = project
+        .add_column(sheet, None, Some("F"), Column::from_f64(&[]))
+        .unwrap();
+    project
+        .add_column(long, None, Some("A"), Column::from_f64(&[1.0; 8]))
+        .unwrap();
+    let formula = project
+        .tree()
+        .formula_from_letters(f, "Long!A + 1")
+        .unwrap();
+    project
+        .set_column_meta(
+            f,
+            ColumnMeta {
+                formula: Some(formula),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let (_session, mut state) = start(project, &dir.path().join("projet.stf"));
+    // Any command runs the pass: the formula column now has its eight rows.
+    state.dispatch(Action::AddWorksheet { book });
+    assert_eq!(state.row_count(sheet), 8);
+    let file = write_csv(dir.path(), "suite.csv", "100\n101\n");
+    import_with(
+        &mut state,
+        book,
+        ImportMode::AddRows,
+        FilesLayout::SheetPerFile,
+        vec![file],
+    );
+    let values = column_values(&state, sheet, 0);
+    assert_eq!(values[..5], [1.0, 2.0, 3.0, 100.0, 101.0]);
+    assert!(state.tree().node(a).is_some());
+}
+
 /// Several files, a single sheet: side by side (X Y X Y), or with the X
 /// of the first file shared.
 #[test]
@@ -18241,6 +18293,7 @@ fn an_untouched_entry_on_a_saved_project_does_not_stop_quit() {
 mod origin_import {
     use super::*;
     use stokesforge_app_state::state::open_dialog::OpenDialog;
+    use stokesforge_app_state::state::OriginShow;
     use stokesforge_app_state::tr;
     use stokesforge_import::origin::synthetic;
     use stokesforge_import::origin::OriginDesignation;
@@ -18311,12 +18364,47 @@ mod origin_import {
         path
     }
 
-    fn drop_paths(state: &mut AppState, paths: Vec<PathBuf>) {
+    /// Drops files on the window; the chooser opens with nothing ticked
+    /// (#557).
+    fn drop_paths_raw(state: &mut AppState, paths: Vec<PathBuf>) {
         state.dispatch(Action::DropFiles {
             paths,
             target_book: None,
         });
         wait_import(state);
+    }
+
+    /// Drops files, then ticks what the chooser of #490 ticked by itself: the
+    /// `Data` sheet of each book, else every sheet with columns. Only files
+    /// that have nothing ticked get it.
+    fn drop_paths(state: &mut AppState, paths: Vec<PathBuf>) {
+        drop_paths_raw(state, paths);
+        let files = state.origin_import_files();
+        for (file_index, file) in files.iter().enumerate() {
+            if file.books.iter().flat_map(|b| &b.sheets).any(|s| s.ticked) {
+                continue;
+            }
+            for (book_index, book) in file.books.iter().enumerate() {
+                let has_data = book
+                    .sheets
+                    .iter()
+                    .any(|sheet| sheet.name.eq_ignore_ascii_case("Data"));
+                for (sheet_index, sheet) in book.sheets.iter().enumerate() {
+                    let ticked = if has_data {
+                        sheet.name.eq_ignore_ascii_case("Data")
+                    } else {
+                        sheet.columns > 0
+                    };
+                    if ticked {
+                        state.dispatch(Action::ToggleOriginSheet {
+                            file: file_index,
+                            book: book_index,
+                            sheet: sheet_index,
+                        });
+                    }
+                }
+            }
+        }
     }
 
     fn root_names(state: &AppState) -> Vec<String> {
@@ -19506,6 +19594,100 @@ mod origin_import {
         state.dispatch(Action::Undo);
     }
 
+    /// Value of the first cell of a created column.
+    fn first_cell(state: &AppState, id: Option<NodeId>) -> f64 {
+        cell_f64(state, id.expect("a created column"), 0)
+    }
+
+    #[test]
+    fn created_columns_are_reported_per_origin_column_even_with_equal_sheet_names() {
+        use OriginDesignation::{X, Y};
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let opj = dir.path().join("same.opj");
+        // Two sheets whose names collide (case aside): the second one is
+        // renamed by the model, so a lookup by name cannot find it.
+        write_opj(
+            &opj,
+            vec![book(
+                "A",
+                "Same",
+                vec![
+                    sheet(
+                        "Data",
+                        vec![column("X", X, &[11.0]), column("Y", Y, &[12.0])],
+                    ),
+                    sheet(
+                        "data",
+                        vec![column("X", X, &[21.0]), column("Y", Y, &[22.0])],
+                    ),
+                ],
+            )],
+        );
+        drop_paths(&mut state, vec![opj]);
+        state.dispatch(Action::CheckAllOriginSheets);
+        state.dispatch(Action::ImportOrigin);
+
+        let ids = state.take_origin_created_columns();
+        assert_eq!(ids.len(), 4);
+        assert_eq!(first_cell(&state, ids[&(0, 0, 0, 0)]), 11.0);
+        assert_eq!(first_cell(&state, ids[&(0, 0, 0, 1)]), 12.0);
+        assert_eq!(first_cell(&state, ids[&(0, 0, 1, 0)]), 21.0);
+        assert_eq!(first_cell(&state, ids[&(0, 0, 1, 1)]), 22.0);
+        assert!(state.take_origin_created_columns().is_empty(), "taken once");
+    }
+
+    #[test]
+    fn created_columns_of_two_files_do_not_share_keys() {
+        use OriginDesignation::{X, Y};
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let one = dir.path().join("one.opj");
+        let two = dir.path().join("two.opj");
+        for (path, base) in [(&one, 1.0), (&two, 2.0)] {
+            write_opj(
+                path,
+                vec![book(
+                    "A",
+                    "Same",
+                    vec![sheet(
+                        "Data",
+                        vec![column("X", X, &[base]), column("Y", Y, &[base + 0.5])],
+                    )],
+                )],
+            );
+        }
+        drop_paths(&mut state, vec![one, two]);
+        state.dispatch(Action::CheckAllOriginSheets);
+        state.dispatch(Action::SetOriginWhere(OriginWhere::NewWorkbook));
+        state.dispatch(Action::SetOriginLayout(FilesLayout::SideBySide));
+        state.dispatch(Action::ImportOrigin);
+
+        let ids = state.take_origin_created_columns();
+        assert_eq!(ids.len(), 4, "{ids:?}");
+        for file in 0..2 {
+            let base = 1.0 + file as f64;
+            assert_eq!(first_cell(&state, ids[&(file, 0, 0, 0)]), base);
+            assert_eq!(first_cell(&state, ids[&(file, 0, 0, 1)]), base + 0.5);
+        }
+    }
+
+    #[test]
+    fn a_column_the_import_skips_in_the_middle_does_not_shift_the_next_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start_demo(dir.path());
+        let root = state.tree().root();
+
+        let ids = state.import_sheet_columns_for_test(root, vec![Some(1.0), None, Some(3.0)]);
+
+        assert_eq!(ids.len(), 3);
+        assert_eq!(ids[1], None);
+        assert_eq!(first_cell(&state, ids[0]), 1.0);
+        assert_eq!(first_cell(&state, ids[2]), 3.0);
+    }
+
     #[test]
     fn the_default_origin_import_is_unchanged_and_marks_no_raw_data_sheet() {
         let _recipes = isolate_recipe_store();
@@ -19836,6 +20018,310 @@ mod origin_import {
             tr!("disabled-no-source-file"),
             "No column of this sheet can be read again from its file"
         );
+    }
+
+    // ---- Graphs (#557) ------------------------------------------------------
+
+    /// `Book1`: sheet `S1` = X, Y1, E1 (Y error), Y2 (ranks 1 to 4), sheet `S2`
+    /// = X2, Y3 (5, 6); `Kin`: `T`, `S` (7, 8). Graphs: `G1` (Y1 vs X, its error
+    /// column stands next to it), `G2` (Y2 vs X, Y3 vs X2: shares the X of
+    /// G1), `Empty` (a layer with no curve), `Lost` (a curve that resolves to
+    /// nothing), `Half` (S vs a missing X), `G1b` (the same curve as G1).
+    fn graph_project() -> synthetic::Project {
+        use OriginDesignation::{YError, X, Y};
+        let window = |short: &str, curves: Vec<synthetic::GraphCurve>| synthetic::GraphWindow {
+            short_name: short.into(),
+            long_name: format!("Graph {short}"),
+            layers: vec![synthetic::GraphLayer {
+                name: "Layer1".into(),
+                curves,
+            }],
+        };
+        let v = [1.0, 2.0];
+        synthetic::Project {
+            books: vec![
+                book(
+                    "A",
+                    "Book1",
+                    vec![
+                        sheet(
+                            "S1",
+                            vec![
+                                column("X", X, &v),
+                                column("Y1", Y, &v),
+                                column("E1", YError, &v),
+                                column("Y2", Y, &v),
+                            ],
+                        ),
+                        sheet("S2", vec![column("X2", X, &v), column("Y3", Y, &v)]),
+                    ],
+                ),
+                book(
+                    "B",
+                    "Kin",
+                    vec![sheet(
+                        "Sheet1",
+                        vec![column("T", X, &v), column("S", Y, &v)],
+                    )],
+                ),
+            ],
+            graph_windows: vec![
+                window("G1", vec![synthetic::GraphCurve::new(2, 1)]),
+                window(
+                    "G2",
+                    vec![
+                        synthetic::GraphCurve::new(4, 1),
+                        synthetic::GraphCurve::new(6, 5),
+                    ],
+                ),
+                window("Empty", vec![]),
+                window("Lost", vec![synthetic::GraphCurve::new(99, 98)]),
+                window("Half", vec![synthetic::GraphCurve::new(8, 99)]),
+                window("G1b", vec![synthetic::GraphCurve::new(2, 1)]),
+            ],
+            ..synthetic::Project::default()
+        }
+    }
+
+    fn open_graphs(dir: &Path) -> (stokesforge_session::Session, AppState) {
+        let (session, mut state) = start_demo(dir);
+        let path = dir.join("graphs.opj");
+        std::fs::write(&path, synthetic::write_project(&graph_project())).unwrap();
+        drop_paths_raw(&mut state, vec![path]);
+        (session, state)
+    }
+
+    /// Every column tick of the file, sheet by sheet: S1, S2, Sheet1.
+    fn all_column_ticks(state: &AppState) -> Vec<Vec<bool>> {
+        state.origin_import_files()[0]
+            .books
+            .iter()
+            .flat_map(|b| &b.sheets)
+            .map(|s| s.column_list.iter().map(|c| c.ticked).collect())
+            .collect()
+    }
+
+    fn toggle_graph(state: &mut AppState, graph: usize) {
+        state.dispatch(Action::ToggleOriginGraph { file: 0, graph });
+    }
+
+    fn graph_tick(state: &AppState, graph: usize) -> OriginTick {
+        state.origin_import_files()[0].graphs[graph].tick
+    }
+
+    #[test]
+    fn nothing_is_ticked_at_opening_and_import_is_blocked() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, state) = open_graphs(dir.path());
+        assert!(all_column_ticks(&state).iter().flatten().all(|t| !t));
+        assert_eq!(
+            state.origin_import_blocker(),
+            Some(tr!("disabled-origin-import-nothing-ticked"))
+        );
+        // A file with no graph and a `Data` sheet: nothing either.
+        let (_session, mut state) = start_demo(dir.path());
+        let opj = standard_opj(dir.path(), "kinetics.opj");
+        drop_paths_raw(&mut state, vec![opj]);
+        assert!(ticks(&state).iter().flatten().flatten().all(|t| !t));
+        assert!(state.origin_import_blocker().is_some());
+    }
+
+    #[test]
+    fn ticking_a_graph_ticks_its_columns_and_the_error_columns_next_to_them() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = open_graphs(dir.path());
+        toggle_graph(&mut state, 0);
+        // X, Y1 and E1 (next to Y1), not Y2, nothing of the other sheets.
+        assert_eq!(
+            all_column_ticks(&state),
+            vec![
+                vec![true, true, true, false],
+                vec![false, false],
+                vec![false, false]
+            ]
+        );
+        assert_eq!(graph_tick(&state, 0), OriginTick::All);
+        assert_eq!(
+            graph_tick(&state, 1),
+            OriginTick::None,
+            "G2 shares the X but is not picked"
+        );
+        assert_eq!(state.origin_import_blocker(), None);
+        // The columns are shared with the books.
+        assert_eq!(
+            state.origin_import_files()[0].books[0].sheets[0].tick,
+            OriginTick::Some
+        );
+    }
+
+    #[test]
+    fn a_column_shared_by_two_graphs_stays_ticked_when_one_is_unticked() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = open_graphs(dir.path());
+        toggle_graph(&mut state, 0);
+        toggle_graph(&mut state, 1);
+        toggle_graph(&mut state, 0);
+        // X is still used by G2; Y1 and E1 went away.
+        assert_eq!(
+            all_column_ticks(&state),
+            vec![
+                vec![true, false, false, true],
+                vec![true, true],
+                vec![false, false]
+            ]
+        );
+        toggle_graph(&mut state, 1);
+        assert!(all_column_ticks(&state).iter().flatten().all(|t| !t));
+    }
+
+    #[test]
+    fn a_graph_click_always_changes_its_box_and_touches_only_its_columns() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = open_graphs(dir.path());
+        let hand = |state: &mut AppState, column| {
+            state.dispatch(Action::ToggleOriginColumn {
+                file: 0,
+                book: 0,
+                sheet: 0,
+                column,
+            });
+        };
+        // Y1 (plotted by G1) and Y2 (plotted by no picked graph) by hand.
+        hand(&mut state, 1);
+        hand(&mut state, 3);
+        toggle_graph(&mut state, 0);
+        toggle_graph(&mut state, 0);
+        assert_eq!(
+            all_column_ticks(&state)[0],
+            vec![false, false, false, true],
+            "what G1 plots goes, a hand tick of another column stays"
+        );
+        // Not picked: the box is empty even when every column of G1 is ticked.
+        for column in 0..3 {
+            hand(&mut state, column);
+        }
+        assert_eq!(graph_tick(&state, 0), OriginTick::None);
+        toggle_graph(&mut state, 0);
+        assert_eq!(
+            graph_tick(&state, 0),
+            OriginTick::All,
+            "the click picked it"
+        );
+        // A picked graph whose column was unticked by hand shows "some"; a
+        // click ticks the missing column.
+        hand(&mut state, 1);
+        assert_eq!(graph_tick(&state, 0), OriginTick::Some);
+        toggle_graph(&mut state, 0);
+        assert_eq!(graph_tick(&state, 0), OriginTick::All);
+        assert!(all_column_ticks(&state)[0][1]);
+    }
+
+    #[test]
+    fn unpicking_one_of_two_identical_graphs_empties_its_box_and_keeps_the_columns() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = open_graphs(dir.path());
+        toggle_graph(&mut state, 0);
+        toggle_graph(&mut state, 5);
+        let ticked = all_column_ticks(&state);
+        toggle_graph(&mut state, 5);
+        // No dead click: the box of G1b changed, G1 keeps the columns.
+        assert_eq!(graph_tick(&state, 5), OriginTick::None);
+        assert_eq!(graph_tick(&state, 0), OriginTick::All);
+        assert_eq!(all_column_ticks(&state), ticked);
+    }
+
+    #[test]
+    fn a_graph_without_curve_is_greyed_and_an_unresolved_curve_is_ignored() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = open_graphs(dir.path());
+        let graphs = state.origin_import_files()[0].graphs.clone();
+        assert_eq!(
+            graphs[2].unavailable,
+            Some(tr!("disabled-origin-graph-no-curve"))
+        );
+        assert_eq!(
+            graphs[3].unavailable,
+            Some(tr!("disabled-origin-graph-unresolved"))
+        );
+        assert_eq!(graphs[0].unavailable, None);
+        assert_eq!(graphs[3].curves.len(), 0);
+        toggle_graph(&mut state, 2);
+        toggle_graph(&mut state, 3);
+        assert!(all_column_ticks(&state).iter().flatten().all(|t| !t));
+        // The curve of `Half` has a Y and no X: only its Y is ticked.
+        toggle_graph(&mut state, 4);
+        assert_eq!(all_column_ticks(&state)[2], vec![false, true]);
+        assert_eq!(graph_tick(&state, 4), OriginTick::All);
+        assert_eq!(graphs[0].curves, vec!["Y1 vs X · Book1 / S1".to_string()]);
+        assert_eq!(graphs[1].curves.len(), 2);
+    }
+
+    #[test]
+    fn the_show_buttons_hide_and_never_untick() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = open_graphs(dir.path());
+        assert_eq!(state.origin_import_show(), OriginShow::All);
+        toggle_graph(&mut state, 0);
+        let ticked = all_column_ticks(&state);
+        for show in [OriginShow::Graphs, OriginShow::Workbooks, OriginShow::All] {
+            state.dispatch(Action::SetOriginShow(show));
+            assert_eq!(state.origin_import_show(), show);
+            assert_eq!(all_column_ticks(&state), ticked);
+            assert_eq!(graph_tick(&state, 0), OriginTick::All);
+        }
+    }
+
+    #[test]
+    fn check_all_and_check_none_cover_the_graphs() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = open_graphs(dir.path());
+        state.dispatch(Action::CheckAllOriginSheets);
+        assert_eq!(graph_tick(&state, 0), OriginTick::All);
+        assert_eq!(graph_tick(&state, 1), OriginTick::All);
+        assert_eq!(graph_tick(&state, 2), OriginTick::None, "no curve");
+        assert_eq!(graph_tick(&state, 3), OriginTick::None, "unresolved");
+        // G1b plots the same columns: unpicking G1 leaves them, then G1b
+        // unticks what only it plots (G2 keeps the X).
+        toggle_graph(&mut state, 0);
+        assert_eq!(all_column_ticks(&state)[0], vec![true, true, true, true]);
+        toggle_graph(&mut state, 5);
+        assert_eq!(all_column_ticks(&state)[0], vec![true, false, false, true]);
+        state.dispatch(Action::CheckNoOriginSheets);
+        assert!(all_column_ticks(&state).iter().flatten().all(|t| !t));
+        assert_eq!(graph_tick(&state, 1), OriginTick::None);
+        // Check None picked nothing: ticking then unticking leaves nothing.
+        toggle_graph(&mut state, 0);
+        toggle_graph(&mut state, 0);
+        assert!(all_column_ticks(&state).iter().flatten().all(|t| !t));
+    }
+
+    #[test]
+    fn reopening_the_last_import_keeps_the_graph_picks() {
+        let _recipes = isolate_recipe_store();
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = open_graphs(dir.path());
+        toggle_graph(&mut state, 0);
+        toggle_graph(&mut state, 1);
+        state.dispatch(Action::SetOriginShow(OriginShow::Graphs));
+        let ticked = all_column_ticks(&state);
+        state.dispatch(Action::ImportOrigin);
+        state.dispatch(Action::ReopenLastImport);
+        assert!(state.origin_import_open());
+        assert_eq!(all_column_ticks(&state), ticked);
+        assert_eq!(graph_tick(&state, 0), OriginTick::All);
+        assert_eq!(graph_tick(&state, 1), OriginTick::All);
+        assert_eq!(state.origin_import_show(), OriginShow::All, "per opening");
+        // The picks came back too: unticking G1 keeps what G2 uses.
+        toggle_graph(&mut state, 0);
+        assert_eq!(all_column_ticks(&state)[0], vec![true, false, false, true]);
     }
 }
 

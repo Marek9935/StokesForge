@@ -32,6 +32,15 @@
 //!            block3 = legacy | blob
 //! ```
 //!
+//! Annotation header and formulas: in a sheet layer of a book, the header
+//! (after unpacking) holds at 0x46, 41 bytes, a name; block 1 holds a
+//! NUL-terminated text. When the name is the short name of a column of that
+//! sheet the text is the formula of the column (`window::formula_text`
+//! refuses blank, over-long and control-character texts; see `mod.rs`).
+//! Block 1 is read in both forms. A graph layer has no annotation of
+//! interest: its curve records carry at header offsets 0x04 and 0x23 the
+//! 1-based ranks of the Y and X datasets, as in the `.opj`.
+//!
 //! The `u64` after `PrvwOPJU` is an offset or a size that is ignored; when a
 //! legacy object does not follow it, `u64` bytes are skipped once and the
 //! global header is tried again. A legacy object is chosen over a blob for
@@ -60,7 +69,9 @@ use super::dataset::{classify_name, ColumnData, Dataset, DatasetKind, Named};
 use super::opju_cells::{read_cells, resolve_refs, Context};
 use super::opju_codec::{lz4_block, text, unzero_run, Cursor};
 use super::reader::le_u16;
-use super::window::{curve_from, Layer, Window};
+use super::window::{
+    curve_from, formula_text, Formula, Layer, Window, ANNOTATION_NAME_AT, ANNOTATION_NAME_LEN,
+};
 use super::{assemble, check_version, OriginError, OriginProject};
 
 /// The first line of the file has been read; `first` is the offset after it.
@@ -172,8 +183,9 @@ fn read_layer(cur: &mut Cursor) -> Result<Layer, OriginError> {
     let sheet_name = text(cur.text_line()?);
     cur.blob()?; // always empty so far
     cur.blob()?; // layer properties
+    let mut formulas = Vec::new();
     while !cur.at_list_end() {
-        read_annotation(cur)?;
+        read_annotation(cur, &mut formulas)?;
     }
     cur.list_end()?;
     let mut curves = Vec::new();
@@ -195,21 +207,32 @@ fn read_layer(cur: &mut Cursor) -> Result<Layer, OriginError> {
         }
         cur.list_end()?;
     }
-    Ok(Layer { sheet_name, curves })
+    Ok(Layer {
+        sheet_name,
+        curves,
+        formulas,
+    })
 }
 
-fn read_annotation(cur: &mut Cursor) -> Result<(), OriginError> {
-    cur.packed()?;
+/// One annotation; when its header names a column and block 1 holds a usable
+/// text, the formula goes to `out`.
+fn read_annotation(cur: &mut Cursor, out: &mut Vec<Formula>) -> Result<(), OriginError> {
+    let header = cur.packed()?;
     cur.blob()?;
-    match cur.peek()? {
-        0x80 => {
-            cur.packed()?;
-        }
+    let block1 = match cur.peek()? {
+        0x80 => cur.packed()?,
         0x00 => {
             cur.u8()?;
-            cur.legacy()?;
+            cur.legacy()?.to_vec()
         }
         _ => return Err(cur.unsupported("unknown annotation form")),
+    };
+    let name_bytes = header
+        .get(ANNOTATION_NAME_AT..)
+        .map(|rest| rest.get(..ANNOTATION_NAME_LEN).unwrap_or(rest));
+    let column = name_bytes.map(text).filter(|name| !name.is_empty());
+    if let (Some(column), Some(text)) = (column, formula_text(&block1, text)) {
+        out.push(Formula { column, text });
     }
     // Block 2 may also be an LZ4 value.
     if cur.peek()? == 0x81 {

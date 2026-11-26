@@ -821,7 +821,10 @@ fn import_origin_file(
     let project = stokesforge_importer::read_origin_file(path)
         .map_err(|failure| HostError::InvalidValue(failure.to_string()))?;
     let selection = stokesforge_importer::default_origin_selection(&project);
-    let plans = stokesforge_importer::plan_origin_import(&project, &selection);
+    // A formula is set when it gives Origin's values, else the column keeps
+    // them (#556); a script is never asked.
+    let import = stokesforge_importer::plan_origin_import_formulas(&project, &selection);
+    let plans = import.plan.books.clone();
     if plans.is_empty() {
         return Err(HostError::InvalidValue("no column to import".into()));
     }
@@ -834,6 +837,7 @@ fn import_origin_file(
         let root = snapshot.tree.root();
         let epoch = snapshot.epoch;
         let mut sheets = Vec::new();
+        let mut located = std::collections::BTreeMap::new();
         for book_plan in plans {
             // A name the project refuses (or already used) keeps an automatic one.
             let book = add_created_node(
@@ -855,7 +859,6 @@ fn import_origin_file(
                 ),
                 _ => Err(error),
             })?;
-            let origin_book = &project.books[book_plan.book];
             for sheet_plan in book_plan.sheets {
                 let sheet = add_created_node(
                     session,
@@ -871,18 +874,57 @@ fn import_origin_file(
                     }
                     _ => Err(error),
                 })?;
-                for column in &origin_book.sheets[sheet_plan.sheet].columns {
-                    session
-                        .execute(Command::AddColumn {
+                for planned in &sheet_plan.columns {
+                    let Some(column) = stokesforge_importer::make_origin_import_column(
+                        &project,
+                        planned,
+                        &import.decision,
+                    ) else {
+                        continue;
+                    };
+                    let id = add_created_node(
+                        session,
+                        sheet,
+                        Command::AddColumn {
                             sheet,
                             index: None,
                             name: None,
-                            column: stokesforge_importer::make_origin_column(origin_book, column),
-                        })
-                        .map_err(HostError::from_session)?;
+                            column,
+                        },
+                    )?;
+                    located.insert(planned.key(), (id, sheet));
                 }
                 sheets.push((sheet, epoch));
             }
+        }
+        // The formulas come last, with the real columns, in the same entry.
+        for key in &import.decision.set {
+            let Some(stokesforge_importer::PlannedFormula {
+                verdict: stokesforge_importer::FormulaVerdict::Translated(pieces),
+                ..
+            }) = import.formulas.get(key)
+            else {
+                continue;
+            };
+            let Some(&(column, sheet)) = located.get(key) else {
+                continue;
+            };
+            let locate = |k: stokesforge_importer::OriginColumnKey| located.get(&k).copied();
+            let Some(formula) = stokesforge_importer::build_column_formula(pieces, sheet, &locate)
+            else {
+                continue;
+            };
+            let snapshot = session.snapshot().map_err(HostError::from_session)?;
+            let mut meta = snapshot
+                .tree
+                .node(column)
+                .and_then(|node| node.as_column())
+                .map(|column| column.meta().clone())
+                .unwrap_or_default();
+            meta.formula = Some(formula);
+            session
+                .execute(Command::SetColumnMeta { column, meta })
+                .map_err(HostError::from_session)?;
         }
         Ok(sheets)
     })();

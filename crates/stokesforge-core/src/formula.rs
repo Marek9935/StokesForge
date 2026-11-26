@@ -7,7 +7,8 @@
 //! `if(cond, a, b)`, and the **column functions** (#402) that give one value
 //! for a whole column: `at(B, x)`, `max/min/mean/sum/std(B)`, `integral(B)`
 //! and their range forms `max(B, x1, x2)`. A column function may read a column
-//! of **another sheet or workbook** (#403, below); nothing else may.
+//! of **another sheet or workbook** (#403, below), and since #556 so may
+//! any row-wise read.
 //!
 //! # Column functions (#402)
 //!
@@ -55,11 +56,15 @@
 //! `'Blanc 2'!B`, `'it''s'!B`. Case is ignored in sheet and workbook names
 //! (`sheet3!b` = `Sheet3!B`); the display restores the real name.
 //!
-//! Only the **read column of a column function** (`at`, `max`, `min`, `mean`,
-//! `sum`, `std`, `integral`) may be remote: `Sheet3!B + 1`, `max(Sheet3!B, C)`
-//! (the row-wise form) and a remote X argument are refused
-//! ([`FormulaError::RemoteOutsideColumnFunction`],
-//! [`FormulaError::RemoteXColumn`]). In `at(Sheet3!B, x, D)`, `D` is read in
+//! A remote column may be the **read column of a column function** (`at`,
+//! `max`, `min`, `mean`, `sum`, `std`, `integral`: one value, the length of the
+//! result is unchanged) or be **read row by row** like an own column (#556):
+//! `Sheet3!B - 1`, `Sheet3!B` alone, `max(Sheet3!B, C)`, `sqrt(Sheet3!B)`. Row
+//! `i` of the result reads row `i` of the remote column; a row past its end is
+//! an empty cell. The length of the result is the longest column read row-wise,
+//! own or remote ([`Formula::row_wise_remotes`] tells the caller which remote
+//! columns count). Only a remote X argument is refused
+//! ([`FormulaError::RemoteXColumn`]). In `at(Sheet3!B, x, D)`, `D` is read in
 //! `Sheet3`; `x` and the range bounds are local expressions, per row.
 //!
 //! The stored form stays a column identifier ([`FormulaPart::Column`]), with a
@@ -226,9 +231,6 @@ pub enum FormulaError {
     AmbiguousName(String),
     /// The sheet exists but has no such column (`Sheet3!Z`).
     UnknownColumnIn { sheet: String, column: String },
-    /// A column of another sheet outside the read column of a column function
-    /// (`Sheet3!B + 1`, `max(Sheet3!B, C)`). Refused at input.
-    RemoteOutsideColumnFunction,
     /// `at(B, x, Sheet3!D)`: the X column must be in the sheet of the column
     /// read. Refused at input.
     RemoteXColumn,
@@ -333,11 +335,6 @@ impl std::fmt::Display for FormulaError {
             FormulaError::UnknownColumnIn { sheet, column } => {
                 write!(f, "column {column} does not exist in the sheet {sheet}")
             }
-            FormulaError::RemoteOutsideColumnFunction => write!(
-                f,
-                "a column of another sheet can only be the column read by at, max, min, \
-                 mean, sum, std or integral"
-            ),
             FormulaError::RemoteXColumn => write!(
                 f,
                 "the X column of a remote at(...) is read in the sheet of the column, \
@@ -811,8 +808,9 @@ fn tokenize_text(source: &str, tokens: &mut Vec<Token>) -> Result<(), FormulaErr
 enum Expr {
     Number(f64),
     Column(NodeId),
-    /// A column of another sheet (#403): only a column function may take it as
-    /// its first argument, the parser refuses it anywhere else.
+    /// A column of another sheet (#403, #556): read like [`Expr::Column`], row
+    /// by row, or as the column of a column function. Kept distinct from
+    /// `Column` so the recalculation can tell a row-wise remote read.
     Remote(NodeId),
     Neg(Box<Expr>),
     Add(Box<Expr>, Box<Expr>),
@@ -873,10 +871,6 @@ struct Parser<'a> {
     depth: usize,
     /// Column calls met so far ([`ColumnCall::slot`]).
     slots: usize,
-    /// Remote columns read so far, and those taken as the column of a column
-    /// function: the two must be equal at the end (#403).
-    remotes: usize,
-    remotes_taken: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -886,8 +880,6 @@ impl<'a> Parser<'a> {
             pos: 0,
             depth: 0,
             slots: 0,
-            remotes: 0,
-            remotes_taken: 0,
         }
     }
 
@@ -1046,10 +1038,7 @@ impl<'a> Parser<'a> {
         let mut args = args.into_iter();
         let source = match args.next() {
             Some(Expr::Column(source)) => source,
-            Some(Expr::Remote(source)) => {
-                self.remotes_taken += 1;
-                source
-            }
+            Some(Expr::Remote(source)) => source,
             _ => return Err(expected),
         };
         let mut rest: Vec<Expr> = args.collect();
@@ -1085,7 +1074,6 @@ impl<'a> Parser<'a> {
             }
             Some(Token::Remote(index)) => {
                 self.pos += 1;
-                self.remotes += 1;
                 Ok(Expr::Remote(*index))
             }
             Some(Token::LParen) => {
@@ -1432,7 +1420,6 @@ impl ColumnFormula {
         if let Err(
             error @ (FormulaError::WrongArgumentCount { .. }
             | FormulaError::ColumnExpected { .. }
-            | FormulaError::RemoteOutsideColumnFunction
             | FormulaError::RemoteXColumn),
         ) = formula.compile()
         {
@@ -1906,10 +1893,6 @@ impl ColumnFormula {
                 "unexpected tokens after the formula".to_string(),
             ));
         }
-        // A remote column that no column function took as its column.
-        if parser.remotes != parser.remotes_taken {
-            return Err(FormulaError::RemoteOutsideColumnFunction);
-        }
         Ok(Formula {
             expr,
             slots: parser.slots,
@@ -1961,6 +1944,42 @@ impl Formula {
                     out.extend(call.x_column);
                     call.args.iter().for_each(|arg| walk(arg, out));
                 }
+            }
+        }
+        let mut set = BTreeSet::new();
+        walk(&self.expr, &mut set);
+        set
+    }
+
+    /// The remote columns read **row by row** (#556): every [`Expr::Remote`]
+    /// reached through the expression tree, including inside the arguments of a
+    /// column function (`at(B, Sheet3!A)` reads `Sheet3!A` per row), but never
+    /// the column a column function reads (`call.source`) nor its `x_column`.
+    /// They set the length of the result, like the own columns read row-wise.
+    pub fn row_wise_remotes(&self) -> BTreeSet<NodeId> {
+        fn walk(expr: &Expr, out: &mut BTreeSet<NodeId>) {
+            match expr {
+                Expr::Number(_) | Expr::Column(_) => {}
+                Expr::Remote(id) => {
+                    out.insert(*id);
+                }
+                Expr::Neg(inner) => walk(inner, out),
+                Expr::Add(a, b)
+                | Expr::Sub(a, b)
+                | Expr::Mul(a, b)
+                | Expr::Div(a, b)
+                | Expr::Pow(a, b)
+                | Expr::Cmp(_, a, b) => {
+                    walk(a, out);
+                    walk(b, out);
+                }
+                Expr::Call(_, args) => args.iter().for_each(|arg| walk(arg, out)),
+                Expr::If(c, a, b) => {
+                    walk(c, out);
+                    walk(a, out);
+                    walk(b, out);
+                }
+                Expr::OfColumn(call) => call.args.iter().for_each(|arg| walk(arg, out)),
             }
         }
         let mut set = BTreeSet::new();
@@ -2143,12 +2162,10 @@ fn eval_expr(expr: &Expr, row: usize, ctx: &Ctx) -> (f64, NumericStatus) {
         // bounds). `get` would clone a `String` per row only to throw it away.
         // A column absent from `columns` cannot happen
         // here (`evaluate` refused it): `NaN`, never a panic.
-        Expr::Column(id) => match ctx.columns.get(id) {
+        Expr::Column(id) | Expr::Remote(id) => match ctx.columns.get(id) {
             Some(values) => (values.number_at(row), values.status_at(row)),
             None => (f64::NAN, NumericStatus::Missing),
         },
-        // Refused by the parser outside a column function: never evaluated.
-        Expr::Remote(_) => (f64::NAN, NumericStatus::Missing),
         Expr::Neg(inner) => {
             let (value, status) = eval_expr(inner, row, ctx);
             (-value, status)
@@ -2663,6 +2680,128 @@ mod tests {
                 })
                 .collect(),
         ))
+    }
+
+    // -- columns of another sheet, read row by row (#556) --
+
+    /// Piece of a formula built by hand: typed text, a column of the own sheet,
+    /// a prefixed remote column, or the unprefixed column that follows the
+    /// sheet of the remote column read before it.
+    enum Piece {
+        T(&'static str),
+        Own(u64),
+        Remote(u64),
+        Follow(u64),
+    }
+
+    fn remote_formula(pieces: &[Piece]) -> Formula {
+        let sheet = NodeId::from_raw(500);
+        let mut parts = Vec::new();
+        let mut remote = BTreeMap::new();
+        for (index, piece) in pieces.iter().enumerate() {
+            match piece {
+                Piece::T(text) => parts.push(FormulaPart::Text((*text).to_string())),
+                Piece::Own(n) => parts.push(FormulaPart::Column(col(*n))),
+                Piece::Remote(n) | Piece::Follow(n) => {
+                    parts.push(FormulaPart::Column(col(*n)));
+                    remote.insert(
+                        index,
+                        RemoteRef {
+                            sheet,
+                            prefixed: matches!(piece, Piece::Remote(_)),
+                        },
+                    );
+                }
+            }
+        }
+        ColumnFormula::from_parts_with_remote(parts, remote)
+            .compile()
+            .expect("compile")
+    }
+
+    /// Witness: the old `Expr::Remote` arm gave `Missing` on every row.
+    #[test]
+    fn a_remote_column_is_read_row_by_row_like_an_own_one() {
+        use Piece::*;
+        let b = 10;
+        let columns = vec![(
+            col(b),
+            mixed_column(&[Some(Ok(1.0)), Some(Err("txt")), None]),
+        )];
+        let times_two = remote_formula(&[Remote(b), T(" * 2")]);
+        let result = evaluate(&times_two, &columns, 5);
+        assert_eq!(result.error, None);
+        assert_eq!(result.values[0], 2.0);
+        assert_eq!(
+            result.statuses,
+            vec![
+                NumericStatus::Ok,
+                NumericStatus::Failed,
+                NumericStatus::Missing,
+                NumericStatus::Missing,
+                NumericStatus::Missing,
+            ]
+        );
+        // Alone, and inside a row-wise function.
+        let alone = evaluate(&remote_formula(&[Remote(b)]), &columns, 4);
+        assert_eq!(alone.values[0], 1.0);
+        assert_eq!(alone.statuses[3], NumericStatus::Missing);
+        let sqrt = evaluate(
+            &remote_formula(&[T("sqrt("), Remote(b), T(")")]),
+            &columns,
+            1,
+        );
+        assert_eq!(sqrt.values, vec![1.0]);
+    }
+
+    /// Witness: not walking `call.args`, or adding `call.source` / `x_column`.
+    #[test]
+    fn the_row_wise_remotes_are_those_read_per_row() {
+        use Piece::*;
+        let (a, b, c, d) = (11, 10, 12, 13);
+        let set = |pieces: &[Piece]| remote_formula(pieces).row_wise_remotes();
+        // `at(Sheet3!C, 1)` reads one value of C: only B counts.
+        assert_eq!(
+            set(&[Remote(b), T(" - at("), Remote(c), T(", 1)")]),
+            BTreeSet::from([col(b)])
+        );
+        // The abscissa of an `at` is read per row.
+        assert_eq!(
+            set(&[T("at("), Remote(b), T(", "), Remote(a), T(")")]),
+            BTreeSet::from([col(a)])
+        );
+        // Its X column is not.
+        assert_eq!(
+            set(&[T("at("), Remote(b), T(", 1, "), Follow(d), T(")")]),
+            BTreeSet::new()
+        );
+        // The bounds of a range form are per row.
+        assert_eq!(
+            set(&[T("max("), Own(1), T(", "), Remote(a), T(", 3)")]),
+            BTreeSet::from([col(a)])
+        );
+        assert_eq!(
+            set(&[T("max("), Remote(b), T(", "), Remote(a), T(", 3)")]),
+            BTreeSet::from([col(a)])
+        );
+        // Row-wise max, unary sign, comparison, `if`.
+        assert_eq!(
+            set(&[T("max("), Remote(b), T(", "), Own(2), T(")")]),
+            BTreeSet::from([col(b)])
+        );
+        assert_eq!(set(&[T("-"), Remote(b)]), BTreeSet::from([col(b)]));
+        assert_eq!(set(&[Remote(b), T(" > 1")]), BTreeSet::from([col(b)]));
+        assert_eq!(
+            set(&[T("if("), Remote(b), T(" > 1, "), Remote(a), T(", 0)")]),
+            BTreeSet::from([col(a), col(b)])
+        );
+        // The column functions alone read none per row.
+        assert_eq!(set(&[T("max("), Remote(b), T(")")]), BTreeSet::new());
+        // And they stay inputs of the formula.
+        assert_eq!(
+            remote_formula(&[T("max("), Remote(b), T(")")]).referenced_columns(),
+            BTreeSet::from([col(b)])
+        );
     }
 
     // -- parsing --

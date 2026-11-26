@@ -3,7 +3,8 @@
 //! The Origin `.opj` reader, on files written by the synthetic generator.
 
 use stokesforge_import::origin::synthetic::{
-    write_project, Book, Cell, Cells, Column, Project, Sheet, FIRST_DATASET_OFFSET,
+    write_project, Book, Cell, Cells, Column, GraphCurve, GraphLayer, GraphWindow, Project, Sheet,
+    FIRST_DATASET_OFFSET,
 };
 use stokesforge_import::origin::{read_project, OriginDesignation, OriginError};
 
@@ -244,12 +245,21 @@ fn the_synthetic_file_ends_with_its_last_mark() {
 fn sample_bytes() -> Vec<u8> {
     let mut x = column("A", OriginDesignation::X, &[1.0, 2.0]);
     x.cells.push(Cell::Text("t".into()));
+    x.formula = Some("col(B)*2".into());
     let mut b = book("Book1", vec![sheet("Data", vec![x])]);
     b.horiba_xml = Some("<HJYInfo><A>1</A></HJYInfo>".into());
     write_project(&Project {
         books: vec![b],
         matrices: vec!["Matrix1".into()],
         graphs: vec!["Graph1".into()],
+        graph_windows: vec![GraphWindow {
+            short_name: "G".into(),
+            long_name: String::new(),
+            layers: vec![GraphLayer {
+                name: "L".into(),
+                curves: vec![GraphCurve::new(1, 1)],
+            }],
+        }],
         ..Project::default()
     })
 }

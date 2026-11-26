@@ -15,12 +15,27 @@
 //! reading, default choice of sheets, plan and column construction.
 
 pub mod origin;
+pub mod origin_formula;
+pub mod origin_formula_plan;
 pub mod planner;
 pub use origin::{
     default_origin_selection, is_origin_bytes, is_origin_file, is_origin_path, make_origin_column,
     make_origin_column_in, origin_book_name, origin_column_key, plan_origin_import,
-    plan_origin_layout, read_origin_file, OriginBookPlan, OriginColumnRef, OriginLayoutPlan,
-    OriginSelection, OriginSheetPlan, OriginSheetRef, OriginSource, OriginWhere,
+    plan_origin_import_layout, plan_origin_layout, read_origin_file, OriginBookPlan,
+    OriginColumnKey, OriginColumnRef, OriginLayoutPlan, OriginSelection, OriginSheetPlan,
+    OriginSheetRef, OriginSource, OriginWhere,
+};
+
+pub use origin_formula_plan::{
+    build_column_formula, decide_origin_formulas, judge_origin_formulas, make_origin_import_column,
+    plan_origin_formulas, plan_origin_import_formulas, resolve_origin_formula, stale_formulas,
+    with_formula_note, ExampleCell, FormulaDecision, FormulaVerdict, Judgement, OriginColumnPos,
+    OriginImportFormulas, PlannedFormula, PlannedPiece, ResolvedFormula, ResolvedPiece,
+    StaleExample, FORMULA_NOTE_PREFIX,
+};
+
+pub use origin_formula::{
+    translate_origin_formula, FormulaPiece, FormulaReference, OriginFormula, UntranslatableReason,
 };
 
 use std::path::{Path, PathBuf};
@@ -142,6 +157,12 @@ pub struct ImportPlan {
     /// Shared X only: the items (tables) that keep an X of their own because
     /// its values differ from the first X.
     pub own_x: Vec<usize>,
+    /// Shared X only: every X column the plan met, with the X column of the
+    /// plan that holds its values: `(column, kept_x)`. A column that stays
+    /// (the first X, or an X of different values) maps to itself; a dropped X
+    /// (equal values, absent from `columns`) maps to the first X. Empty in the
+    /// other layouts: no X is dropped there.
+    pub x_map: Vec<(PlannedColumn, PlannedColumn)>,
 }
 
 /// Distributes the columns of the readable items into worksheets according to `layout`: one

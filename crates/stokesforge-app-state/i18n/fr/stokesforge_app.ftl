@@ -739,7 +739,6 @@ error-formula-workbook-without-sheet = Une référence à un autre classeur nomm
 error-formula-ambiguous-workbook = Plusieurs classeurs s'appellent { $name }. Écrire le chemin depuis la racine du projet, par exemple [Dossier/{ $name }]Sheet1!B
 error-formula-ambiguous-name = Plusieurs objets s'appellent { $name } à la casse près. Renommer l'un d'eux
 error-formula-unknown-column-in = La colonne { $column } n'existe pas dans la feuille { $sheet }
-error-formula-remote-outside = Une colonne d'une autre feuille ne peut être lue que par at, max, min, mean, sum, std ou integral. La donner à l'une d'elles comme colonne
 error-formula-remote-x = La colonne X d'un at() sur une autre feuille se lit dans cette feuille. L'écrire sans préfixe (D, pas Sheet3!D)
 error-paste-formula-kept = La formule de la colonne { $column } ne se calcule pas : { $reason }
 error-paste-formulas-kept = Les formules des colonnes { $columns } ne se calculent pas. { $first } : { $reason }
@@ -1248,7 +1247,7 @@ formula-help-family-operators = Opérateurs
 formula-help-op-arithmetic = Additionner, soustraire, multiplier, diviser
 formula-help-op-power = Puissance
 formula-help-op-comparison = Comparaison : 1 si vrai, 0 si faux
-formula-help-reference = Colonne d'une autre feuille, lue par les fonctions de colonne (at, max, min, mean, sum, std, integral). Autre classeur : [Book2]Sheet5!B. Un nom avec une espace se met entre apostrophes : 'Blanc 2'!B. Une feuille transposée Sheet1ᵀ peut s'écrire Sheet1T
+formula-help-reference = Colonne d'une autre feuille, lue ligne par ligne comme une colonne de la feuille (Sheet3!B - 1) ou par les fonctions de colonne (at, max, min, mean, sum, std, integral). Autre classeur : [Book2]Sheet5!B. Un nom avec une espace se met entre apostrophes : 'Blanc 2'!B. Une feuille transposée Sheet1ᵀ peut s'écrire Sheet1T
 formula-help-family-powers = Puissances et logarithmes
 formula-help-family-trigonometry = Trigonométrie
 formula-help-family-error = Fonction d'erreur
@@ -2073,7 +2072,7 @@ origin-import-summary = À créer : { $sheets ->
     [one] { $books } classeur
    *[other] { $books } classeurs
     }
-origin-import-partial = Une partie de ce fichier n'a pas pu être lue : certains classeurs gardent leurs données mais perdent noms longs, unités et rôles X/Y
+origin-import-partial = Une partie de ce fichier n'a pas pu être lue : certains classeurs gardent leurs données mais perdent noms longs, unités et rôles X/Y, et certains graphiques peuvent manquer
 origin-import-own-x = Ces feuilles gardent un X propre, ses valeurs diffèrent du premier X : { $names }
 status-import-own-x = Ces fichiers gardent un X propre, ses valeurs diffèrent du premier X : { $names }
 status-import-folder-gone = Le dossier choisi pour l'import n'existe plus : les classeurs ont été créés à la racine du projet
@@ -2083,10 +2082,37 @@ origin-import-accept =
     .hint = Crée les classeurs et les feuilles que demandent les colonnes cochées (Entrée)
 origin-import-check-all =
     Tout cocher
-    .hint = Coche toutes les colonnes de toutes les feuilles
+    .hint = Coche toutes les colonnes de toutes les feuilles et tous les graphiques
 origin-import-check-none =
     Ne rien cocher
-    .hint = Décoche toutes les colonnes de toutes les feuilles
+    .hint = Décoche toutes les colonnes de toutes les feuilles et tous les graphiques
+origin-import-reads-unchecked = { $column } lit { $inputs }, non coché
+origin-import-reads-warning = { $count ->
+    [one] { $count } formule lit une colonne non cochée et gardera les valeurs : { $names }
+   *[other] { $count } formules lisent des colonnes non cochées et garderont les valeurs : { $names }
+}
+origin-import-reads-names-more = { $names } et { $more } de plus
+status-import-origin-formulas = { $done } ; { $set ->
+    [one] { $set } formule posée
+   *[other] { $set } formules posées
+}, { $kept ->
+    [one] { $kept } gardée en valeurs
+   *[other] { $kept } gardées en valeurs
+}
+origin-formulas-title = Formules aux valeurs différentes
+origin-formulas-intro = Ces formules donnent d'autres valeurs que celles d'Origin. Cochez les colonnes qui doivent prendre la formule. Les autres gardent les valeurs d'Origin
+origin-formulas-row = { $book } · { $sheet } · { $column } = { $formula }
+origin-formulas-example = ligne { $row } : Origin { $origin }, formule { $formula }
+origin-formulas-empty = vide
+origin-formulas-accept =
+    Importer
+    .hint = Importe en posant les formules cochées (Entrée)
+origin-formulas-check-all =
+    Tout cocher
+    .hint = Coche toutes les formules
+origin-formulas-check-none =
+    Ne rien cocher
+    .hint = Décoche toutes les formules
 origin-import-book-hint = Coche ou décoche toutes les colonnes de ce classeur
 origin-import-sheet-size = { $columns ->
     [one] { $columns } colonne
@@ -2703,6 +2729,30 @@ origin-import-column-hint = Clic pour cocher ou décocher, Maj+clic pour une pla
 origin-import-column-check-in-all = Cocher « { $name } » dans toutes les feuilles
 origin-import-column-uncheck-in-all = Décocher « { $name } » dans toutes les feuilles
 origin-import-sheet-hint = Coche ou décoche toutes les colonnes de cette feuille
+origin-import-graphs-heading = Graphiques
+origin-import-graph-hint = Coche ou décoche les colonnes que ce graphique trace (et les colonnes d'erreur à leur suite)
+origin-import-graph-curves = { $count ->
+    [one] { $count } courbe
+   *[other] { $count } courbes
+}
+origin-import-curve = { $y } en fonction de { $x } · { $book } / { $sheet }
+origin-import-curve-no-x = { $y } · { $book } / { $sheet }
+origin-import-show = Afficher :
+origin-import-show-all = Tout
+origin-import-show-workbooks = Classeurs
+origin-import-show-graphs = Graphiques
+origin-import-include-reads =
+    Inclure les colonnes lues par les formules
+    .hint = Importe aussi les colonnes que lisent les formules des colonnes cochées, pour que ces formules restent actives
+disabled-origin-include-reads-no-formula = Aucune colonne de ces fichiers n'a de formule qui lise d'autres colonnes
+disabled-origin-column-read-by-formula = Lue par la formule de { $column }
+disabled-origin-all-read-by-formulas = Toutes les colonnes d'ici sont importées parce qu'une formule les lit
+origin-import-no-graph = Aucun graphique dans ce fichier
+origin-import-no-graph-in = Aucun graphique dans { $file }
+origin-import-no-workbook = Aucun classeur dans ce fichier
+origin-import-no-workbook-in = Aucun classeur dans { $file }
+disabled-origin-graph-no-curve = Ce graphique ne trace aucune courbe
+disabled-origin-graph-unresolved = Aucune courbe de ce graphique n'a pu être rattachée à une colonne d'un classeur
 disabled-import-folder-active-book = Le dossier n'est pas utilisé quand on importe dans le classeur actif
 import-footer-template = Modèle : { $value }
 import-footer-template-auto = Auto · { $name }

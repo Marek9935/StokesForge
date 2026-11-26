@@ -6,8 +6,8 @@
 
 use stokesforge_import::origin::synthetic::{
     fpc_encode, lz4_literal, opju_header_code, put_leb, put_zigzag, write_opju,
-    write_opju_with_dataset, write_project, Book, Cell, Cells, Column, OpjuNumbers, Project, Sheet,
-    OPJU_TRAILER_LEN, STRING_TABLE_KEY,
+    write_opju_with_dataset, write_project, Annotation, Book, Cell, Cells, Column, GraphCurve,
+    GraphLayer, GraphWindow, OpjuNumbers, Project, Sheet, OPJU_TRAILER_LEN, STRING_TABLE_KEY,
 };
 use stokesforge_import::origin::{read_project, OriginDesignation, OriginError, OriginProject};
 
@@ -59,12 +59,13 @@ fn flat(project: &OriginProject) -> Vec<String> {
                     .map(|v| if v.is_nan() { u64::MAX } else { v.to_bits() })
                     .collect();
                 out.push(format!(
-                    "col {} {:?} {} {} {} {bits:x?} {:?}",
-                    c.short_name, c.designation, c.long_name, c.unit, c.comment, c.texts
+                    "col {} {:?} {} {} {} {bits:x?} {:?} {:?}",
+                    c.short_name, c.designation, c.long_name, c.unit, c.comment, c.texts, c.formula
                 ));
             }
         }
     }
+    out.push(format!("graphs {:?}", project.graphs));
     out
 }
 
@@ -112,6 +113,7 @@ fn rich_project() -> Project {
     y.long_name = "Signal".into();
     y.unit = "CPS".into();
     y.opju_numbers = OpjuNumbers::Runs;
+    y.formula = Some("col(A)*2".into());
     let mut single = numbers("C", OriginDesignation::YError, &awkward_values());
     single.opju_numbers = OpjuNumbers::Single;
     single.unit = "\u{B5}m".into();
@@ -143,6 +145,7 @@ fn rich_project() -> Project {
     let mut numeric_storage = numbers("H", OriginDesignation::Z, &[1.0]);
     numeric_storage.storage = Cells::Numeric;
     numeric_storage.cells.push(Cell::Text("lost".into()));
+    numeric_storage.formula = Some("H/Max(H)".into());
     let mut empty = numbers("I", OriginDesignation::Disregard, &[]);
     empty.long_name = "No rows".into();
     let mut horiba = book(
@@ -177,6 +180,18 @@ fn rich_project() -> Project {
         ],
         matrices: vec!["Matrix1".into(), "Matrix2".into()],
         graphs: vec!["Graph1".into(), "Graph2".into(), "Graph3".into()],
+        graph_windows: vec![GraphWindow {
+            short_name: "Graph9".into(),
+            long_name: "Plotted".into(),
+            layers: vec![GraphLayer {
+                name: "Layer1".into(),
+                curves: vec![
+                    GraphCurve::new(2, 1),
+                    GraphCurve::new(3, 1),
+                    GraphCurve::new(9999, 1),
+                ],
+            }],
+        }],
         opju_annotations: true,
         ..Project::default()
     }
@@ -190,8 +205,11 @@ fn the_opj_and_the_opju_of_the_same_project_read_equal() {
     assert_eq!(flat(&from_opju), flat(&from_opj));
     assert!(!from_opju.partial);
     assert_eq!(from_opju.books.len(), 3);
-    assert_eq!(from_opju.skipped.graphs, 3);
+    assert_eq!(from_opju.skipped.graphs, 4);
     assert_eq!(from_opju.skipped.matrices, 2);
+    // Formulas and graphs are in the twin comparison above, not vacuous.
+    assert!(from_opju.books[0].sheets[0].columns[1].formula.is_some());
+    assert_eq!(from_opju.graphs.len(), 4);
 }
 
 #[test]
@@ -679,6 +697,20 @@ fn flipping_any_bit_never_panics() {
             )],
         )],
         graphs: vec!["Graph1".into()],
+        graph_windows: vec![GraphWindow {
+            short_name: "G".into(),
+            long_name: String::new(),
+            layers: vec![GraphLayer {
+                name: "L".into(),
+                curves: vec![GraphCurve::new(1, 1)],
+            }],
+        }],
+        annotations: vec![Annotation {
+            book: 0,
+            sheet: 0,
+            name: "A".into(),
+            text: "col(B)*2".into(),
+        }],
         opju_annotations: true,
         ..Project::default()
     };

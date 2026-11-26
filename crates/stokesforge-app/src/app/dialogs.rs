@@ -1280,7 +1280,20 @@ fn paint_footer_message(ui: &mut egui::Ui, message: Option<FooterMessage<'_>>) {
         Some(FooterMessage::Error(error)) => {
             egui::RichText::new(error).color(ui.visuals().error_fg_color)
         }
-        Some(FooterMessage::Reason(reason)) => crate::theme::secondary_text(reason),
+        Some(FooterMessage::Reason(reason)) => {
+            // A reason wraps on two rows at most (the footer is two rows high
+            // at the secondary size), then is cut; the button tooltip has it all.
+            let mut job = egui::text::LayoutJob::single_section(
+                reason.to_owned(),
+                egui::TextFormat::simple(
+                    egui::FontId::proportional(crate::theme::SECONDARY_TEXT_SIZE),
+                    ui.visuals().weak_text_color(),
+                ),
+            );
+            job.wrap.max_rows = 2;
+            ui.add(egui::Label::new(job).wrap());
+            return;
+        }
         Some(FooterMessage::Warning(warning)) => {
             egui::RichText::new(warning).color(crate::theme::warning_color(ui.visuals().dark_mode))
         }
